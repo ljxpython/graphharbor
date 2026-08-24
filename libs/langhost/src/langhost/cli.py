@@ -1,4 +1,4 @@
-"""langhost CLI — thin wrappers around langgraph-cli + langgraph_api.cli.run_server."""
+"""GraphHarbor CLI — thin wrappers around langgraph-cli and langgraph_api."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ DEFAULT_PORT = 31296
 LOG_LEVELS = ["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
 DEFAULT_STUDIO_ORIGIN = "https://smith.langchain.com"
 
-# Upstream run_server always logs an inmem-oriented welcome; replace it for langhost.
+# Upstream run_server always logs an inmem-oriented welcome; replace it for GraphHarbor.
 _UPSTREAM_WELCOME_MARKER = "This in-memory server is designed for development and testing"
 
 
@@ -62,8 +62,8 @@ def _langhost_welcome(
     origin = (studio_origin or DEFAULT_STUDIO_ORIGIN).rstrip("/")
     studio_url = f"{origin}/studio/?baseUrl={api_url}"
     agent_chat_url = f"https://agentchat.vercel.app/?apiUrl={api_url}&assistantId=agent"
-    title = figlet_format("langhost", font="standard").rstrip()
-    repo_url = "https://github.com/langhost/langhost"
+    title = figlet_format("GraphHarbor", font="standard").rstrip()
+    repo_url = "https://github.com/ljxpython/graphharbor"
     return f"""
 
 {title}
@@ -73,17 +73,17 @@ def _langhost_welcome(
 - 📚 API Docs: \033[36m{api_url}/docs\033[0m
 - 💬 Agent Chat UI: \033[36m{agent_chat_url}\033[0m
 
-\033[1;33m★\033[0m  If langhost helps you, a \033[1;33mGitHub star\033[0m keeps the project alive:
+\033[1;33m★\033[0m  If GraphHarbor helps you, a \033[1;33mGitHub star\033[0m keeps the project alive:
    \033[36m{repo_url}\033[0m
 
-Self-hosted, production-grade LangGraph Agent Server (Postgres + Redis).
-langhost {__version__}
+Self-hosted LangGraph Agent Server with PostgreSQL + Redis.
+GraphHarbor {__version__}
 
 """
 
 
 class _ReplaceWelcomeBanner(logging.Filter):
-    """Swap the upstream inmem welcome for a prebuilt langhost banner."""
+    """Swap the upstream inmem welcome for a prebuilt GraphHarbor banner."""
 
     def __init__(self, welcome: str) -> None:
         super().__init__()
@@ -166,9 +166,9 @@ def _resolve_mount_prefix(config_json: dict[str, Any]) -> tuple[dict | None, str
 
 
 @click.group()
-@click.version_option(version=__version__, prog_name="langhost")
+@click.version_option(version=__version__, prog_name="graphharbor")
 def cli() -> None:
-    """Self-hosted LangGraph Agent Server on Postgres + Redis (edition=pg)."""
+    """Self-hosted LangGraph Agent Server on PostgreSQL + Redis."""
 
 
 @cli.command(

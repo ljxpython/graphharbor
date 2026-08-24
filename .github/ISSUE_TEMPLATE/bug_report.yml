@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a problem with langhost
+description: Report a problem with graphharbor
 title: "[bug] "
 labels: ["bug"]
 body:

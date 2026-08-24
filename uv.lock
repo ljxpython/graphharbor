@@ -9,9 +9,9 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "langgraph-runtime-pg",
-    "langhost",
-    "langhost-workspace",
+    "graphharbor",
+    "graphharbor-runtime",
+    "graphharbor-workspace",
 ]
 constraints = [
     { name = "langgraph", specifier = "==1.2.9" },
@@ -511,6 +511,99 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b5/c8/f439cffde755cffa462bfbb156278fa6f9d09119719af9814b858fd4f81f/googleapis_common_protos-1.75.0.tar.gz", hash = "sha256:53a062ff3c32552fbd62c11fe23768b78e4ddf0494d5e5fd97d3f4689c75fbbd", size = 151035, upload-time = "2026-05-07T08:04:49.423Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e7/c8/e2645aa8ed02fd4c7a2f59d68783b65b1f3cbdfe39a6308e156509d1fee8/googleapis_common_protos-1.75.0-py3-none-any.whl", hash = "sha256:961ed60399c457ceb0ee8f285a84c870aabc9c6a832b9d37bb281b5bebde43ed", size = 300631, upload-time = "2026-05-07T08:03:30.345Z" },
+]
+
+[[package]]
+name = "graphharbor"
+version = "0.11.1.post1"
+source = { editable = "libs/langhost" }
+dependencies = [
+    { name = "click" },
+    { name = "graphharbor-runtime" },
+    { name = "langgraph-cli" },
+    { name = "pyfiglet" },
+    { name = "python-dotenv" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "click", specifier = ">=8.1.7" },
+    { name = "graphharbor-runtime", editable = "libs/langgraph-runtime-pg" },
+    { name = "langgraph-cli", specifier = ">=0.4.0,<0.5" },
+    { name = "pyfiglet", specifier = ">=1.0.0" },
+    { name = "python-dotenv", specifier = ">=0.8.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.51.0" },
+]
+
+[[package]]
+name = "graphharbor-runtime"
+version = "0.11.1.post1"
+source = { editable = "libs/langgraph-runtime-pg" }
+dependencies = [
+    { name = "alembic" },
+    { name = "asyncpg" },
+    { name = "croniter" },
+    { name = "langgraph-api" },
+    { name = "langgraph-checkpoint-postgres" },
+    { name = "orjson" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "redis" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "starlette" },
+    { name = "structlog" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic", specifier = ">=1.14" },
+    { name = "asyncpg", specifier = ">=0.29" },
+    { name = "croniter", specifier = ">=1.0" },
+    { name = "langgraph-api", specifier = "==0.11.1" },
+    { name = "langgraph-checkpoint-postgres", specifier = "==3.1.0" },
+    { name = "orjson", specifier = ">=3.9" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.4" },
+    { name = "redis", specifier = ">=5.0" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.51" },
+    { name = "starlette", specifier = ">=0.37" },
+    { name = "structlog", specifier = ">=24.0" },
+]
+
+[[package]]
+name = "graphharbor-workspace"
+version = "0.0.0"
+source = { virtual = "." }
+
+[package.dev-dependencies]
+dev = [
+    { name = "asgi-lifespan" },
+    { name = "graphharbor" },
+    { name = "graphharbor-runtime" },
+    { name = "httpx" },
+    { name = "mypy" },
+    { name = "pre-commit" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-rerunfailures" },
+    { name = "pytest-timeout" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "asgi-lifespan", specifier = ">=2.1" },
+    { name = "graphharbor", editable = "libs/langhost" },
+    { name = "graphharbor-runtime", editable = "libs/langgraph-runtime-pg" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "mypy", specifier = ">=1.14" },
+    { name = "pre-commit", specifier = ">=4.0" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = ">=0.24" },
+    { name = "pytest-rerunfailures", specifier = ">=16.4" },
+    { name = "pytest-timeout", specifier = ">=2.4.0" },
+    { name = "ruff", specifier = ">=0.16.0" },
 ]
 
 [[package]]
@@ -1052,39 +1145,6 @@ wheels = [
 ]
 
 [[package]]
-name = "langgraph-runtime-pg"
-version = "0.11.1.post1"
-source = { editable = "libs/langgraph-runtime-pg" }
-dependencies = [
-    { name = "alembic" },
-    { name = "asyncpg" },
-    { name = "croniter" },
-    { name = "langgraph-api" },
-    { name = "langgraph-checkpoint-postgres" },
-    { name = "orjson" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "redis" },
-    { name = "sqlalchemy", extra = ["asyncio"] },
-    { name = "starlette" },
-    { name = "structlog" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", specifier = ">=1.14" },
-    { name = "asyncpg", specifier = ">=0.29" },
-    { name = "croniter", specifier = ">=1.0" },
-    { name = "langgraph-api", specifier = "==0.11.1" },
-    { name = "langgraph-checkpoint-postgres", specifier = "==3.1.0" },
-    { name = "orjson", specifier = ">=3.9" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.4" },
-    { name = "redis", specifier = ">=5.0" },
-    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.51" },
-    { name = "starlette", specifier = ">=0.37" },
-    { name = "structlog", specifier = ">=24.0" },
-]
-
-[[package]]
 name = "langgraph-sdk"
 version = "0.4.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1098,66 +1158,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b4/2b/bd8ac26d4e97f6df88ef05ce5b6a38945a3903e1025d926f4752aa88aa97/langgraph_sdk-0.4.2.tar.gz", hash = "sha256:b88f0f5f6328ac0680d6790614a905b2bcfa257f2276dba4e38f0e86db0aa738", size = 348327, upload-time = "2026-06-01T17:51:19.856Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a0/05/aac507337cceae773c2cc9ab91eb6301963af7aeeb55b4217a00e15aff17/langgraph_sdk-0.4.2-py3-none-any.whl", hash = "sha256:75fa5096c1177ce39c847096a8fe3745ffd480ddb412995f836e9f5f884c43dd", size = 160521, upload-time = "2026-06-01T17:51:18.849Z" },
-]
-
-[[package]]
-name = "langhost"
-version = "0.11.1.post1"
-source = { editable = "libs/langhost" }
-dependencies = [
-    { name = "click" },
-    { name = "langgraph-cli" },
-    { name = "langgraph-runtime-pg" },
-    { name = "pyfiglet" },
-    { name = "python-dotenv" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "click", specifier = ">=8.1.7" },
-    { name = "langgraph-cli", specifier = ">=0.4.0,<0.5" },
-    { name = "langgraph-runtime-pg", editable = "libs/langgraph-runtime-pg" },
-    { name = "pyfiglet", specifier = ">=1.0.0" },
-    { name = "python-dotenv", specifier = ">=0.8.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.51.0" },
-]
-
-[[package]]
-name = "langhost-workspace"
-version = "0.0.0"
-source = { virtual = "." }
-
-[package.dev-dependencies]
-dev = [
-    { name = "asgi-lifespan" },
-    { name = "httpx" },
-    { name = "langgraph-runtime-pg" },
-    { name = "langhost" },
-    { name = "mypy" },
-    { name = "pre-commit" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-rerunfailures" },
-    { name = "pytest-timeout" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "asgi-lifespan", specifier = ">=2.1" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "langgraph-runtime-pg", editable = "libs/langgraph-runtime-pg" },
-    { name = "langhost", editable = "libs/langhost" },
-    { name = "mypy", specifier = ">=1.14" },
-    { name = "pre-commit", specifier = ">=4.0" },
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "pytest-asyncio", specifier = ">=0.24" },
-    { name = "pytest-rerunfailures", specifier = ">=16.4" },
-    { name = "pytest-timeout", specifier = ">=2.4.0" },
-    { name = "ruff", specifier = ">=0.16.0" },
 ]
 
 [[package]]

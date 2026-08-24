@@ -1,11 +1,11 @@
-# Contributing to langhost
+# Contributing to GraphHarbor
 
 Thanks for helping keep this **100% open source**.
 
 This monorepo has two packages:
 
-- **`langhost`** — CLI (`langhost serve`)
-- **`langgraph-runtime-pg`** — Postgres + Redis runtime (`edition=pg`) that powers the official Agent Server
+- **`graphharbor`** — CLI (`graphharbor serve`)
+- **`graphharbor-runtime`** — PostgreSQL + Redis runtime that powers the official Agent Server
 
 We replace the *runtime*, not the Agent Server. Prefer stock `langgraph-api` / `langgraph` / SDK behavior.
 
@@ -20,8 +20,8 @@ We replace the *runtime*, not the Agent Server. Prefer stock `langgraph-api` / `
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), Docker, git.
 
 ```bash
-git clone https://github.com/langhost/langhost.git
-cd langhost
+git clone https://github.com/ljxpython/graphharbor.git
+cd graphharbor
 uv sync --group dev
 cp .env.example .env
 docker compose up -d
@@ -57,9 +57,9 @@ uv run pytest -q libs/langgraph-runtime-pg/tests
 
 ## Releasing
 
-Both packages ship in **lockstep** (`langhost` and `langgraph-runtime-pg` share the same version).
+Both packages ship in **lockstep** (`graphharbor` and `graphharbor-runtime` share the same version).
 
-1. Bump both package versions in their `pyproject.toml` files (and the `langhost` → `langgraph-runtime-pg==…` pin).
+1. Bump both package versions in their `pyproject.toml` files (and the `graphharbor` → `graphharbor-runtime==…` pin).
 2. Run `uv lock` and `python3 scripts/check_versions.py`.
 3. Merge to `main`.
 4. Tag and push (tag must match the version, with a `v` prefix):
@@ -73,10 +73,9 @@ Both packages ship in **lockstep** (`langhost` and `langgraph-runtime-pg` share 
 
 ### One-time PyPI + GitHub setup
 
-- Create GitHub Environments **`pypi-langhost`** and **`pypi-runtime`** (Settings → Environments) with **required reviewers** so a human must approve before each upload.
+- Create GitHub Environments **`pypi-graphharbor`** and **`pypi-graphharbor-runtime`** (Settings → Environments) with **required reviewers** so a human must approve before each upload.
 - Pending / trusted publishers (same repo + workflow `release.yml`, different environments):
-  - `langhost` → environment `pypi-langhost`
-  - `langgraph-runtime-pg` → environment `pypi-runtime`
+  - `graphharbor` → environment `pypi-graphharbor`
+  - `graphharbor-runtime` → environment `pypi-graphharbor-runtime`
 - Protect `main`: require the **Lint**, **Build**, and **Test** status checks before merge.
 - The Release workflow runs the full CI suite first; each package publishes only after CI is green and its environment is approved.
-

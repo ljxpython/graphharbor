@@ -1,4 +1,4 @@
-"""Alembic migration runner (``langgraph-runtime-pg-migrate``)."""
+"""Alembic migration runner (``graphharbor-runtime-migrate``)."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def downgrade(revision: str, database_uri: str | None = None) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="langgraph-runtime-pg-migrate",
+        prog="graphharbor-runtime-migrate",
         description="Apply langgraph_runtime_pg Postgres schema migrations",
     )
     parser.add_argument(

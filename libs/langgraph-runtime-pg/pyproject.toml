@@ -1,8 +1,8 @@
 [project]
-name = "langgraph-runtime-pg"
+name = "graphharbor-runtime"
 # Tracks langgraph-api: X.Y.Z or X.Y.Z.postN for our patches on the same API.
 version = "0.11.1.post1"
-description = "Self-hosted LangSmith Deployments alternative: MIT Postgres+Redis runtime (edition=pg) for stock langgraph-api"
+description = "GraphHarbor PostgreSQL and Redis runtime for the LangGraph Agent Server"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -64,13 +64,13 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/langhost/langhost"
-Repository = "https://github.com/langhost/langhost"
-Issues = "https://github.com/langhost/langhost/issues"
-Changelog = "https://github.com/langhost/langhost/releases"
+Homepage = "https://github.com/ljxpython/graphharbor"
+Repository = "https://github.com/ljxpython/graphharbor"
+Issues = "https://github.com/ljxpython/graphharbor/issues"
+Changelog = "https://github.com/ljxpython/graphharbor/releases"
 
 [project.scripts]
-langgraph-runtime-pg-migrate = "langgraph_runtime_pg.migrate:main"
+graphharbor-runtime-migrate = "langgraph_runtime_pg.migrate:main"
 
 [build-system]
 requires = ["hatchling"]

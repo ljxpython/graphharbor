@@ -68,19 +68,19 @@ jobs:
         env:
           UV_NO_BUILD: "0"
         run: |
-          uv build --package langgraph-runtime-pg
-          uv build --package langhost
+          uv build --package graphharbor-runtime
+          uv build --package graphharbor
           ls -la dist
 
       - name: Smoke import wheels
         run: |
-          RUNTIME_WHL="$(ls dist/langgraph_runtime_pg-*.whl | head -n1)"
-          LANGHOST_WHL="$(ls dist/langhost-*.whl | head -n1)"
+          RUNTIME_WHL="$(ls dist/graphharbor_runtime-*.whl | head -n1)"
+          GRAPH_HARBOR_WHL="$(ls dist/graphharbor-*.whl | head -n1)"
           # NOSONAR - wheel path is a pinned local artifact, not index resolution
           uv run --isolated --no-project --with "${RUNTIME_WHL}" \
             python -c "import langgraph_runtime_pg; print(langgraph_runtime_pg.__name__)"
           # NOSONAR - wheel paths are pinned local artifacts, not index resolution
-          uv run --isolated --no-project --with "${RUNTIME_WHL}" --with "${LANGHOST_WHL}" \
+          uv run --isolated --no-project --with "${RUNTIME_WHL}" --with "${GRAPH_HARBOR_WHL}" \
             python -c "import langhost; print(langhost.__name__)"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

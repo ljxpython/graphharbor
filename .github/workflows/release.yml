@@ -4,6 +4,16 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "Package index to publish to"
+        required: true
+        default: testpypi
+        type: choice
+        options:
+          - testpypi
+          - pypi
 
 concurrency:
   group: release
@@ -39,33 +49,34 @@ jobs:
           python3 scripts/check_versions.py
 
       - name: Tag matches package versions
+        if: github.event_name == 'push'
         run: |
           TAG="${GITHUB_REF_NAME#v}"
-          RUNTIME="$(uv version --package langgraph-runtime-pg --short)"
-          LANGHOST="$(uv version --package langhost --short)"
-          echo "tag=${TAG} runtime=${RUNTIME} langhost=${LANGHOST}"
-          if [[ "${TAG}" != "${RUNTIME}" || "${TAG}" != "${LANGHOST}" ]]; then
-            echo "Tag v${TAG} must match both package versions (got runtime=${RUNTIME}, langhost=${LANGHOST})" >&2
+          RUNTIME="$(uv version --package graphharbor-runtime --short)"
+          GRAPH_HARBOR="$(uv version --package graphharbor --short)"
+          echo "tag=${TAG} runtime=${RUNTIME} graphharbor=${GRAPH_HARBOR}"
+          if [[ "${TAG}" != "${RUNTIME}" || "${TAG}" != "${GRAPH_HARBOR}" ]]; then
+            echo "Tag v${TAG} must match both package versions (got runtime=${RUNTIME}, graphharbor=${GRAPH_HARBOR})" >&2
             exit 1
           fi
 
       - name: Build
         run: |
           rm -rf dist
-          uv build --package langgraph-runtime-pg
-          uv build --package langhost
+          uv build --package graphharbor-runtime
+          uv build --package graphharbor
           ls -la dist
 
       - name: Smoke import wheels
         run: |
-          RUNTIME_WHL="$(ls dist/langgraph_runtime_pg-*.whl | head -n1)"
-          LANGHOST_WHL="$(ls dist/langhost-*.whl | head -n1)"
+          RUNTIME_WHL="$(ls dist/graphharbor_runtime-*.whl | head -n1)"
+          GRAPH_HARBOR_WHL="$(ls dist/graphharbor-*.whl | head -n1)"
           # Exact built wheel paths — no unlocked package names from an index.
           # NOSONAR - wheel path is a pinned local artifact, not index resolution
           uv run --isolated --no-project --with "${RUNTIME_WHL}" \
             python -c "import langgraph_runtime_pg; print(langgraph_runtime_pg.__name__)"
           # NOSONAR - wheel paths are pinned local artifacts, not index resolution
-          uv run --isolated --no-project --with "${RUNTIME_WHL}" --with "${LANGHOST_WHL}" \
+          uv run --isolated --no-project --with "${RUNTIME_WHL}" --with "${GRAPH_HARBOR_WHL}" \
             python -c "import langhost; print(langhost.__name__)"
       - name: Upload dist
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -74,12 +85,12 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  publish-langhost:
-    name: Publish langhost
+  publish-graphharbor:
+    name: Publish graphharbor
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: pypi-langhost
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi' && 'testpypi-graphharbor' || 'pypi-graphharbor' }}
     permissions:
       id-token: write # PyPI Trusted Publishing (OIDC)
 
@@ -95,15 +106,25 @@ jobs:
           enable-cache: false
           python-version: "3.11"
 
-      - name: Publish langhost to PyPI
-        run: uv publish --trusted-publishing always --check-url https://pypi.org/simple/ dist/langhost-*
+      - name: Publish graphharbor to PyPI
+        env:
+          PUBLISH_REPOSITORY: ${{ github.event_name == 'workflow_dispatch' && inputs.repository || 'pypi' }}
+        run: |
+          if [[ "${PUBLISH_REPOSITORY}" == "testpypi" ]]; then
+            uv publish --trusted-publishing always \
+              --publish-url https://test.pypi.org/legacy/ \
+              --check-url https://test.pypi.org/simple/ dist/graphharbor-*
+          else
+            uv publish --trusted-publishing always \
+              --check-url https://pypi.org/simple/ dist/graphharbor-*
+          fi
 
-  publish-runtime:
-    name: Publish langgraph-runtime-pg
+  publish-graphharbor-runtime:
+    name: Publish graphharbor-runtime
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: pypi-runtime
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi' && 'testpypi-graphharbor-runtime' || 'pypi-graphharbor-runtime' }}
     permissions:
       id-token: write # PyPI Trusted Publishing (OIDC)
 
@@ -119,12 +140,23 @@ jobs:
           enable-cache: false
           python-version: "3.11"
 
-      - name: Publish langgraph-runtime-pg to PyPI
-        run: uv publish --trusted-publishing always --check-url https://pypi.org/simple/ dist/langgraph_runtime_pg-*
+      - name: Publish graphharbor-runtime to PyPI
+        env:
+          PUBLISH_REPOSITORY: ${{ github.event_name == 'workflow_dispatch' && inputs.repository || 'pypi' }}
+        run: |
+          if [[ "${PUBLISH_REPOSITORY}" == "testpypi" ]]; then
+            uv publish --trusted-publishing always \
+              --publish-url https://test.pypi.org/legacy/ \
+              --check-url https://test.pypi.org/simple/ dist/graphharbor_runtime-*
+          else
+            uv publish --trusted-publishing always \
+              --check-url https://pypi.org/simple/ dist/graphharbor_runtime-*
+          fi
 
   github-release:
     name: GitHub Release
-    needs: [publish-langhost, publish-runtime]
+    needs: [publish-graphharbor, publish-graphharbor-runtime]
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

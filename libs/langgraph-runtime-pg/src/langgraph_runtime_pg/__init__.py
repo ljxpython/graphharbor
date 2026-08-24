@@ -18,7 +18,7 @@ from langgraph_runtime_pg import (
 )
 
 try:
-    __version__ = version("langgraph-runtime-pg")
+    __version__ = version("graphharbor-runtime")
 except PackageNotFoundError:  # pragma: no cover - editable / source tree edge
     __version__ = "0.0.0"
 __all__ = [

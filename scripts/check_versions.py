@@ -13,12 +13,12 @@ def main() -> None:
     pkgs = {
         p["name"]: p["version"] for p in tomllib.loads((ROOT / "uv.lock").read_text())["package"]
     }
-    runtime = pkgs["langgraph-runtime-pg"]
-    langhost = pkgs["langhost"]
+    runtime = pkgs["graphharbor-runtime"]
+    graphharbor = pkgs["graphharbor"]
     api = pkgs["langgraph-api"]
 
-    if runtime != langhost:
-        raise SystemExit(f"lockstep: runtime-pg={runtime!r} langhost={langhost!r}")
+    if runtime != graphharbor:
+        raise SystemExit(f"lockstep: graphharbor-runtime={runtime!r} graphharbor={graphharbor!r}")
     if runtime.split(".post")[0] != api:
         raise SystemExit(f"{runtime!r} base != langgraph-api=={api}")
 
@@ -31,7 +31,7 @@ def main() -> None:
         if pkg_license != root_license:
             raise SystemExit(f"{rel} must match root LICENSE (copy after editing)")
 
-    print(f"ok: {runtime} ↔ langgraph-api=={api}")
+    print(f"ok: graphharbor={runtime} ↔ langgraph-api=={api}")
 
 
 if __name__ == "__main__":

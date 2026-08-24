@@ -1,13 +1,13 @@
-# langhost
+# graphharbor
 
 Minimal CLI for running the official LangGraph Agent Server on the open
-[`langgraph-runtime-pg`](https://pypi.org/project/langgraph-runtime-pg/) backend
+[`graphharbor-runtime`](https://pypi.org/project/graphharbor-runtime/) backend
 (Postgres + Redis).
 
 ## Command
 
 ```bash
-langhost serve [OPTIONS]
+graphharbor serve [OPTIONS]
 ```
 
 Requires a `langgraph.json` in the working directory (same format as
@@ -20,10 +20,10 @@ cp .env.example .env
 docker compose up -d postgres redis
 
 # Dev (hot reload)
-langhost serve --reload -c langgraph.json
+graphharbor serve --reload -c langgraph.json
 
 # Prod (multi-process)
-langhost serve --host 0.0.0.0 --workers 4 -c langgraph.json
+graphharbor serve --host 0.0.0.0 --workers 4 -c langgraph.json
 ```
 
-Run `langhost serve --help` for the full option list.
+Run `graphharbor serve --help` for the full option list.
