@@ -179,6 +179,7 @@ jobs:
           VERSION="$(basename "${RUNTIME_WHL}" | sed -E 's/^graphharbor_runtime-(.+)-py3-none-any\.whl$/\1/')"
           for attempt in $(seq 1 20); do
             if uv run --isolated --no-project \
+              --index-strategy unsafe-best-match \
               --default-index https://pypi.org/simple \
               --index https://test.pypi.org/simple \
               --with "graphharbor==${VERSION}" \
@@ -191,6 +192,7 @@ jobs:
             sleep 15
           done
           uv run --isolated --no-project \
+            --index-strategy unsafe-best-match \
             --default-index https://pypi.org/simple \
             --index https://test.pypi.org/simple \
             --with "graphharbor==${VERSION}" \

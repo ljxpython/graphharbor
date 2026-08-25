@@ -2,8 +2,8 @@
 
 | 项目 | 已验证版本 | 说明 |
 |---|---|---|
-| `graphharbor` | 0.13.0.post1 | 与 runtime 锁步发布 |
-| `graphharbor-runtime` | 0.13.0.post1 | 默认不依赖 `langgraph-api` |
+| `graphharbor` | 0.13.0.post2 | 与 runtime 锁步发布 |
+| `graphharbor-runtime` | 0.13.0.post2 | 默认不依赖 `langgraph-api` |
 | Python | 3.11 / 3.12 / 3.13 | CI production-contract matrix |
 | `langgraph` | 1.2.11 | 锁文件固定 |
 | `langgraph-sdk` | 0.4.3 | Python SDK 契约 |
