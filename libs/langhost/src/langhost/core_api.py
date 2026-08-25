@@ -709,8 +709,9 @@ async def threads_history(request: Request) -> JSONResponse:
             return _error("before must be a JSON object")
     if isinstance(before, dict):
         before = {"configurable": before}
+    before_config = cast(RunnableConfig | None, before)
     items = []
-    async for item in get_checkpointer().alist(config, before=before, limit=limit):
+    async for item in get_checkpointer().alist(config, before=before_config, limit=limit):
         items.append(_state_from_tuple(item))
     return JSONResponse(items)
 

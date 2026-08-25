@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -17,8 +17,7 @@ def _namespace_error(namespace: Sequence[str]) -> Response | None:
         return Response(
             status_code=422,
             content=(
-                "Namespace labels cannot be empty or contain periods. "
-                f"Received: {tuple(namespace)}"
+                f"Namespace labels cannot be empty or contain periods. Received: {tuple(namespace)}"
             ),
         )
     return None
@@ -64,12 +63,18 @@ async def store_put(request: Request) -> Response:
     if error := _namespace_error(namespace[-len(payload["namespace"]) :]):
         return error
     if not isinstance(payload["key"], str) or not isinstance(payload["value"], dict):
-        return JSONResponse({"detail": "key must be a string and value must be an object"}, status_code=422)
+        return JSONResponse(
+            {"detail": "key must be a string and value must be an object"}, status_code=422
+        )
     index = payload.get("index")
-    if index is not None and index is not False and not (
-        isinstance(index, list) and all(isinstance(item, str) for item in index)
+    if (
+        index is not None
+        and index is not False
+        and not (isinstance(index, list) and all(isinstance(item, str) for item in index))
     ):
-        return JSONResponse({"detail": "index must be null, false, or an array of strings"}, status_code=422)
+        return JSONResponse(
+            {"detail": "index must be null, false, or an array of strings"}, status_code=422
+        )
     ttl = payload.get("ttl")
     if ttl is not None and (isinstance(ttl, bool) or not isinstance(ttl, (int, float))):
         return JSONResponse({"detail": "ttl must be a number or null"}, status_code=422)
@@ -88,7 +93,9 @@ async def store_get(request: Request) -> JSONResponse | Response:
     if not key:
         return JSONResponse({"error": "Key is required"}, status_code=400)
     refresh = request.query_params.get("refresh_ttl")
-    item = await Store().aget(namespace, key, refresh_ttl=refresh.lower() == "true" if refresh else None)
+    item = await Store().aget(
+        namespace, key, refresh_ttl=refresh.lower() == "true" if refresh else None
+    )
     return JSONResponse(None if item is None else _item(request, item))
 
 
@@ -107,19 +114,27 @@ async def store_delete(request: Request) -> JSONResponse | Response:
     return Response(status_code=204)
 
 
-async def store_search(request: Request) -> JSONResponse:
+async def store_search(request: Request) -> JSONResponse | Response:
     payload = await _body(request)
     if payload is None:
         return JSONResponse({"detail": "request body must be an object"}, status_code=422)
     labels = payload.get("namespace_prefix")
     namespace = _namespace(request, labels)
     if namespace is None:
-        return JSONResponse({"detail": "namespace_prefix must be an array of strings"}, status_code=422)
+        return JSONResponse(
+            {"detail": "namespace_prefix must be an array of strings"}, status_code=422
+        )
+    labels = cast(list[str], labels)
     if error := _namespace_error(labels):
         return error
     limit = payload.get("limit", 10)
     offset = payload.get("offset", 0)
-    if isinstance(limit, bool) or not isinstance(limit, int) or isinstance(offset, bool) or not isinstance(offset, int):
+    if (
+        isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or isinstance(offset, bool)
+        or not isinstance(offset, int)
+    ):
         return JSONResponse({"detail": "limit and offset must be integers"}, status_code=422)
     items = await Store().asearch(
         namespace,
@@ -132,15 +147,19 @@ async def store_search(request: Request) -> JSONResponse:
     return JSONResponse({"items": [_item(request, item) for item in items]})
 
 
-async def store_list_namespaces(request: Request) -> JSONResponse:
+async def store_list_namespaces(request: Request) -> JSONResponse | Response:
     payload = await _body(request)
     if payload is None:
         return JSONResponse({"detail": "request body must be an object"}, status_code=422)
     prefix = payload.get("prefix")
     suffix = payload.get("suffix")
-    if prefix is not None and (not isinstance(prefix, list) or not all(isinstance(item, str) for item in prefix)):
+    if prefix is not None and (
+        not isinstance(prefix, list) or not all(isinstance(item, str) for item in prefix)
+    ):
         return JSONResponse({"detail": "prefix must be an array of strings"}, status_code=422)
-    if suffix is not None and (not isinstance(suffix, list) or not all(isinstance(item, str) for item in suffix)):
+    if suffix is not None and (
+        not isinstance(suffix, list) or not all(isinstance(item, str) for item in suffix)
+    ):
         return JSONResponse({"detail": "suffix must be an array of strings"}, status_code=422)
     if prefix and (error := _namespace_error(prefix)):
         return error

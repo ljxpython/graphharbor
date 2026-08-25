@@ -30,6 +30,7 @@ def _load_dotenv() -> None:
 
 
 _load_dotenv()
+os.environ.setdefault("LANGGRAPH_RUNTIME_EDITION", "pg")
 os.environ.setdefault("REDIS_URI", "redis://localhost:6379/0")
 os.environ.setdefault(
     "DATABASE_URI",

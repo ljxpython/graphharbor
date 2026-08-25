@@ -103,8 +103,14 @@ def test_scenario_resolves_independent_response_references(tmp_path: Path) -> No
 
     steps = compare._load_scenario(str(scenario))
 
-    assert compare._resolve_references(steps[1]["path"], {"assistant": {"assistant_id": "one"}}) == "/assistants/one"
-    assert compare._resolve_references(steps[1]["path"], {"assistant": {"assistant_id": "two"}}) == "/assistants/two"
+    assert (
+        compare._resolve_references(steps[1]["path"], {"assistant": {"assistant_id": "one"}})
+        == "/assistants/one"
+    )
+    assert (
+        compare._resolve_references(steps[1]["path"], {"assistant": {"assistant_id": "two"}})
+        == "/assistants/two"
+    )
 
 
 def test_compare_sse_keeps_events_but_normalizes_dynamic_values() -> None:

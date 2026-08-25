@@ -29,16 +29,18 @@ def _write_graph_project(root: Path) -> dict[str, dict[str, str]]:
 
 
 @pytest.mark.asyncio
-async def test_official_python_sdk_core_surface_is_complete(pg_runtime, tmp_path: Path) -> None:
+async def test_official_python_sdk_core_surface_is_complete(tmp_path: Path) -> None:
     from langgraph_sdk._async.client import LangGraphClient
 
+    from langgraph_runtime_pg.database import truncate_all
     from langhost.server import create_app
 
     app = create_app(
         {"graphs": _write_graph_project(tmp_path)},
         base_dir=tmp_path,
     )
-    async with LifespanManager(app):  # noqa: SIM117 - keep SDK client scope explicit
+    async with LifespanManager(app):
+        await truncate_all()
         async with LangGraphClient(
             AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
         ) as client:
@@ -208,19 +210,19 @@ async def test_thread_stream_projects_durable_events_and_resumes(pg_runtime, mon
         )
 
     initial = await thread_stream(request("-"))
-    assert "event: values\ndata: {\"value\":1}\nid: 1-0" in await anext(initial.body_iterator)
+    assert 'event: values\ndata: {"value":1}\nid: 1-0' in await anext(initial.body_iterator)
     await initial.body_iterator.aclose()
 
     resumed = await thread_stream(request("1-0"))
-    assert "event: values\ndata: {\"value\":2}\nid: 2-0" in await anext(resumed.body_iterator)
+    assert 'event: values\ndata: {"value":2}\nid: 2-0' in await anext(resumed.body_iterator)
     await resumed.body_iterator.aclose()
 
 
 @pytest.mark.asyncio
 async def test_official_python_sdk_protocol_v2_multi_interrupt_resume(
-    pg_runtime, tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch
 ) -> None:
-    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.database import connect, truncate_all
     from langgraph_runtime_pg.models import RuntimeEventRow, ThreadRow
     from langgraph_runtime_pg.protocol import protocol_event
     from langgraph_runtime_pg.redis_stream import Message
@@ -257,6 +259,7 @@ async def test_official_python_sdk_protocol_v2_multi_interrupt_resume(
             AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
         ) as client,
     ):
+        await truncate_all()
         assistant = await client.assistants.create("assistant")
         thread = await client.threads.create(graph_id="assistant")
         thread_id = UUID(thread["thread_id"])
@@ -361,11 +364,9 @@ async def test_official_python_sdk_protocol_v2_multi_interrupt_resume(
 
 
 @pytest.mark.asyncio
-async def test_official_python_sdk_runs_stream_v2_and_replay(
-    pg_runtime, tmp_path: Path, monkeypatch
-) -> None:
+async def test_official_python_sdk_runs_stream_v2_and_replay(tmp_path: Path, monkeypatch) -> None:
 
-    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.database import connect, truncate_all
     from langgraph_runtime_pg.models import RunRow, RuntimeEventRow
     from langgraph_runtime_pg.protocol import RunReason, RunStatus
     from langgraph_runtime_pg.redis_stream import Message
@@ -402,6 +403,7 @@ async def test_official_python_sdk_runs_stream_v2_and_replay(
             AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
         ) as client,
     ):
+        await truncate_all()
         assistant = await client.assistants.create("assistant")
         thread = await client.threads.create(graph_id="assistant")
         thread_id = UUID(thread["thread_id"])

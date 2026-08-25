@@ -28,7 +28,8 @@ def _graph_config(root: Path) -> dict[str, dict[str, str]]:
 
 
 @pytest.mark.asyncio
-async def test_core_rest_contract_covers_resources_and_errors(pg_runtime, tmp_path: Path) -> None:
+async def test_core_rest_contract_covers_resources_and_errors(tmp_path: Path) -> None:
+    from langgraph_runtime_pg.database import truncate_all
     from langhost.server import create_app
 
     app = create_app({"graphs": _graph_config(tmp_path)}, base_dir=tmp_path)
@@ -36,6 +37,7 @@ async def test_core_rest_contract_covers_resources_and_errors(pg_runtime, tmp_pa
         LifespanManager(app),
         AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
     ):
+        await truncate_all()
         for path in ("/ok", "/live", "/info", "/openapi.json", "/docs", "/metrics"):
             response = await client.get(path)
             assert response.status_code == 200, (path, response.text)

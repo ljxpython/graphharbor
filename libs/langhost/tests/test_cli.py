@@ -4,10 +4,10 @@ from typing import Any
 import httpx
 import pytest
 
-from langhost import cli as cli_module
-
 
 def test_banner_uses_resolved_port() -> None:
+    from langhost import cli as cli_module
+
     rendered = cli_module._langhost_welcome(
         host="127.0.0.1",
         port=51234,
@@ -24,6 +24,8 @@ def test_serve_passes_resolved_port_to_banner_and_server(
     monkeypatch: Any,
     tmp_path: Path,
 ) -> None:
+    from langhost import cli as cli_module
+
     calls: dict[str, Any] = {}
 
     monkeypatch.chdir(tmp_path)

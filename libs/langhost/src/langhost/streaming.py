@@ -96,7 +96,9 @@ def _thread_stream_modes(request: Request) -> set[str] | JSONResponse:
     modes = {item.strip() for item in raw.split(",")} if raw else {"run_modes"}
     invalid = modes - {"lifecycle", "run_modes", "state_update"}
     if invalid:
-        return JSONResponse({"detail": f"Invalid stream mode: {sorted(invalid)[0]}"}, status_code=422)
+        return JSONResponse(
+            {"detail": f"Invalid stream mode: {sorted(invalid)[0]}"}, status_code=422
+        )
     return modes
 
 
@@ -158,7 +160,11 @@ async def _thread_frame(row: RuntimeEventRow, modes: set[str]) -> tuple[str, Any
         if status in _TERMINAL:
             if "lifecycle" not in modes and "run_modes" not in modes:
                 return None
-            return "metadata", {"status": "run_done", "run_id": str(row.run_id)}, f"{row.sequence}-0"
+            return (
+                "metadata",
+                {"status": "run_done", "run_id": str(row.run_id)},
+                f"{row.sequence}-0",
+            )
         return None
     if name == "state_update":
         if "state_update" not in modes:
@@ -179,19 +185,20 @@ async def thread_stream(request: Request) -> JSONResponse | StreamingResponse:
     cursor = _thread_cursor(request.headers.get("last-event-id"))
     if isinstance(cursor, JSONResponse):
         return cursor
+    cursor_value = int(cursor)
     principal = principal_from_scope(request.scope)
     heartbeat = max(float(os.environ.get("GRAPHHARBOR_THREAD_STREAM_HEARTBEAT_SECONDS", "15")), 0.1)
     manager = get_stream_manager()
 
     async def body() -> AsyncIterator[str]:
-        nonlocal cursor
+        nonlocal cursor_value
         queue = await manager.add_thread_stream(thread_id)
         try:
-            if cursor < 0:
-                cursor = await _thread_event_sequence(thread_id, principal)
+            if cursor_value < 0:
+                cursor_value = await _thread_event_sequence(thread_id, principal)
             while True:
-                for row in await _thread_events(thread_id, cursor, principal):
-                    cursor = row.sequence
+                for row in await _thread_events(thread_id, cursor_value, principal):
+                    cursor_value = row.sequence
                     frame = await _thread_frame(row, modes)
                     if frame is not None:
                         name, data, event_id = frame
@@ -208,7 +215,11 @@ async def thread_stream(request: Request) -> JSONResponse | StreamingResponse:
     return StreamingResponse(
         body(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-store", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
