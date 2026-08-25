@@ -1,0 +1,14 @@
+{
+  "graphharbor": "0.13.0.post2",
+  "graphharbor-runtime": "0.13.0.post2",
+  "langgraph": "1.2.11",
+  "langgraph-sdk": "0.4.3",
+  "langgraph-cli": "0.4.31",
+  "langgraph-checkpoint": "4.2.0",
+  "langgraph-checkpoint-postgres": "3.1.2",
+  "official-agent-server": "langgraph-api==0.13.0 via langgraph dev",
+  "protocol-comparison": "required before any LangGraph dependency upgrade",
+  "official-protocol-status": "passed with documented core-profile exclusions",
+  "official-protocol-verified-at": "2026-08-25",
+  "protocol-exclusions": "docs/compatibility-exclusions.json"
+}

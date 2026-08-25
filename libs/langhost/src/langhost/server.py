@@ -40,7 +40,7 @@ from langgraph_runtime_pg.models import (
     ThreadRow,
 )
 from langgraph_runtime_pg.production import RuntimeReadiness, lifespan as runtime_lifespan
-from langgraph_runtime_pg.protocol import RunReason, RunStatus, capability_document
+from langgraph_runtime_pg.protocol import RunReason, RunStatus, official_info_document
 from langgraph_runtime_pg.redis_stream import wake_run_queue
 from langgraph_runtime_pg.run_state import is_terminal, transition
 from langgraph_runtime_pg.run_store import RunRepository
@@ -163,7 +163,7 @@ def _principal(request: Request):
 
 async def _info(request: Request) -> JSONResponse:
     del request
-    return JSONResponse({"graphharbor": "production", **capability_document()})
+    return JSONResponse(official_info_document())
 
 
 async def _openapi(request: Request) -> JSONResponse:

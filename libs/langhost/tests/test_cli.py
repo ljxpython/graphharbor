@@ -88,11 +88,25 @@ async def test_owned_server_exposes_public_health_and_capabilities() -> None:
         stream = await client.post("/runs/stream", json={})
     assert ok.status_code == 200 and ok.json() == {"ok": True}
     assert ready.status_code == 503 and ready.json()["ready"] is False
-    assert info.status_code == 200 and info.json()["protocol"] == "langgraph-agent-server"
-    capabilities = {item["name"]: item for item in info.json()["capabilities"]}
-    assert capabilities["stream_v2"]["available"] is True
-    assert capabilities["events_v2"]["available"] is True
-    assert capabilities["events_v3"]["available"] is True
+    assert info.status_code == 200
+    assert info.json() == {
+        "flags": {
+            "assistants": True,
+            "crons": True,
+            "langsmith": False,
+            "langsmith_tracing_replicas": True,
+            "langsmith_tracing_session_on_runs": True,
+        },
+        "host": {
+            "host_revision_id": None,
+            "kind": "self-hosted",
+            "project_id": None,
+            "revision_id": None,
+            "tenant_id": None,
+        },
+        "langgraph_py_version": info.json()["langgraph_py_version"],
+        "version": info.json()["version"],
+    }
     assert schema.status_code == 200 and schema.json()["openapi"] == "3.1.0"
     assert metrics.status_code == 200 and "text/plain" in metrics.headers["content-type"]
     assert stream.status_code == 422 and stream.json()["detail"] == "assistant_id is required"

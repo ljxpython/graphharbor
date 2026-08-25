@@ -126,17 +126,19 @@ def _assistant(row: AssistantRow) -> dict[str, Any]:
 
 
 def _thread(row: ThreadRow) -> dict[str, Any]:
-    return _plain(
-        {
-            "thread_id": row.thread_id,
-            "created_at": row.created_at,
-            "updated_at": row.updated_at,
-            "metadata": row.metadata_,
-            "status": row.status,
-            "values": row.values_,
-            "interrupts": row.interrupts,
-        }
-    )
+    value: dict[str, Any] = {
+        "thread_id": row.thread_id,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "metadata": row.metadata_,
+        "status": row.status,
+        "config": row.config,
+        "values": row.values_,
+        "state_updated_at": row.state_updated_at,
+    }
+    if row.interrupts:
+        value["interrupts"] = row.interrupts
+    return _plain(value)
 
 
 def _run(row: RunRow) -> dict[str, Any]:
@@ -260,7 +262,7 @@ async def assistants_create(request: Request) -> JSONResponse:
             )
         )
         await conn.session.flush()
-    return JSONResponse(_assistant(row), status_code=201)
+    return JSONResponse(_assistant(row))
 
 
 async def assistants_get(request: Request) -> JSONResponse:
@@ -510,10 +512,11 @@ async def threads_create(request: Request) -> JSONResponse:
             metadata_=metadata,
             config=payload.get("config") or {},
             interrupts={},
+            state_updated_at=datetime.now(UTC),
         )
         conn.session.add(row)
         await conn.session.flush()
-    return JSONResponse(_thread(row), status_code=201)
+    return JSONResponse(_thread(row))
 
 
 async def threads_search(request: Request) -> JSONResponse:

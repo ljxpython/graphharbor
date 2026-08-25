@@ -1,0 +1,147 @@
+name: Compatibility Upgrade
+
+on:
+  workflow_dispatch:
+    inputs:
+      official_version:
+        description: "Official LangGraph version being evaluated"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  REDIS_URI: redis://localhost:6379/2
+  OFFICIAL_URL: http://127.0.0.1:31398
+  GRAPHHARBOR_URL: http://127.0.0.1:31397
+
+jobs:
+  compare:
+    name: Official protocol comparison (${{ inputs.official_version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16.9
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4.2
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: false
+          python-version: "3.11"
+
+      - name: Sync upgraded dependency set
+        run: uv sync --group dev
+
+      - name: Record official Agent Server version
+        run: |
+          test "$(uv run python -c 'from importlib.metadata import version; print(version("langgraph"))')" = "${{ inputs.official_version }}"
+          echo "GRAPHHARBOR_OFFICIAL_AGENT_SERVER_VERSION=$(uv run python -c 'from importlib.metadata import version; print(version("langgraph-api"))')" >> "$GITHUB_ENV"
+
+      - name: Create isolated databases
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d postgres -c 'CREATE DATABASE graphharbor_candidate;'
+          psql -h localhost -U postgres -d postgres -c 'CREATE DATABASE langgraph_official;'
+
+      - name: Start official langgraph dev
+        env:
+          DATABASE_URI: postgresql+asyncpg://postgres:postgres@localhost:5432/langgraph_official
+        run: |
+          (
+            cd "${GITHUB_WORKSPACE}/tests/javascript/fixtures"
+            export PYTHONPATH="$PWD"
+            exec uv --project "${GITHUB_WORKSPACE}" run langgraph dev --config "$PWD/langgraph.json" \
+              --host 127.0.0.1 --port 31398 --no-browser --no-reload --allow-blocking
+          ) > /tmp/langgraph-dev.log 2>&1 &
+          echo $! > /tmp/langgraph-dev.pid
+
+      - name: Migrate and start GraphHarbor
+        env:
+          DATABASE_URI: postgresql+asyncpg://postgres:postgres@localhost:5432/graphharbor_candidate
+        run: |
+          uv run graphharbor migrate upgrade
+          uv run graphharbor serve --config tests/javascript/fixtures/langgraph.json \
+            --host 127.0.0.1 --port 31397 --no-browser > /tmp/graphharbor.log 2>&1 &
+          echo $! > /tmp/graphharbor.pid
+          uv run graphharbor worker --config tests/javascript/fixtures/langgraph.json \
+            --n-jobs-per-worker 1 > /tmp/graphharbor-worker.log 2>&1 &
+          echo $! > /tmp/graphharbor-worker.pid
+
+      - name: Wait for both services
+        run: |
+          for url in "${OFFICIAL_URL}/ok" "${GRAPHHARBOR_URL}/ready"; do
+            for _ in $(seq 1 60); do
+              if curl -fsS "${url}" >/dev/null; then break; fi
+              sleep 1
+            done
+            curl -fsS "${url}" >/dev/null
+          done
+
+      - name: Compare official public output
+        run: |
+          uv run python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          exclusions = json.loads(Path("docs/compatibility-exclusions.json").read_text())
+          args = [
+              sys.executable,
+              "scripts/compare_official_protocol.py",
+              "--official-url",
+              os.environ["OFFICIAL_URL"],
+              "--graphharbor-url",
+              os.environ["GRAPHHARBOR_URL"],
+              "--scenario",
+              "tests/javascript/fixtures/official-protocol-scenario.json",
+          ]
+          for path in exclusions["official_openapi_paths"] + exclusions["graphharbor_openapi_paths"]:
+              args.extend(("--ignore-openapi-path", path))
+          for method in exclusions["openapi_methods"]:
+              args.extend(("--ignore-openapi-method", method))
+          raise SystemExit(subprocess.call(args))
+          PY
+
+      - name: Upload comparison logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: compatibility-upgrade-logs
+          path: |
+            /tmp/langgraph-dev.log
+            /tmp/graphharbor.log
+            /tmp/graphharbor-worker.log
+          if-no-files-found: warn
+
+      - name: Stop services
+        if: always()
+        run: |
+          for pid_file in /tmp/langgraph-dev.pid /tmp/graphharbor.pid /tmp/graphharbor-worker.pid; do
+            if [[ -f "${pid_file}" ]]; then kill "$(cat "${pid_file}")" 2>/dev/null || true; fi
+          done

@@ -6,8 +6,10 @@ adapters can use these constants while the compatibility spike remains optional.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from enum import StrEnum
+from importlib.metadata import PackageNotFoundError, version
 from time import time
 from typing import Any
 
@@ -97,6 +99,40 @@ def capability_document() -> dict[str, Any]:
         "run_statuses": sorted(PUBLIC_RUN_STATUSES),
         "capabilities": [item.as_dict() for item in CORE_CAPABILITIES],
         "authentication": {"production": "platform-api-delegation-jwt"},
+    }
+
+
+def official_info_document() -> dict[str, Any]:
+    """Return the public ``langgraph dev`` info shape.
+
+    The API version is injected by the compatibility workflow for releases;
+    the installed compatibility package is only a local fallback.
+    """
+    try:
+        langgraph_version = version("langgraph")
+    except PackageNotFoundError:
+        langgraph_version = "unknown"
+    try:
+        api_version = version("langgraph-api")
+    except PackageNotFoundError:
+        api_version = os.environ.get("GRAPHHARBOR_OFFICIAL_AGENT_SERVER_VERSION", "0.13.0")
+    return {
+        "flags": {
+            "assistants": True,
+            "crons": True,
+            "langsmith": False,
+            "langsmith_tracing_replicas": True,
+            "langsmith_tracing_session_on_runs": True,
+        },
+        "host": {
+            "host_revision_id": None,
+            "kind": "self-hosted",
+            "project_id": None,
+            "revision_id": None,
+            "tenant_id": None,
+        },
+        "langgraph_py_version": langgraph_version,
+        "version": os.environ.get("GRAPHHARBOR_OFFICIAL_AGENT_SERVER_VERSION", api_version),
     }
 
 

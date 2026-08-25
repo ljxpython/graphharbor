@@ -358,11 +358,11 @@ async def test_owned_server_core_resource_flow(pg_runtime) -> None:
             "/assistants",
             json={"graph_id": "assistant", "name": "default", "metadata": {}},
         )
-        assert assistant_response.status_code == 201, assistant_response.text
+        assert assistant_response.status_code == 200, assistant_response.text
         assistant_id = assistant_response.json()["assistant_id"]
 
         thread_response = await client.post("/threads", json={"metadata": {}})
-        assert thread_response.status_code == 201, thread_response.text
+        assert thread_response.status_code == 200, thread_response.text
         thread_id = thread_response.json()["thread_id"]
 
         run_response = await client.post(
@@ -513,7 +513,7 @@ async def test_production_auth_rejects_missing_management_and_scope_override(
     assert missing.status_code == 401
     assert management.status_code == 403
     assert override.status_code == 403
-    assert created.status_code == 201
+    assert created.status_code == 200
     assert custom.status_code == 200 and custom.json() == {"tenant_id": "tenant-1"}
     assert hidden.status_code == 404
 
@@ -1232,7 +1232,7 @@ async def test_owned_server_run_sse_replays_durable_events(pg_runtime, monkeypat
             conn.session,
             assistant_id=assistant_id,
             thread_id=thread_id,
-            kwargs={"stream_mode": "values"},
+            kwargs={"stream_mode": "values", "stream_resumable": True},
             metadata={},
             tenant_id=None,
             project_id=None,
@@ -1271,7 +1271,7 @@ async def test_owned_server_run_sse_replays_durable_events(pg_runtime, monkeypat
     assert "event: metadata" in response.text
     assert "event: values" in response.text
     assert "id: 1" in response.text
-    assert "event: end" in response.text
+    assert "event: end" not in response.text
 
 
 @pytest.mark.asyncio

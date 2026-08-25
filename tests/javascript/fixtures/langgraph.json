@@ -1,6 +1,6 @@
 {
   "dependencies": ["./"],
   "graphs": {
-    "assistant": "graphs.py:graph"
+    "assistant": "./graphs.py:graph"
   }
 }

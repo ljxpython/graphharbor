@@ -1,0 +1,38 @@
+[
+  {
+    "name": "assistant_create",
+    "method": "POST",
+    "path": "/assistants",
+    "body": {
+      "graph_id": "assistant",
+      "name": "official-protocol-gate",
+      "metadata": {"compatibility": "official-protocol-gate"}
+    }
+  },
+  {
+    "name": "assistant_get",
+    "method": "GET",
+    "path": "/assistants/{{assistant_create.assistant_id}}"
+  },
+  {
+    "name": "thread_create",
+    "method": "POST",
+    "path": "/threads",
+    "body": {"metadata": {"compatibility": "official-protocol-gate"}}
+  },
+  {
+    "name": "thread_get",
+    "method": "GET",
+    "path": "/threads/{{thread_create.thread_id}}"
+  },
+  {
+    "name": "run_stream",
+    "method": "POST",
+    "path": "/threads/{{thread_create.thread_id}}/runs/stream",
+    "body": {
+      "assistant_id": "{{assistant_create.assistant_id}}",
+      "input": {"value": 1},
+      "stream_mode": ["values"]
+    }
+  }
+]

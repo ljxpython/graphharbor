@@ -60,7 +60,7 @@ async def test_core_rest_contract_covers_resources_and_errors(pg_runtime, tmp_pa
         assistant_response = await client.post(
             "/assistants", json={"graph_id": "assistant", "name": "rest-contract"}
         )
-        assert assistant_response.status_code == 201, assistant_response.text
+        assert assistant_response.status_code == 200, assistant_response.text
         assistant = assistant_response.json()
         assistant_id = assistant["assistant_id"]
 
@@ -85,7 +85,7 @@ async def test_core_rest_contract_covers_resources_and_errors(pg_runtime, tmp_pa
         thread_response = await client.post(
             "/threads", json={"graph_id": "assistant", "metadata": {"suite": "rest"}}
         )
-        assert thread_response.status_code == 201
+        assert thread_response.status_code == 200
         thread_id = thread_response.json()["thread_id"]
         assert (await client.get(f"/threads/{thread_id}")).status_code == 200
         assert (await client.get("/threads")).status_code == 200

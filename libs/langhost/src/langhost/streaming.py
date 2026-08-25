@@ -167,6 +167,7 @@ async def _run_sse(
         cursor = 0
     heartbeat = max(float(os.environ.get("GRAPHHARBOR_SSE_HEARTBEAT_SECONDS", "15")), 0.1)
     timeout = max(float(os.environ.get("GRAPHHARBOR_SSE_TIMEOUT_SECONDS", "300")), heartbeat)
+    resumable = bool(payload.get("stream_resumable", False)) or "last-event-id" in request.headers
     manager = get_stream_manager()
 
     async def body() -> AsyncIterator[str]:
@@ -179,16 +180,10 @@ async def _run_sse(
             snapshot = await _run_snapshot(run_id, principal)
             if snapshot is None:
                 yield _sse("error", {"detail": "run not found"})
-                yield _sse("end")
                 return
             yield _sse(
                 "metadata",
-                {
-                    "run_id": str(run_id),
-                    "thread_id": str(thread_id) if thread_id else None,
-                    "assistant_id": str(snapshot.assistant_id),
-                },
-                event_id=0,
+                {"run_id": str(run_id), "attempt": snapshot.retry_count + 1},
             )
 
             async def emit_envelope(envelope: dict[str, Any]) -> AsyncIterator[str]:
@@ -205,11 +200,14 @@ async def _run_sse(
                     return
                 seen.add(sequence)
                 metric_inc("graphharbor_sse_events_total", labels={"version": version})
-                yield _sse(name, data, event_id=sequence)
+                yield _sse(name, data, event_id=sequence if resumable else None)
 
             for envelope in await _load_events(run_id, after=cursor):
                 async for frame in emit_envelope(envelope):
                     yield frame
+            snapshot = await _run_snapshot(run_id, principal)
+            if snapshot is None or snapshot.status in _TERMINAL:
+                return
 
             started = asyncio.get_running_loop().time()
             while asyncio.get_running_loop().time() - started < timeout:
@@ -220,13 +218,11 @@ async def _run_sse(
                     snapshot = await _run_snapshot(run_id, principal)
                     if snapshot is None:
                         yield _sse("error", {"detail": "run not found"})
-                        yield _sse("end")
                         return
                     if snapshot.status in _TERMINAL:
                         for envelope in await _load_events(run_id, after=max(seen or {cursor})):
                             async for frame in emit_envelope(envelope):
                                 yield frame
-                        yield _sse("end", event_id=max(seen or {cursor}))
                         return
                     continue
                 live_envelope = _message_envelope(message)
@@ -238,10 +234,8 @@ async def _run_sse(
                 if isinstance(event, dict) and event.get("event") == "lifecycle":
                     status = str(event.get("status", ""))
                     if status in _TERMINAL:
-                        yield _sse("end", event_id=max(seen or {cursor}))
                         return
             yield _sse("error", {"detail": "stream timed out"})
-            yield _sse("end", event_id=max(seen or {cursor}))
         finally:
             metric_inc("graphharbor_sse_connections_closed_total", labels={"version": version})
             await manager.remove_queue(run_id, thread_id, queue)
