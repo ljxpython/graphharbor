@@ -100,7 +100,7 @@ async def lifespan(
 
     await logger.ainfo(
         f"Starting PG runtime with langgraph-api={__version__} "
-        f"and langgraph-runtime-pg={runtime_version}",
+        f"and graphharbor-runtime={runtime_version}",
         version=__version__,
         runtime_version=runtime_version,
     )

@@ -1,7 +1,8 @@
-# langgraph-runtime-pg
+# graphharbor-runtime
 
-MIT Postgres + Redis runtime (`LANGGRAPH_RUNTIME_EDITION=pg`) for stock
-[`langgraph-api`](https://pypi.org/project/langgraph-api/).
+MIT PostgreSQL + Redis runtime (`LANGGRAPH_RUNTIME_EDITION=pg`) for the
+self-hosted GraphHarbor Agent Server. `langgraph-api` is optional and only
+used by the internal compatibility profile.
 
-See the [repository README](https://github.com/langhost/langhost)
-for setup, CLI (`langhost`), and architecture.
+See the [repository README](https://github.com/ljxpython/graphharbor)
+for setup, CLI (`graphharbor`), and architecture.

@@ -1,4 +1,4 @@
-"""Shared fixtures. Postgres + Redis must already be up (compose / CI services)."""
+"""Shared fixtures. PostgreSQL and Redis must already be reachable."""
 
 from __future__ import annotations
 

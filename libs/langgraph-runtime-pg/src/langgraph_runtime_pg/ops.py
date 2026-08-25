@@ -2841,8 +2841,14 @@ async def _insert_run_row(
         run_id=run_id,
         thread_id=thread_id,
         assistant_id=assistant_id,
+        tenant_id=getattr(existing_thread, "tenant_id", None)
+        or getattr(assistant, "tenant_id", None),
+        project_id=getattr(existing_thread, "project_id", None)
+        or getattr(assistant, "project_id", None),
         metadata_=merged_metadata,
         status=effective_status,
+        reason=None,
+        max_attempts=3,
         kwargs={
             **kwargs,
             "config": {

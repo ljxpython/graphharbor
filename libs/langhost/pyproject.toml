@@ -1,8 +1,8 @@
 [project]
-name = "langhost"
-# Lockstep with langgraph-runtime-pg: same X.Y.Z / X.Y.Z.postN (tracks langgraph-api).
-version = "0.11.1.post1"
-description = "Minimal CLI for self-hosted LangGraph Agent Server on langgraph-runtime-pg"
+name = "graphharbor"
+# Lockstep with graphharbor-runtime; independent of langgraph-api releases.
+version = "0.13.0.post1"
+description = "GraphHarbor CLI for a self-hosted LangGraph Agent Server on PostgreSQL and Redis"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -48,18 +48,18 @@ dependencies = [
     "pyfiglet>=1.0.0",
     "langgraph-cli>=0.4.0,<0.5",
     "uvicorn[standard]>=0.51.0",
-    # Exact same version as this package / langgraph-runtime-pg (lockstep releases).
-    "langgraph-runtime-pg==0.11.1.post1",
+    # Exact same version as graphharbor-runtime (lockstep releases).
+    "graphharbor-runtime==0.13.0.post1",
 ]
 
 [project.urls]
-Homepage = "https://github.com/langhost/langhost"
-Repository = "https://github.com/langhost/langhost"
-Issues = "https://github.com/langhost/langhost/issues"
-Changelog = "https://github.com/langhost/langhost/releases"
+Homepage = "https://github.com/ljxpython/graphharbor"
+Repository = "https://github.com/ljxpython/graphharbor"
+Issues = "https://github.com/ljxpython/graphharbor/issues"
+Changelog = "https://github.com/ljxpython/graphharbor/releases"
 
 [project.scripts]
-langhost = "langhost.cli:cli"
+graphharbor = "langhost.cli:cli"
 
 [build-system]
 requires = ["hatchling"]
@@ -69,4 +69,4 @@ build-backend = "hatchling.build"
 packages = ["src/langhost"]
 
 [tool.uv.sources]
-langgraph-runtime-pg = { workspace = true }
+graphharbor-runtime = { workspace = true }

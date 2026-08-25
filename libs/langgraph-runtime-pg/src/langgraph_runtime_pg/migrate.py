@@ -1,4 +1,4 @@
-"""Alembic migration runner (``langgraph-runtime-pg-migrate``)."""
+"""Alembic migration runner (``graphharbor-runtime-migrate``)."""
 
 from __future__ import annotations
 
@@ -20,11 +20,17 @@ def to_sync_url(uri: str) -> str:
     return "postgresql+psycopg://" + to_psycopg_uri(uri).removeprefix("postgresql://")
 
 
-def alembic_config(database_uri: str | None = None) -> Config:
+def alembic_config(
+    database_uri: str | None = None, *, version_table_schema: str | None = None
+) -> Config:
     uri = to_sync_url(database_uri or get_database_uri())
     cfg = Config()
     cfg.set_main_option("script_location", str(MIGRATIONS_DIR))
-    cfg.set_main_option("sqlalchemy.url", uri)
+    # ConfigParser treats percent-encoded query values as interpolation markers.
+    # Escape them here so valid libpq options (for example search_path) survive.
+    cfg.set_main_option("sqlalchemy.url", uri.replace("%", "%%"))
+    if version_table_schema:
+        cfg.attributes["version_table_schema"] = version_table_schema
     cfg.attributes["configure_logger"] = False
     return cfg
 
@@ -34,9 +40,11 @@ def _head_revision() -> str:
     return heads[0] if len(heads) == 1 else "head"
 
 
-def upgrade_head(database_uri: str | None = None) -> str:
+def upgrade_head(
+    database_uri: str | None = None, *, version_table_schema: str | None = None
+) -> str:
     """Apply all pending migrations; return the head revision id."""
-    cfg = alembic_config(database_uri)
+    cfg = alembic_config(database_uri, version_table_schema=version_table_schema)
     command.upgrade(cfg, "head")
     return _head_revision()
 
@@ -60,7 +68,7 @@ def downgrade(revision: str, database_uri: str | None = None) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="langgraph-runtime-pg-migrate",
+        prog="graphharbor-runtime-migrate",
         description="Apply langgraph_runtime_pg Postgres schema migrations",
     )
     parser.add_argument(

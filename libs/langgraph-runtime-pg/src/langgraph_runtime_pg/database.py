@@ -174,6 +174,8 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 _ASSISTANT_KEYS = [
     "assistant_id",
+    "tenant_id",
+    "project_id",
     "graph_id",
     "name",
     "description",
@@ -199,7 +201,11 @@ _ASSISTANT_VERSION_KEYS = [
 
 _THREAD_KEYS = [
     "thread_id",
+    "graph_id",
+    "tenant_id",
+    "project_id",
     "status",
+    "event_seq",
     "metadata",
     "config",
     "values",
@@ -212,9 +218,20 @@ _THREAD_KEYS = [
 
 _RUN_KEYS = [
     "run_id",
+    "tenant_id",
+    "project_id",
     "thread_id",
     "assistant_id",
     "status",
+    "reason",
+    "retry_count",
+    "max_attempts",
+    "next_attempt_at",
+    "idempotency_key",
+    "lease_owner",
+    "lease_expires_at",
+    "heartbeat_at",
+    "event_seq",
     "metadata",
     "kwargs",
     "multitask_strategy",
@@ -479,8 +496,32 @@ async def healthcheck(*, check_db: bool = True) -> None:
             await conn.execute(text("SELECT 1"))
 
 
-def pool_stats(*args: Any, **kwargs: Any) -> dict[str, dict[str, int]]:
-    return {}
+async def schema_ready() -> bool:
+    """Return whether the explicit production schema contract is installed."""
+    if _ENGINE is None:
+        return False
+    try:
+        async with _ENGINE.connect() as conn:
+            value = await conn.scalar(
+                text("SELECT value FROM runtime_schema WHERE key = 'contract'")
+            )
+        return value == "production-v1"
+    except Exception:
+        return False
+
+
+def pool_stats(*args: Any, **kwargs: Any) -> dict[str, int]:
+    """Return SQLAlchemy pool gauges without exposing the engine object."""
+    del args, kwargs
+    if _ENGINE is None:
+        return {"size": 0, "checked_in": 0, "checked_out": 0, "overflow": 0}
+    pool: Any = _ENGINE.pool
+    return {
+        "size": int(pool.size()),
+        "checked_in": int(pool.checkedin()),
+        "checked_out": int(pool.checkedout()),
+        "overflow": int(pool.overflow()),
+    }
 
 
 # Checkpoint/store tables owned outside Base.metadata; truncate in tests too.
@@ -496,7 +537,10 @@ async def truncate_all() -> None:
     """Truncate ORM + checkpoint/store tables (tests)."""
     if _ENGINE is None:
         return
-    orm_tables = [t.name for t in reversed(Base.metadata.sorted_tables)]
+    # Keep migration metadata intact so readiness remains meaningful after test cleanup.
+    orm_tables = [
+        t.name for t in reversed(Base.metadata.sorted_tables) if t.name != "runtime_schema"
+    ]
     async with _ENGINE.begin() as conn:
         existing = {
             row[0]

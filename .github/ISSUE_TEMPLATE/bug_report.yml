@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a problem with langhost
+description: Report a problem with graphharbor
 title: "[bug] "
 labels: ["bug"]
 body:
@@ -35,6 +35,6 @@ body:
     id: env
     attributes:
       label: Environment
-      description: OS, Python, Docker, relevant env vars (redact secrets).
+      description: OS, Python, PostgreSQL/Redis versions, relevant env vars (redact secrets).
     validations:
       required: false
