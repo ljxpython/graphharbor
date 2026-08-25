@@ -1,7 +1,7 @@
 [project]
 name = "graphharbor-runtime"
-# Tracks langgraph-api: X.Y.Z or X.Y.Z.postN for our patches on the same API.
-version = "0.11.1.post1"
+# GraphHarbor has its own release line; langgraph-api is compatibility-spike-only.
+version = "0.13.0.post1"
 description = "GraphHarbor PostgreSQL and Redis runtime for the LangGraph Agent Server"
 readme = "README.md"
 license = "MIT"
@@ -57,11 +57,17 @@ dependencies = [
     "structlog>=24.0",
     "croniter>=1.0",
     "orjson>=3.9",
+    "PyJWT[crypto]>=2.8",
     "starlette>=0.37",
-    # Exact Agent Server this runtime edition targets (version sync enforced in CI).
-    "langgraph-api==0.11.1",
-    "langgraph-checkpoint-postgres==3.1.0",
+    "langgraph-checkpoint-postgres==3.1.2",
 ]
+
+[project.optional-dependencies]
+# Keep the old server available for comparison tests, never for the production profile.
+compatibility = ["langgraph-api==0.13.0"]
+
+[dependency-groups]
+compatibility = ["langgraph-api==0.13.0"]
 
 [project.urls]
 Homepage = "https://github.com/ljxpython/graphharbor"

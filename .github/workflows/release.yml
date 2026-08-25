@@ -87,7 +87,7 @@ jobs:
 
   publish-graphharbor:
     name: Publish graphharbor
-    needs: build
+    needs: publish-graphharbor-runtime
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: ${{ github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi' && 'testpypi-graphharbor' || 'pypi-graphharbor' }}
@@ -152,6 +152,49 @@ jobs:
             uv publish --trusted-publishing always \
               --check-url https://pypi.org/simple/ dist/graphharbor_runtime-*
           fi
+
+  verify-testpypi:
+    name: Verify TestPyPI installation
+    needs: [publish-graphharbor, publish-graphharbor-runtime]
+    if: github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: false
+          python-version: "3.11"
+
+      - name: Install exactly the published TestPyPI pair
+        run: |
+          RUNTIME_WHL="$(ls dist/graphharbor_runtime-*.whl | head -n1)"
+          VERSION="$(basename "${RUNTIME_WHL}" | sed -E 's/^graphharbor_runtime-(.+)-py3-none-any\.whl$/\1/')"
+          for attempt in $(seq 1 20); do
+            if uv run --isolated --no-project \
+              --default-index https://pypi.org/simple \
+              --index https://test.pypi.org/simple \
+              --with "graphharbor==${VERSION}" \
+              python -c "import importlib.metadata as m; assert m.version('graphharbor') == '${VERSION}'; assert m.version('graphharbor-runtime') == '${VERSION}'"; then
+              break
+            fi
+            if [[ "${attempt}" == "20" ]]; then
+              exit 1
+            fi
+            sleep 15
+          done
+          uv run --isolated --no-project \
+            --default-index https://pypi.org/simple \
+            --index https://test.pypi.org/simple \
+            --with "graphharbor==${VERSION}" \
+            graphharbor --version
 
   github-release:
     name: GitHub Release

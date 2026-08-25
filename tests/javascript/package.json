@@ -1,0 +1,8 @@
+{
+  "name": "graphharbor-javascript-contract",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@langchain/langgraph-sdk": "1.9.28"
+  }
+}

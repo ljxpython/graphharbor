@@ -1,6 +1,9 @@
 from pathlib import Path
 from typing import Any
 
+import httpx
+import pytest
+
 from langhost import cli as cli_module
 
 
@@ -68,3 +71,35 @@ def test_serve_passes_resolved_port_to_banner_and_server(
     assert calls["resolved"] == ("127.0.0.1", 31296)
     assert calls["welcome"]["port"] == 51234
     assert calls["server"] == ("127.0.0.1", 51234)
+
+
+@pytest.mark.asyncio
+async def test_owned_server_exposes_public_health_and_capabilities() -> None:
+    from langhost.server import create_app
+
+    app = create_app({"graphs": {}})
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        ok = await client.get("/ok")
+        ready = await client.get("/ready")
+        info = await client.get("/info")
+        schema = await client.get("/openapi.json")
+        metrics = await client.get("/metrics")
+        stream = await client.post("/runs/stream", json={})
+    assert ok.status_code == 200 and ok.json() == {"ok": True}
+    assert ready.status_code == 503 and ready.json()["ready"] is False
+    assert info.status_code == 200 and info.json()["protocol"] == "langgraph-agent-server"
+    capabilities = {item["name"]: item for item in info.json()["capabilities"]}
+    assert capabilities["stream_v2"]["available"] is True
+    assert capabilities["events_v2"]["available"] is True
+    assert capabilities["events_v3"]["available"] is True
+    assert schema.status_code == 200 and schema.json()["openapi"] == "3.1.0"
+    assert metrics.status_code == 200 and "text/plain" in metrics.headers["content-type"]
+    assert stream.status_code == 422 and stream.json()["detail"] == "assistant_id is required"
+
+
+def test_owned_server_source_has_no_private_api_startup_import() -> None:
+    source = (Path(__file__).parents[1] / "src" / "langhost" / "server.py").read_text()
+    cli_source = (Path(__file__).parents[1] / "src" / "langhost" / "cli.py").read_text()
+    assert "langgraph_api" not in source
+    assert "langgraph_api" not in cli_source

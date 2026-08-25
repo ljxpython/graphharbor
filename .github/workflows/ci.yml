@@ -90,6 +90,62 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  production-contract:
+    name: Production contract (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    services:
+      postgres:
+        image: postgres:16.9
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: langgraph
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d langgraph"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4.2
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: false
+          python-version: ${{ matrix.python-version }}
+
+      - name: Sync
+        run: uv sync --group dev
+
+      - name: Apply GraphHarbor migration
+        run: uv run graphharbor migrate upgrade
+
+      - name: Production, security and persistence regression
+        run: |
+          uv run pytest \
+            libs/langgraph-runtime-pg/tests/test_production_contract.py \
+            libs/langgraph-runtime-pg/tests/test_persistence_contract.py \
+            libs/langgraph-runtime-pg/tests/test_public_runtime.py \
+            libs/langgraph-runtime-pg/tests/test_rest_contract.py \
+            libs/langgraph-runtime-pg/tests/test_official_sdk_contract.py \
+            libs/langhost/tests/test_cli.py \
+            -o "timeout=60"
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -105,7 +161,7 @@ jobs:
       PYTEST_ADDOPTS: "-vv --tb=short --timeout=60 --timeout-method=signal"
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16.9
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -118,7 +174,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       redis:
-        image: redis:7
+        image: redis:7.4.2
         ports:
           - 6379:6379
         options: >-
@@ -166,6 +222,8 @@ jobs:
           uv run pytest \
             libs/langgraph-runtime-pg/tests/test_interface.py \
             libs/langgraph-runtime-pg/tests/test_queue.py \
+            libs/langgraph-runtime-pg/tests/test_rest_contract.py \
+            libs/langgraph-runtime-pg/tests/test_official_sdk_contract.py \
             libs/langhost/tests/test_cli.py \
             -o "timeout=30"  # NOSONAR — pytest from locked env
 
@@ -218,4 +276,94 @@ jobs:
             echo "::group::langgraph-api log (tail)"
             tail -n 400 /tmp/langgraph-api.log || true
             echo "::endgroup::"
+          fi
+
+  javascript-contract:
+    name: JavaScript SDK contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URI: postgresql+asyncpg://postgres:postgres@localhost:5432/langgraph
+      REDIS_URI: redis://localhost:6379/0
+      LANGGRAPH_RUNTIME_EDITION: pg
+      LG_RUNTIME_PG_TEST: "1"
+      UV_FROZEN: "1"
+      GRAPHHARBOR_URL: http://127.0.0.1:31397
+    services:
+      postgres:
+        image: postgres:16.9
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: langgraph
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d langgraph"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4.2
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: false
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tests/javascript/package.json
+
+      - name: Sync Python workspace
+        run: uv sync --group dev
+
+      - name: Apply GraphHarbor migration
+        run: uv run graphharbor migrate upgrade
+
+      - name: Install official JavaScript SDK
+        working-directory: tests/javascript
+        run: npm install --ignore-scripts --no-package-lock
+
+      - name: Start GraphHarbor Agent Server
+        run: |
+          uv run graphharbor serve \
+            --host 127.0.0.1 \
+            --port 31397 \
+            --config tests/javascript/fixtures/langgraph.json \
+            --database-uri "${DATABASE_URI}" \
+            --redis-uri "${REDIS_URI}" \
+            --no-browser > /tmp/graphharbor-js-contract.log 2>&1 &
+          echo $! > /tmp/graphharbor-js-contract.pid
+          for i in $(seq 1 60); do
+            if curl -sf "${GRAPHHARBOR_URL}/ready" >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          tail -n 200 /tmp/graphharbor-js-contract.log
+          exit 1
+
+      - name: Run JavaScript SDK contract
+        run: node scripts/test_js_sdk.mjs
+
+      - name: Stop GraphHarbor Agent Server
+        if: always()
+        run: |
+          if [[ -f /tmp/graphharbor-js-contract.pid ]]; then
+            kill "$(cat /tmp/graphharbor-js-contract.pid)" 2>/dev/null || true
+          fi
+          if [[ -f /tmp/graphharbor-js-contract.log ]]; then
+            tail -n 200 /tmp/graphharbor-js-contract.log || true
           fi

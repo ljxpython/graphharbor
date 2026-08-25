@@ -17,14 +17,14 @@ We replace the *runtime*, not the Agent Server. Prefer stock `langgraph-api` / `
 
 ## Setup
 
-Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), Docker, git.
+Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), PostgreSQL, Redis, git.
 
 ```bash
 git clone https://github.com/ljxpython/graphharbor.git
 cd graphharbor
 uv sync --group dev
 cp .env.example .env
-docker compose up -d
+# Start PostgreSQL and Redis with your host's service manager, then set their URIs in .env.
 uv run pre-commit install   # optional
 ```
 
@@ -33,7 +33,7 @@ uv run pre-commit install   # optional
 ```bash
 uv run pre-commit run --all-files
 
-# Full e2e (compose + package tests + live API + upstream SDK suite)
+# Full e2e (host PostgreSQL/Redis + package tests + live API + upstream SDK suite)
 ./scripts/test.sh
 
 # Faster loop when Postgres/Redis are already up

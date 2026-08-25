@@ -1,5 +1,11 @@
 # GraphHarbor 生产化路线与验收方案
 
+> 本文是路线摘要。详细架构讨论和开放问题见
+> [production-decisions.md](production-decisions.md)；可执行阶段、任务和门禁见
+> [production-implementation-plan.md](production-implementation-plan.md)；六项冻结讨论见
+> [production-freeze-decisions.md](production-freeze-decisions.md)；分层兼容范围见
+> [compatibility-profile.md](compatibility-profile.md)。
+
 ## 1. 目标定义
 
 GraphHarbor 的核心目标不是简单替换包名或发布 PyPI，而是：
@@ -20,7 +26,7 @@ GraphHarbor 的核心目标不是简单替换包名或发布 PyPI，而是：
         + 多 worker 与故障恢复
 ```
 
-GraphHarbor 不重写 Agent Server HTTP API，优先保留官方 `langgraph-api`、`langgraph-sdk`、Studio 和 Agent Protocol 行为，只替换或扩展生产 runtime。
+GraphHarbor 优先验证官方 `langgraph-api`、`langgraph-sdk`、Studio 和 Agent Protocol 行为；最终由 GraphHarbor 自有的完整 drop-in Agent Protocol server 承担 HTTP/API 边界，用户无需修改 graph、`langgraph.json`、SDK 调用或前端协议。
 
 ## 2. 目标架构
 
@@ -29,7 +35,7 @@ GraphHarbor 不重写 Agent Server HTTP API，优先保留官方 `langgraph-api`
                     │
                     ▼
           GraphHarbor Agent Server
-          官方 langgraph-api 能力
+          官方协议兼容能力
                     │
        ┌────────────┴────────────┐
        ▼                         ▼
@@ -310,7 +316,7 @@ P0 graph 全部通过后，才进入生产部署验证；P1/P2 graph 的实验�
 推荐生产拓扑：
 
 ```text
-GraphHarbor Agent Server：容器、systemd 或 Kubernetes
+GraphHarbor Agent Server：systemd、supervisord 或其他主机进程管理
 PostgreSQL：独立服务或托管数据库
 Redis：独立服务或托管 Redis
 ```
@@ -319,6 +325,7 @@ Redis：独立服务或托管 Redis
 
 #### 必需能力
 
+- 首阶段提供本地 API、worker、migration 启动方式；不提供 Docker Compose 或 Kubernetes 资源。
 - health/readiness 检查。
 - 可重复执行的 migration。
 - 明确启动顺序。
@@ -420,14 +427,21 @@ GraphHarbor 只有在以下条件全部满足时，才可以称为“生产级 L
 - PostgreSQL + Redis runtime 基础测试。
 - 本地 PostgreSQL 用户、数据库和 Redis 环境准备。
 - CI、构建和 Trusted Publishing 工作流基础配置。
+- OpenSpec `implement-production-agent-server` 已安装并建立，当前 51 个任务中完成 44 个。
+- LangGraph 目标版本基线和兼容性脚本已通过。
+- 生产 wheel 已去除硬依赖 `langgraph-api`；旧版本仅保留 compatibility extra。
+- 自有 API/migration 入口、worker fail-closed guard、组合 lifespan、Principal/JWKS、run
+  状态机、lease primitive 和 PostgreSQL 002 增量 schema 已落地。
+- 自有 server 已提供 health/discovery、assistants、threads、run CRUD/cancel、v2 SSE 和
+  Protocol v2 thread events；当前核心回归与生产契约测试通过。
+- 官方 Python/JavaScript SDK Core、REST 契约、runtime-service custom routes/lifespan 与五个
+  P0 graph 的真实 HTTP/SDK E2E 已通过；结构化日志与 Prometheus 兼容指标已实测导出。
+- 本地故障验收已覆盖 API/worker/PG/Redis 重启、worker 滚动停机与替换 worker 接管、队列积压、
+  SSE `Last-Event-ID` replay；重启窗口的 run 持久化为 `success`，基础设施重试计数为 1、1、2。
 
 尚未完成：
 
-- 最新目标 `langgraph-api` 版本升级。
-- runtime 与新 Agent Server 的兼容性验收。
-- custom routes 与 lifespan 的组合验收。
-- v2/v3 流式协议端到端验收。
-- 当前项目真实 graph 的 P0 E2E 验收。
-- 多 worker、断线续传和故障恢复验收。
+- 真实网络长连接重连和 v3 graph typed projection E2E。
+- Python 3.11/3.12/3.13 CI、构建、TestPyPI 隔离安装及发布回滚验收。
 
-下一步从阶段 0 开始，先建立真实能力基线，再进行依赖升级。
+下一步完成发布门禁。当前代码尚未达到最终生产发布门禁。

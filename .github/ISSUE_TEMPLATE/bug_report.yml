@@ -35,6 +35,6 @@ body:
     id: env
     attributes:
       label: Environment
-      description: OS, Python, Docker, relevant env vars (redact secrets).
+      description: OS, Python, PostgreSQL/Redis versions, relevant env vars (redact secrets).
     validations:
       required: false

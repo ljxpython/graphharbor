@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end local test runner (macOS/Linux):
-#   compose up → sparse-clone upstream SDK → unit/queue → API server →
+#   host PostgreSQL/Redis check → sparse-clone upstream SDK → unit/queue → API server →
 #   e2e → SDK integration → teardown
 #
 # Usage:
@@ -55,8 +55,6 @@ cleanup() {
     kill "${SERVER_PID}" 2>/dev/null || true
     wait "${SERVER_PID}" 2>/dev/null || true
   fi
-  echo "==> docker compose down"
-  docker compose down --remove-orphans >/dev/null 2>&1 || true
   if [[ "${code}" -ne 0 && -f "${SERVER_LOG}" ]]; then
     echo "==> langgraph-api log (tail):" >&2
     tail -n 80 "${SERVER_LOG}" >&2 || true
@@ -76,17 +74,40 @@ DEFAULT_UPSTREAM_REF="sdk==${SDK_VERSION}"
 UPSTREAM_REF="${1:-${UPSTREAM_LANGGRAPH_REF:-$DEFAULT_UPSTREAM_REF}}"
 echo "    langgraph-sdk=${SDK_VERSION} → upstream ref=${UPSTREAM_REF}"
 
-echo "==> docker compose up (postgres + redis)"
-docker compose up -d postgres redis
+infra_ready() {
+  uv run python - <<'PY'
+import asyncio
+import os
+
+import asyncpg
+from redis.asyncio import from_url
+
+
+async def main() -> None:
+    connection = await asyncpg.connect(os.environ["DATABASE_URI"])
+    try:
+        await connection.execute("SELECT 1")
+    finally:
+        await connection.close()
+    client = from_url(os.environ["REDIS_URI"])
+    try:
+        await client.ping()
+    finally:
+        await client.aclose()
+
+
+asyncio.run(main())
+PY
+}
+
+echo "==> check host PostgreSQL + Redis"
 for i in $(seq 1 60); do
-  if docker compose exec -T postgres pg_isready -U postgres -d langgraph >/dev/null 2>&1 \
-    && docker compose exec -T redis redis-cli ping 2>/dev/null | grep -q PONG; then
+  if infra_ready >/dev/null 2>&1; then
     echo "    infra ready (${i}s)"
     break
   fi
   if [[ "${i}" -eq 60 ]]; then
-    echo "error: postgres/redis not healthy" >&2
-    docker compose ps >&2 || true
+    echo "error: host PostgreSQL/Redis are not reachable via DATABASE_URI/REDIS_URI" >&2
     exit 1
   fi
   sleep 1
@@ -218,4 +239,4 @@ if [[ "${SUITE_CODE}" -ne 0 ]]; then
 fi
 
 echo "==> all suites passed"
-# trap cleanup → stop server + docker compose down
+# trap cleanup → stop server

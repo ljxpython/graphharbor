@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import importlib
-import logging
 import os
 import threading
 import time
@@ -17,9 +16,12 @@ from uuid import UUID
 
 import orjson
 import redis.asyncio as redis
+import structlog
 from redis.driver_info import DriverInfo
 
-logger = logging.getLogger(__name__)
+from langgraph_runtime_pg.metrics import inc as metric_inc, set_gauge
+
+logger = structlog.stdlib.get_logger(__name__)
 
 _REDIS: redis.Redis | None = None
 _REDIS_POOL: redis.ConnectionPool | None = None
@@ -28,9 +30,26 @@ _WAKE_TASK: asyncio.Task | None = None
 # Monotonic wake generation — avoids asyncio.Event wait/clear lost-wakeup races.
 _WAKE_GEN = 0
 
-QUEUE_WAKE_CHANNEL = "langgraph:run_queue"
-RUN_FANOUT_PATTERN = "lg:run-fanout:*"
-THREAD_FANOUT_PATTERN = "lg:thread-fanout:*"
+
+def _namespace() -> str:
+    return os.environ.get("GRAPHHARBOR_REDIS_PREFIX", "graphharbor:runtime").strip(":")
+
+
+def _queue_wake_channel() -> str:
+    return f"{_namespace()}:run-queue"
+
+
+def _job_queue_key() -> str:
+    return f"{_namespace()}:jobs"
+
+
+def _run_fanout_pattern() -> str:
+    return f"{_namespace()}:run-fanout:*"
+
+
+def _thread_fanout_pattern() -> str:
+    return f"{_namespace()}:thread-fanout:*"
+
 
 _REDIS_NOT_CONNECTED = "Redis not connected; call start_stream() first"
 
@@ -94,7 +113,7 @@ def _ensure_uuid(id_: str | UUID) -> UUID:
 
 
 def _heartbeat_key(run_id: UUID | str) -> str:
-    return f"lg:run-heartbeat:{_ensure_uuid(run_id)}"
+    return f"{_namespace()}:run-heartbeat:{_ensure_uuid(run_id)}"
 
 
 def bg_job_heartbeat_secs() -> float:
@@ -113,6 +132,14 @@ def bg_job_heartbeat_secs() -> float:
 def _heartbeat_ttl_secs() -> int:
     """Redis heartbeat key TTL (~2x interval)."""
     return max(int(bg_job_heartbeat_secs() * 2), 4)
+
+
+def _replay_maxlen() -> int:
+    raw = os.environ.get("GRAPHHARBOR_REDIS_REPLAY_MAXLEN", "2000")
+    try:
+        return max(int(raw), 100)
+    except ValueError:
+        return 2000
 
 
 def heartbeat_refresh_interval_secs() -> float:
@@ -140,7 +167,7 @@ async def has_run_heartbeat(run_id: UUID | str) -> bool | None:
     try:
         return bool(await _REDIS.exists(_heartbeat_key(run_id)))
     except Exception:
-        logger.exception("Failed to check run heartbeat for %s", run_id)
+        logger.exception("failed to check run heartbeat", run_id=str(run_id))
         return None
 
 
@@ -189,19 +216,19 @@ def ms_seq_id_sort_key(mid: str) -> tuple[int, int, str]:
 
 
 def _stream_key(thread_id: Any, run_id: UUID) -> str:
-    return f"lg:run-stream:{thread_id}:{run_id}"
+    return f"{_namespace()}:run-stream:{thread_id}:{run_id}"
 
 
 def _control_key(thread_id: Any, run_id: UUID) -> str:
-    return f"lg:run-control:{thread_id}:{run_id}"
+    return f"{_namespace()}:run-control:{thread_id}:{run_id}"
 
 
 def _fanout_channel(thread_id: Any, run_id: UUID) -> str:
-    return f"lg:run-fanout:{thread_id}:{run_id}"
+    return f"{_namespace()}:run-fanout:{thread_id}:{run_id}"
 
 
 def _thread_fanout_channel(thread_id: UUID) -> str:
-    return f"lg:thread-fanout:{thread_id}"
+    return f"{_namespace()}:thread-fanout:{thread_id}"
 
 
 THREADLESS_KEY = "no-thread"
@@ -214,7 +241,7 @@ def _channel_str(channel: Any) -> str:
 
 
 def _parse_run_fanout_channel(channel: str) -> tuple[Any, UUID] | None:
-    prefix = "lg:run-fanout:"
+    prefix = f"{_namespace()}:run-fanout:"
     if not channel.startswith(prefix):
         return None
     rest = channel[len(prefix) :]
@@ -234,7 +261,7 @@ def _parse_run_fanout_channel(channel: str) -> tuple[Any, UUID] | None:
 
 
 def _parse_thread_fanout_channel(channel: str) -> UUID | None:
-    prefix = "lg:thread-fanout:"
+    prefix = f"{_namespace()}:thread-fanout:"
     if not channel.startswith(prefix):
         return None
     try:
@@ -323,7 +350,7 @@ async def _fanout_put(queues: list, message: Message) -> None:
     results = await asyncio.gather(*[q.put(message) for q in queues], return_exceptions=True)
     for r in results:
         if isinstance(r, Exception):
-            logger.exception("Failed to put message in queue: %s", r)
+            logger.exception("failed to put message in queue", error=str(r))
 
 
 class StreamManager:
@@ -379,7 +406,7 @@ class StreamManager:
         try:
             data = await self._redis.get(_control_key(thread_id, run_id))
         except Exception:
-            logger.exception("Failed to read control key for run %s", run_id)
+            logger.exception("failed to read control key", run_id=str(run_id))
             return None
         if data is None:
             return None
@@ -445,7 +472,7 @@ class StreamManager:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.exception("%s mux failed; reconnecting", pattern)
+                logger.exception("redis fanout mux failed; reconnecting", pattern=pattern)
                 await _reconnect_backoff()
             finally:
                 try:
@@ -476,11 +503,11 @@ class StreamManager:
 
     async def _run_fanout_mux(self) -> None:
         """Shared pattern-subscribe mux for all run fanout channels."""
-        await self._pubsub_mux_loop(RUN_FANOUT_PATTERN, self._handle_run_fanout_message)
+        await self._pubsub_mux_loop(_run_fanout_pattern(), self._handle_run_fanout_message)
 
     async def _thread_fanout_mux(self) -> None:
         """Shared pattern-subscribe mux for all thread fanout channels."""
-        await self._pubsub_mux_loop(THREAD_FANOUT_PATTERN, self._handle_thread_fanout_message)
+        await self._pubsub_mux_loop(_thread_fanout_pattern(), self._handle_thread_fanout_message)
 
     # -- Put / publish -------------------------------------------------------
 
@@ -506,6 +533,8 @@ class StreamManager:
             entry_id = await self._redis.xadd(
                 _stream_key(thread_id, run_id),
                 {b"topic": message.topic, b"data": message.data},
+                maxlen=_replay_maxlen(),
+                approximate=True,
             )
             message.id = entry_id if isinstance(entry_id, bytes) else str(entry_id).encode()
         else:
@@ -533,6 +562,10 @@ class StreamManager:
             )
 
         envelope = _encode_envelope(message, control=control)
+        metric_inc(
+            "graphharbor_redis_events_published_total",
+            labels={"kind": "control" if control else "run"},
+        )
         await self._redis.publish(_fanout_channel(thread_id, run_id), envelope)
 
     async def put_thread(
@@ -548,6 +581,7 @@ class StreamManager:
         await self._deliver_thread_local(thread_id, message)
 
         envelope = _encode_envelope(message, control=False)
+        metric_inc("graphharbor_redis_events_published_total", labels={"kind": "thread"})
         await self._redis.publish(_thread_fanout_channel(thread_id), envelope)
 
     # -- Queue / subscriber management ---------------------------------------
@@ -710,7 +744,7 @@ class StreamManager:
         try:
             from_redis = await self.arestore_messages(run_id, thread_id, message_id)
         except Exception:
-            logger.exception("Redis stream restore failed for run %s", run_id)
+            logger.exception("redis stream restore failed", run_id=str(run_id))
             from_redis = []
         if from_redis:
             return from_redis
@@ -729,7 +763,7 @@ class StreamManager:
             pipe.expire(_stream_key(thread_id, run_id), max(int(stream_ttl_secs), 60))
             await pipe.execute()
         except Exception:
-            logger.exception("Failed to clear Redis buffers for run %s", run_id)
+            logger.exception("failed to clear redis buffers", run_id=str(run_id))
 
     def _drop_local_store_sync(self, thread_id: Any, run_id: UUID) -> None:
         if thread_id in self.message_stores:
@@ -804,7 +838,7 @@ async def _wake_listener_loop() -> None:
     while _REDIS is not None and _WAKE_EVENT is not None:
         pubsub = _REDIS.pubsub()
         try:
-            await pubsub.subscribe(QUEUE_WAKE_CHANNEL)
+            await pubsub.subscribe(_queue_wake_channel())
             async for msg in pubsub.listen():
                 if msg is None or msg.get("type") != "message":
                     continue
@@ -812,11 +846,11 @@ async def _wake_listener_loop() -> None:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Queue wake listener failed; reconnecting")
+            logger.exception("redis queue wake listener failed; reconnecting")
             await _reconnect_backoff()
         finally:
             try:
-                await pubsub.unsubscribe(QUEUE_WAKE_CHANNEL)
+                await pubsub.unsubscribe(_queue_wake_channel())
                 await pubsub.aclose()
             except Exception:
                 pass
@@ -843,6 +877,7 @@ async def start_stream() -> None:
     client = redis.Redis(connection_pool=_REDIS_POOL)
     await client.ping()
     _REDIS = client
+    set_gauge("graphharbor_redis_connected", 1)
     stream_manager = StreamManager(_REDIS)
     stream_manager.start_mux()
 
@@ -874,6 +909,7 @@ async def stop_stream() -> None:
     if _REDIS_POOL is not None:
         await _REDIS_POOL.aclose()
         _REDIS_POOL = None
+    set_gauge("graphharbor_redis_connected", 0)
 
 
 def get_stream_manager() -> StreamManager:
@@ -884,6 +920,11 @@ def get_stream_manager() -> StreamManager:
     return stream_manager
 
 
+def stream_ready() -> bool:
+    """Whether the Redis transport and fanout manager are initialized."""
+    return stream_manager is not None and _REDIS is not None
+
+
 def _signal_local_wake() -> None:
     """Bump wake generation and set the shared Event."""
     global _WAKE_GEN
@@ -892,12 +933,47 @@ def _signal_local_wake() -> None:
         _WAKE_EVENT.set()
 
 
+async def enqueue_run(run_id: UUID | str) -> None:
+    """Add a namespaced run hint; PostgreSQL remains the claim source of truth."""
+    if _REDIS is None:
+        return
+    depth = await _REDIS.rpush(_job_queue_key(), str(_ensure_uuid(run_id)).encode())
+    metric_inc("graphharbor_queue_enqueued_total")
+    set_gauge("graphharbor_queue_depth", int(depth))
+    await _REDIS.publish(_queue_wake_channel(), b"wake")
+
+
+async def transport_stats() -> dict[str, int]:
+    """Return Redis transport gauges for the local metrics endpoint."""
+    if _REDIS is None:
+        return {"connected": 0, "queue_depth": 0, "replay_streams": 0}
+    try:
+        queue_depth = int(await _REDIS.llen(_job_queue_key()))
+        keys = [key async for key in _REDIS.scan_iter(match=_run_fanout_pattern())]
+        return {"connected": 1, "queue_depth": queue_depth, "replay_streams": len(keys)}
+    except Exception:
+        metric_inc("graphharbor_redis_healthcheck_failures_total")
+        return {"connected": 0, "queue_depth": 0, "replay_streams": 0}
+
+
+async def dequeue_run_hint() -> str | None:
+    """Consume one Redis queue hint, tolerating stale/duplicate entries."""
+    if _REDIS is None:
+        return None
+    value = await _REDIS.lpop(_job_queue_key())
+    if value is None:
+        set_gauge("graphharbor_queue_depth", 0)
+        return None
+    set_gauge("graphharbor_queue_depth", int(await _REDIS.llen(_job_queue_key())))
+    return value.decode() if isinstance(value, bytes) else str(value)
+
+
 async def wake_run_queue() -> None:
     """Notify all replicas that a pending run is available."""
     _signal_local_wake()
     if _REDIS is None:
         return
-    await _REDIS.publish(QUEUE_WAKE_CHANNEL, b"wake")
+    await _REDIS.publish(_queue_wake_channel(), b"wake")
 
 
 async def wait_for_queue_wake(timeout: float = 0.5) -> bool:  # NOSONAR

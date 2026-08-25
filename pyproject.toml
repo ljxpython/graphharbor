@@ -18,6 +18,8 @@ dev = [
     # Workspace packages under test / for local CLI.
     "graphharbor-runtime",
     "graphharbor",
+    # Internal comparison profile only; GraphHarbor production has no langgraph-api dependency.
+    "langgraph-api==0.13.0",
     # Test + lint tooling (not shipped with the libs).
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
@@ -40,12 +42,12 @@ graphharbor = { workspace = true }
 # Keep the whole resolver on the frozen upstream set (incl. transitive pulls).
 [tool.uv]
 constraint-dependencies = [
-    "langgraph-api==0.11.1",
-    "langgraph-runtime-inmem==0.31.1",
-    "langgraph-sdk==0.4.2",
-    "langgraph==1.2.9",
-    "langgraph-checkpoint==4.1.1",
-    "langgraph-checkpoint-postgres==3.1.0",
+    "langgraph-api==0.13.0",
+    "langgraph-runtime-inmem==0.33.0",
+    "langgraph-sdk==0.4.3",
+    "langgraph==1.2.11",
+    "langgraph-checkpoint==4.2.0",
+    "langgraph-checkpoint-postgres==3.1.2",
 ]
 package = false
 

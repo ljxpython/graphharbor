@@ -1,6 +1,6 @@
 # graphharbor
 
-Minimal CLI for running the official LangGraph Agent Server on the open
+Minimal CLI for running the self-hosted GraphHarbor Agent Server on the open
 [`graphharbor-runtime`](https://pypi.org/project/graphharbor-runtime/) backend
 (Postgres + Redis).
 
@@ -13,11 +13,11 @@ graphharbor serve [OPTIONS]
 Requires a `langgraph.json` in the working directory (same format as
 [`langgraph-cli`](https://github.com/langchain-ai/langgraph/tree/main/libs/cli))
 and `DATABASE_URI` / `REDIS_URI` (see repo `.env.example`). Bring your own
-Postgres + Redis (for example via the repo `docker-compose.yml`).
+PostgreSQL and Redis reachable from the host.
 
 ```bash
 cp .env.example .env
-docker compose up -d postgres redis
+# Start PostgreSQL and Redis with your host's service manager.
 
 # Dev (hot reload)
 graphharbor serve --reload -c langgraph.json

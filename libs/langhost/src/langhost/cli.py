@@ -1,22 +1,24 @@
-"""GraphHarbor CLI — thin wrappers around langgraph-cli and langgraph_api."""
+"""GraphHarbor CLI — config loading plus the self-owned Agent Server."""
 
 from __future__ import annotations
 
 import logging
 import os
 import pathlib
+import socket
 import sys
 from collections.abc import Sequence
 from typing import Any, cast
 
 import click
 from dotenv import load_dotenv
-from langgraph_api.cli import _resolve_port, run_server
 from langgraph_cli.config import validate_config_file
 from langgraph_cli.constants import DEFAULT_CONFIG
 from pyfiglet import figlet_format
 
+from langgraph_runtime_pg.graph_registry import resolve_config_base_dir
 from langhost import __version__
+from langhost.server import run_server
 
 # Always the open Postgres+Redis runtime.
 RUNTIME_EDITION = "pg"
@@ -26,6 +28,20 @@ DEFAULT_STUDIO_ORIGIN = "https://smith.langchain.com"
 
 # Upstream run_server always logs an inmem-oriented welcome; replace it for GraphHarbor.
 _UPSTREAM_WELCOME_MARKER = "This in-memory server is designed for development and testing"
+
+
+def _resolve_port(host: str, port: int | None) -> int:
+    """Return the requested port or the first free port, without private API imports."""
+    requested = port if port is not None else DEFAULT_PORT
+    with socket.socket(
+        socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM
+    ) as sock:
+        try:
+            sock.bind((host, requested))
+        except OSError:
+            sock.bind((host, 0))
+            return int(sock.getsockname()[1])
+    return requested
 
 
 def _display_host(host: str) -> str:
@@ -288,7 +304,7 @@ def cli() -> None:
     default="INFO",
     show_default=True,
     type=click.Choice(LOG_LEVELS, case_sensitive=False),
-    help="Log level for uvicorn / langgraph_api.server.",
+    help="Log level for uvicorn / GraphHarbor Agent Server.",
 )
 @click.option(
     "--ssl-certfile",
@@ -328,10 +344,6 @@ def serve(
         reload, workers, ssl_certfile, ssl_keyfile, tunnel, wait_for_client, debug_port
     )
 
-    database_uri, redis_uri, n_jobs_per_worker = _prepare_serve_env(
-        env_file, database_uri, redis_uri, n_jobs_per_worker
-    )
-
     config_json = validate_config_file(config)
     if config_json.get("node_version"):
         raise click.UsageError(
@@ -339,7 +351,16 @@ def serve(
         )
 
     cwd = pathlib.Path.cwd()
-    sys.path.append(str(cwd))
+    config_base_dir = resolve_config_base_dir(config, cast(dict[str, Any], config_json))
+    config_env = config_json.get("env")
+    if env_file is None and isinstance(config_env, str):
+        load_dotenv(config_base_dir / config_env, override=False)
+    database_uri, redis_uri, n_jobs_per_worker = _prepare_serve_env(
+        env_file, database_uri, redis_uri, n_jobs_per_worker
+    )
+    for import_root in (cwd, config_base_dir):
+        if str(import_root) not in sys.path:
+            sys.path.append(str(import_root))
     for dep in config_json.get("dependencies", []):
         dep_path = cwd / dep
         if dep_path.is_dir() and dep_path.exists():
@@ -358,7 +379,7 @@ def serve(
         studio_origin=studio_url,
         mount_prefix=mount_prefix,
     )
-    api_cli_logger = logging.getLogger("langgraph_api.cli")
+    api_cli_logger = logging.getLogger("graphharbor.cli")
     banner_filter = _ReplaceWelcomeBanner(welcome)
     api_cli_logger.addFilter(banner_filter)
     try:
@@ -392,10 +413,99 @@ def serve(
             __database_uri__=database_uri,
             __redis_uri__=redis_uri,
             __migrations_path__=None,
+            config=config_json,
+            base_dir=config_base_dir,
             **uvicorn_kwargs,
         )
     finally:
         api_cli_logger.removeFilter(banner_filter)
+
+
+@cli.command("migrate", help="Apply the explicit PostgreSQL schema migration job.")
+@click.argument(
+    "migration_action",
+    type=click.Choice(["upgrade", "current", "history", "stamp", "downgrade"]),
+    default="upgrade",
+)
+@click.argument("revision", required=False)
+def migrate_command(migration_action: str, revision: str | None) -> None:
+    """Run migrations separately from API startup."""
+    from langgraph_runtime_pg import migrate
+
+    if migration_action == "upgrade":
+        click.echo(f"upgraded to {migrate.upgrade_head()}")
+    elif migration_action == "stamp":
+        migrate.stamp_head()
+        click.echo("stamped head")
+    elif migration_action == "current":
+        migrate.current()
+    elif migration_action == "history":
+        migrate.history()
+    else:
+        migrate.downgrade(revision or "-1")
+        click.echo(f"downgraded to {revision or '-1'}")
+
+
+@cli.command("worker", help="Run the GraphHarbor worker against host PostgreSQL and Redis.")
+@click.option(
+    "--config",
+    "config_path",
+    default=DEFAULT_CONFIG,
+    show_default=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=pathlib.Path),
+    help="Path to langgraph.json used for graph discovery.",
+)
+@click.option("--env-file", type=click.Path(exists=True, dir_okay=False, path_type=pathlib.Path))
+@click.option("--database-uri", default=None)
+@click.option("--redis-uri", default=None)
+@click.option("--n-jobs-per-worker", default=1, type=click.IntRange(min=1), show_default=True)
+@click.option(
+    "--compatibility-spike",
+    is_flag=True,
+    help="Use the legacy private worker only for comparison tests; never use in production.",
+)
+def worker_command(
+    config_path: pathlib.Path,
+    env_file: pathlib.Path | None,
+    database_uri: str | None,
+    redis_uri: str | None,
+    n_jobs_per_worker: int,
+    compatibility_spike: bool,
+) -> None:
+    """Start only the queue worker; migrations remain an explicit command."""
+    worker_config = validate_config_file(config_path)
+    worker_base_dir = resolve_config_base_dir(config_path, cast(dict[str, Any], worker_config))
+    worker_env = worker_config.get("env")
+    if env_file is None and isinstance(worker_env, str):
+        load_dotenv(worker_base_dir / worker_env, override=False)
+    database_uri, redis_uri, _ = _prepare_serve_env(
+        env_file, database_uri, redis_uri, n_jobs_per_worker
+    )
+    os.environ["DATABASE_URI"] = database_uri
+    os.environ["REDIS_URI"] = redis_uri
+    os.environ["GRAPHHARBOR_COMPATIBILITY_SPIKE"] = "1" if compatibility_spike else "0"
+
+    if compatibility_spike:
+        from langgraph_runtime_pg.production import lifespan
+        from langgraph_runtime_pg.queue import queue
+
+        async def _run_compatibility() -> None:
+            async with lifespan():
+                await queue()
+
+        import asyncio
+
+        asyncio.run(_run_compatibility())
+        return
+
+    async def _run() -> None:
+        from langgraph_runtime_pg.production_worker import run_worker
+
+        await run_worker(config_path)
+
+    import asyncio
+
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":
