@@ -76,5 +76,5 @@
 - [x] 10.1 Run Python 3.11/3.12/3.13 CI and official Python/JavaScript SDK contract suites.
 - [x] 10.2 Run security, tenant-isolation, migration, fault-recovery and P0 graph regression suites.
 - [x] 10.3 Build lockstep `graphharbor` and `graphharbor-runtime` packages and verify no License Key is required.
-- [ ] 10.4 Publish to TestPyPI only after all Core gates pass; validate isolated installation and rollback.
+- [x] 10.4 Publish to TestPyPI only after all Core gates pass; validate isolated installation and rollback.
 - [x] 10.5 Produce compatibility matrix, deployment runbook, incident recovery runbook and release notes before PyPI production release.
