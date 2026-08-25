@@ -86,7 +86,14 @@ from langhost.core_api import (
     threads_update_state,
 )
 from langhost.protocol_api import protocol_commands, protocol_event_stream
-from langhost.streaming import runs_stream, runs_stream_existing
+from langhost.store_api import (
+    store_delete,
+    store_get,
+    store_list_namespaces,
+    store_put,
+    store_search,
+)
+from langhost.streaming import runs_stream, runs_stream_existing, thread_stream
 
 
 def _plain(value: Any) -> Any:
@@ -198,6 +205,7 @@ async def _openapi(request: Request) -> JSONResponse:
                 "/threads/{thread_id}/state/checkpoint": {"post": {}},
                 "/threads/{thread_id}/state/{checkpoint_id}": {"get": {}},
                 "/threads/{thread_id}/history": {"post": {}},
+                "/threads/{thread_id}/stream": {"get": {}},
                 "/runs": {"post": {}},
                 "/runs/wait": {"post": {}},
                 "/runs/batch": {"post": {}},
@@ -213,6 +221,9 @@ async def _openapi(request: Request) -> JSONResponse:
                 "/threads/{thread_id}/runs/{run_id}/join": {"get": {}},
                 "/threads/{thread_id}/commands": {"post": {}},
                 "/threads/{thread_id}/stream/events": {"post": {}},
+                "/store/items": {"get": {}, "put": {}, "delete": {}},
+                "/store/items/search": {"post": {}},
+                "/store/namespaces": {"post": {}},
                 "/runs/crons": {"post": {}},
                 "/runs/crons/search": {"post": {}},
                 "/runs/crons/count": {"post": {}},
@@ -745,6 +756,7 @@ def create_app(
         Route("/threads/{thread_id}/state", threads_state, methods=["GET"]),
         Route("/threads/{thread_id}/state", threads_update_state, methods=["POST", "PATCH"]),
         Route("/threads/{thread_id}/history", threads_history, methods=["POST"]),
+        Route("/threads/{thread_id}/stream", thread_stream, methods=["GET"]),
         Route("/threads/{thread_id}", threads_get, methods=["GET"]),
         Route("/threads/{thread_id}", threads_update, methods=["PATCH"]),
         Route("/threads/{thread_id}", threads_delete, methods=["DELETE"]),
@@ -761,6 +773,11 @@ def create_app(
         Route("/threads/{thread_id}/runs/stream", runs_stream, methods=["POST"]),
         Route("/threads/{thread_id}/commands", protocol_commands, methods=["POST"]),
         Route("/threads/{thread_id}/stream/events", protocol_event_stream, methods=["POST"]),
+        Route("/store/items", store_put, methods=["PUT"]),
+        Route("/store/items", store_get, methods=["GET"]),
+        Route("/store/items", store_delete, methods=["DELETE"]),
+        Route("/store/items/search", store_search, methods=["POST"]),
+        Route("/store/namespaces", store_list_namespaces, methods=["POST"]),
         Route("/threads/{thread_id}/runs", runs_create_thread, methods=["POST"]),
         Route("/threads/{thread_id}/runs/{run_id}/cancel", runs_cancel, methods=["POST"]),
         Route("/threads/{thread_id}/runs/{run_id}/join", runs_join, methods=["GET"]),

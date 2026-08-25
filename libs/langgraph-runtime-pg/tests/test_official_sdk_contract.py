@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from asgi_lifespan import LifespanManager
@@ -51,6 +51,16 @@ async def test_official_python_sdk_core_surface_is_complete(pg_runtime, tmp_path
                 metadata={"suite": "core"},
             )
             assert (await client.assistants.get(assistant["assistant_id"]))["name"] == "contract"
+            await client.store.put_item(["sdk", "contract"], "item", {"value": 1})
+            item = await client.store.get_item(["sdk", "contract"], "item")
+            assert item["value"] == {"value": 1}
+            found_items = await client.store.search_items(["sdk"])
+            assert found_items["items"][0]["key"] == "item"
+            assert await client.store.list_namespaces(prefix=["sdk"]) == {
+                "namespaces": [["sdk", "contract"]]
+            }
+            await client.store.delete_item(["sdk", "contract"], "item")
+            assert await client.store.get_item(["sdk", "contract"], "item") is None
             assert await client.assistants.count(graph_id="assistant") == 1
             assert (await client.assistants.search(graph_id="assistant"))[0][
                 "assistant_id"
@@ -151,6 +161,59 @@ async def test_official_python_sdk_core_surface_is_complete(pg_runtime, tmp_path
 
     # Keep this contract test deterministic if the SDK adds an extra JSON field.
     assert json.dumps(assistant, sort_keys=True)
+
+
+@pytest.mark.asyncio
+async def test_thread_stream_projects_durable_events_and_resumes(pg_runtime, monkeypatch) -> None:
+    from starlette.requests import Request
+
+    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.models import RuntimeEventRow, ThreadRow
+    from langhost.streaming import thread_stream
+
+    class FakeManager:
+        async def add_thread_stream(self, _thread_id: UUID) -> asyncio.Queue:
+            return asyncio.Queue()
+
+        async def remove_thread_stream(self, _thread_id: UUID, _queue: asyncio.Queue) -> None:
+            return None
+
+    thread_id = uuid4()
+    async with connect() as conn:
+        conn.session.add(ThreadRow(thread_id=thread_id, metadata_={}, config={}, interrupts={}))
+        await conn.session.flush()
+        for sequence, value in enumerate((1, 2), start=1):
+            conn.session.add(
+                RuntimeEventRow(
+                    thread_id=thread_id,
+                    sequence=sequence,
+                    topic="values",
+                    namespace=[],
+                    payload={"event": "values", "data": {"value": value}},
+                )
+            )
+
+    monkeypatch.setattr("langhost.streaming.get_stream_manager", lambda: FakeManager())
+
+    def request(last_event_id: str) -> Request:
+        return Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": f"/threads/{thread_id}/stream",
+                "query_string": b"stream_modes=run_modes",
+                "headers": [(b"last-event-id", last_event_id.encode())],
+                "path_params": {"thread_id": str(thread_id)},
+            }
+        )
+
+    initial = await thread_stream(request("-"))
+    assert "id: 1-0\nevent: values\ndata: {\"value\":1}" in await anext(initial.body_iterator)
+    await initial.body_iterator.aclose()
+
+    resumed = await thread_stream(request("1-0"))
+    assert "id: 2-0\nevent: values\ndata: {\"value\":2}" in await anext(resumed.body_iterator)
+    await resumed.body_iterator.aclose()
 
 
 @pytest.mark.asyncio

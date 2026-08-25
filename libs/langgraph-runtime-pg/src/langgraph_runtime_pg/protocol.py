@@ -76,9 +76,7 @@ CORE_CAPABILITIES = (
     Capability("stream_v2", "core", True),
     Capability("events_v2", "core", True),
     Capability("events_v3", "core", True),
-    Capability(
-        "store", "extended", False, "Extended store remains outside the foundation HTTP slice"
-    ),
+    Capability("store", "extended", True),
 )
 
 

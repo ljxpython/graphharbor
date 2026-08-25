@@ -53,6 +53,10 @@ async def test_core_rest_contract_covers_resources_and_errors(pg_runtime, tmp_pa
             "/runs/crons/count": {"post"},
             "/threads/{thread_id}/commands": {"post"},
             "/threads/{thread_id}/stream/events": {"post"},
+            "/threads/{thread_id}/stream": {"get"},
+            "/store/items": {"get", "put", "delete"},
+            "/store/items/search": {"post"},
+            "/store/namespaces": {"post"},
         }.items():
             assert path in openapi["paths"]
             assert methods <= set(openapi["paths"][path])
@@ -63,6 +67,30 @@ async def test_core_rest_contract_covers_resources_and_errors(pg_runtime, tmp_pa
         assert assistant_response.status_code == 200, assistant_response.text
         assistant = assistant_response.json()
         assistant_id = assistant["assistant_id"]
+
+        namespace = ["rest", "contract"]
+        assert (
+            await client.put(
+                "/store/items", json={"namespace": namespace, "key": "item", "value": {"n": 1}}
+            )
+        ).status_code == 204
+        item = await client.get("/store/items", params={"namespace": "rest.contract", "key": "item"})
+        assert item.status_code == 200
+        assert item.json()["namespace"] == namespace
+        assert item.json()["value"] == {"n": 1}
+        search = await client.post("/store/items/search", json={"namespace_prefix": ["rest"]})
+        assert search.status_code == 200
+        assert search.json()["items"][0]["key"] == "item"
+        namespaces = await client.post("/store/namespaces", json={"prefix": ["rest"]})
+        assert namespaces.json() == {"namespaces": [namespace]}
+        assert (
+            await client.request(
+                "DELETE", "/store/items", json={"namespace": namespace, "key": "item"}
+            )
+        ).status_code == 204
+        assert (
+            await client.get("/store/items", params={"namespace": "rest.contract", "key": "item"})
+        ).json() is None
 
         assert (await client.get(f"/assistants/{assistant_id}")).status_code == 200
         assert (
@@ -160,6 +188,5 @@ async def test_core_rest_contract_covers_resources_and_errors(pg_runtime, tmp_pa
         assert "graphharbor_redis_connected" in metrics.text
         assert "graphharbor_runs_created_total" in metrics.text
 
-        unavailable = await client.get("/store/items")
-        assert unavailable.status_code in {404, 501}
+        assert (await client.get("/store/items")).status_code == 422
         assert (await client.get("/assistants/not-a-uuid")).status_code == 404

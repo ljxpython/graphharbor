@@ -12,6 +12,7 @@ import argparse
 import json
 import re
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -132,13 +133,21 @@ def compare(official: Response, graphharbor: Response, *, path: str) -> list[Dif
 
 
 def _request(
-    base_url: str, method: str, path: str, timeout: float, body: Any | None = None
+    base_url: str,
+    method: str,
+    path: str,
+    timeout: float,
+    body: Any | None = None,
+    headers: dict[str, str] | None = None,
 ) -> Response:
     data = json.dumps(body).encode("utf-8") if body is not None else None
+    request_headers = dict(headers or {})
+    if data is not None:
+        request_headers.setdefault("content-type", "application/json")
     request = Request(
         f"{base_url.rstrip('/')}{path}",
         data=data,
-        headers={"content-type": "application/json"} if data is not None else {},
+        headers=request_headers,
         method=method,
     )
     try:
@@ -155,6 +164,57 @@ def _request(
         headers={key.lower(): value.split(";", 1)[0] for key, value in response.headers.items()},
         body=body,
     )
+
+
+def _read_sse(
+    response: Any, *, frames: int, ready: threading.Event | None = None
+) -> Response:
+    if ready is not None:
+        ready.set()
+    lines: list[str] = []
+    complete = 0
+    has_content = False
+    try:
+        while complete < frames:
+            raw = response.readline()
+            if not raw:
+                break
+            line = raw.decode("utf-8")
+            lines.append(line)
+            if line in {"\n", "\r\n"}:
+                if has_content:
+                    complete += 1
+                    has_content = False
+            elif line.startswith(("id:", "event:", "data:")):
+                has_content = True
+    finally:
+        response.close()
+    return Response(
+        status=response.status,
+        headers={key.lower(): value.split(";", 1)[0] for key, value in response.headers.items()},
+        body="".join(lines),
+    )
+
+
+def _request_sse(
+    base_url: str,
+    method: str,
+    path: str,
+    timeout: float,
+    frames: int,
+    headers: dict[str, str] | None = None,
+    ready: threading.Event | None = None,
+) -> Response:
+    request = Request(
+        f"{base_url.rstrip('/')}{path}",
+        headers=headers or {},
+        method=method,
+    )
+    try:
+        response = urlopen(request, timeout=timeout)
+    except HTTPError as error:
+        response = error
+    return _read_sse(response, frames=frames, ready=ready)
 
 
 def _parse_probe(value: str) -> tuple[str, str]:
@@ -207,7 +267,35 @@ def _load_scenario(path: str) -> list[dict[str, Any]]:
             raise ValueError(f"scenario step {name!r} has an invalid HTTP method")
         if not isinstance(request_path, str) or not request_path.startswith("/"):
             raise ValueError(f"scenario step {name!r} needs an absolute request path")
-        steps.append({"name": name, "method": method.upper(), "path": request_path, "body": raw.get("body")})
+        headers = raw.get("headers") or {}
+        if not isinstance(headers, dict) or not all(
+            isinstance(key, str) and isinstance(value, str) for key, value in headers.items()
+        ):
+            raise ValueError(f"scenario step {name!r} headers must be a string map")
+        stream = raw.get("stream")
+        if stream is not None:
+            if not isinstance(stream, dict) or not isinstance(stream.get("frames"), int):
+                raise ValueError(f"scenario step {name!r} stream needs a positive frame count")
+            trigger = stream.get("trigger")
+            if (
+                stream["frames"] < 1
+                or not isinstance(trigger, dict)
+                or not isinstance(trigger.get("method"), str)
+                or trigger["method"].upper() not in _HTTP_METHODS
+                or not isinstance(trigger.get("path"), str)
+                or not trigger["path"].startswith("/")
+            ):
+                raise ValueError(f"scenario step {name!r} has an invalid stream trigger")
+        steps.append(
+            {
+                "name": name,
+                "method": method.upper(),
+                "path": request_path,
+                "body": raw.get("body"),
+                "headers": headers,
+                "stream": stream,
+            }
+        )
         names.add(name)
     return steps
 
@@ -247,6 +335,98 @@ def _compare_openapi(
         if path not in ignored_paths and isinstance(value, dict)
     }
     return _differences(official_paths, graphharbor_paths, "$.openapi.paths")
+
+
+def _capture_stream(
+    target: list[Response | BaseException],
+    ready: threading.Event,
+    base_url: str,
+    method: str,
+    path: str,
+    timeout: float,
+    frames: int,
+    headers: dict[str, str],
+) -> None:
+    try:
+        target.append(
+            _request_sse(
+                base_url, method, path, timeout, frames, headers=headers, ready=ready
+            )
+        )
+    except BaseException as error:
+        target.append(error)
+        ready.set()
+
+
+def _triggered_streams(
+    *,
+    official_url: str,
+    graphharbor_url: str,
+    step: dict[str, Any],
+    official_responses: dict[str, Any],
+    graphharbor_responses: dict[str, Any],
+    timeout: float,
+) -> tuple[Response, Response]:
+    stream = step["stream"]
+    assert isinstance(stream, dict)
+    trigger = stream["trigger"]
+    assert isinstance(trigger, dict)
+    resolved: list[tuple[str, Any, Any, dict[str, str], dict[str, str]]] = []
+    for responses in (official_responses, graphharbor_responses):
+        resolved.append(
+            (
+                _resolve_references(step["path"], responses),
+                _resolve_references(trigger.get("path"), responses),
+                _resolve_references(trigger.get("body"), responses),
+                _resolve_references(step["headers"], responses),
+                _resolve_references(trigger.get("headers") or {}, responses),
+            )
+        )
+    captures: list[list[Response | BaseException]] = [[], []]
+    ready = [threading.Event(), threading.Event()]
+    threads = [
+        threading.Thread(
+            target=_capture_stream,
+            args=(
+                captures[index],
+                ready[index],
+                base_url,
+                step["method"],
+                resolved[index][0],
+                timeout,
+                stream["frames"],
+                resolved[index][3],
+            ),
+            daemon=True,
+        )
+        for index, base_url in enumerate((official_url, graphharbor_url))
+    ]
+    for thread in threads:
+        thread.start()
+    if not all(event.wait(timeout) for event in ready):
+        raise RuntimeError("thread stream did not establish before the timeout")
+    for index, base_url in enumerate((official_url, graphharbor_url)):
+        _request(
+            base_url,
+            str(trigger["method"]).upper(),
+            resolved[index][1],
+            timeout,
+            resolved[index][2],
+            resolved[index][4],
+        )
+    for thread in threads:
+        thread.join(timeout)
+    if any(thread.is_alive() for thread in threads):
+        raise RuntimeError("thread stream did not emit the requested frame count")
+    responses: list[Response] = []
+    for capture in captures:
+        if not capture:
+            raise RuntimeError("thread stream produced no response")
+        result = capture[0]
+        if isinstance(result, BaseException):
+            raise result
+        responses.append(result)
+    return responses[0], responses[1]
 
 
 def main() -> int:

@@ -5,18 +5,19 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 
 from langgraph_runtime_pg.auth import in_principal_scope, principal_from_scope
 from langgraph_runtime_pg.database import connect
 from langgraph_runtime_pg.metrics import inc as metric_inc
-from langgraph_runtime_pg.models import RunRow, RuntimeEventRow
+from langgraph_runtime_pg.models import RunRow, RuntimeEventRow, ThreadRow
 from langgraph_runtime_pg.protocol import RunStatus, project_v3_event
 from langgraph_runtime_pg.redis_stream import Message, get_stream_manager
 
@@ -77,6 +78,130 @@ def _event_envelope(row: RuntimeEventRow) -> dict[str, Any]:
         "event": row.payload,
         "namespace": list(row.namespace or []),
     }
+
+
+_REDIS_STREAM_ID = re.compile(r"^\d+-\d+$")
+
+
+def _thread_stream_modes(request: Request) -> set[str] | JSONResponse:
+    raw = request.query_params.get("stream_modes")
+    modes = {item.strip() for item in raw.split(",")} if raw else {"run_modes"}
+    invalid = modes - {"lifecycle", "run_modes", "state_update"}
+    if invalid:
+        return JSONResponse({"detail": f"Invalid stream mode: {sorted(invalid)[0]}"}, status_code=422)
+    return modes
+
+
+def _thread_cursor(value: str | None) -> int | JSONResponse:
+    if value is None:
+        return -1
+    if value == "-":
+        return 0
+    if not _REDIS_STREAM_ID.fullmatch(value):
+        return JSONResponse(
+            {"detail": "Invalid last-event-id: must be a valid Redis stream ID"}, status_code=422
+        )
+    return int(value.partition("-")[0])
+
+
+async def _thread_events(thread_id: UUID, after: int, principal: Any) -> list[RuntimeEventRow]:
+    query = (
+        select(RuntimeEventRow)
+        .where(RuntimeEventRow.thread_id == thread_id, RuntimeEventRow.sequence > after)
+        .order_by(RuntimeEventRow.sequence)
+    )
+    if principal is not None:
+        query = query.join(ThreadRow, ThreadRow.thread_id == RuntimeEventRow.thread_id).where(
+            ThreadRow.tenant_id == principal.tenant_id,
+            ThreadRow.project_id == principal.project_id,
+        )
+    async with connect() as conn:
+        return list((await conn.session.execute(query)).scalars())
+
+
+async def _thread_event_sequence(thread_id: UUID, principal: Any) -> int:
+    query = select(func.coalesce(func.max(RuntimeEventRow.sequence), 0)).where(
+        RuntimeEventRow.thread_id == thread_id
+    )
+    if principal is not None:
+        query = query.join(ThreadRow, ThreadRow.thread_id == RuntimeEventRow.thread_id).where(
+            ThreadRow.tenant_id == principal.tenant_id,
+            ThreadRow.project_id == principal.project_id,
+        )
+    async with connect() as conn:
+        return int(await conn.session.scalar(query) or 0)
+
+
+async def _thread_frame(row: RuntimeEventRow, modes: set[str]) -> tuple[str, Any, str] | None:
+    event = row.payload
+    name = str(event.get("event") or event.get("method") or "custom")
+    if name == "lifecycle":
+        status = str(event.get("status") or "")
+        if status == RunStatus.RUNNING.value:
+            if "lifecycle" not in modes and "run_modes" not in modes:
+                return None
+            attempt = 1
+            if row.run_id is not None:
+                async with connect() as conn:
+                    run = await conn.session.get(RunRow, row.run_id)
+                if run is not None:
+                    attempt = run.retry_count + 1
+            return "metadata", {"run_id": str(row.run_id), "attempt": attempt}, f"{row.sequence}-0"
+        if status in _TERMINAL:
+            if "lifecycle" not in modes and "run_modes" not in modes:
+                return None
+            return "metadata", {"status": "run_done", "run_id": str(row.run_id)}, f"{row.sequence}-0"
+        return None
+    if name == "state_update":
+        if "state_update" not in modes:
+            return None
+    elif "run_modes" not in modes:
+        return None
+    return name, event.get("data"), f"{row.sequence}-0"
+
+
+async def thread_stream(request: Request) -> JSONResponse | StreamingResponse:
+    try:
+        thread_id = UUID(str(request.path_params["thread_id"]))
+    except (KeyError, TypeError, ValueError):
+        return JSONResponse({"detail": "Invalid thread ID: must be a UUID"}, status_code=422)
+    modes = _thread_stream_modes(request)
+    if isinstance(modes, JSONResponse):
+        return modes
+    cursor = _thread_cursor(request.headers.get("last-event-id"))
+    if isinstance(cursor, JSONResponse):
+        return cursor
+    principal = principal_from_scope(request.scope)
+    heartbeat = max(float(os.environ.get("GRAPHHARBOR_THREAD_STREAM_HEARTBEAT_SECONDS", "15")), 0.1)
+    manager = get_stream_manager()
+
+    async def body() -> AsyncIterator[str]:
+        nonlocal cursor
+        queue = await manager.add_thread_stream(thread_id)
+        try:
+            if cursor < 0:
+                cursor = await _thread_event_sequence(thread_id, principal)
+            while True:
+                for row in await _thread_events(thread_id, cursor, principal):
+                    cursor = row.sequence
+                    frame = await _thread_frame(row, modes)
+                    if frame is not None:
+                        name, data, event_id = frame
+                        yield _sse(name, data, event_id=event_id)
+                try:
+                    await asyncio.wait_for(queue.get(), timeout=heartbeat)
+                except TimeoutError:
+                    if await request.is_disconnected():
+                        return
+                    yield ": heartbeat\n\n"
+        finally:
+            await manager.remove_thread_stream(thread_id, queue)
+
+    return StreamingResponse(
+        body(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
 
 
 def _message_envelope(message: Message) -> dict[str, Any] | None:
@@ -308,4 +433,4 @@ async def runs_stream_existing(request: Request) -> JSONResponse | StreamingResp
     )
 
 
-__all__ = ["runs_stream", "runs_stream_existing"]
+__all__ = ["runs_stream", "runs_stream_existing", "thread_stream"]
