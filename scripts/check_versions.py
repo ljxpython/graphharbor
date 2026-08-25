@@ -7,7 +7,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_GRAPHARBOR = "0.13.0.post2"
+EXPECTED_GRAPHARBOR = "0.13.0.post3"
 EXPECTED_DEPENDENCIES = {
     "langgraph": "1.2.11",
     "langgraph-sdk": "0.4.3",

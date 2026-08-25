@@ -44,7 +44,7 @@ Level Extended 是已知的官方能力，但不是第一阶段发布门禁。�
 - dependencies、graphs、env。
 - auth、http.app。
 - graph discovery 和 assistant/graph lookup。
-- /ok、/info、/openapi.json。
+- /ok、/info、/openapi.json、/docs（Scalar API Reference）。
 
 验证：
 

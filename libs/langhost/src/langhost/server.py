@@ -19,7 +19,7 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 
 from langgraph_runtime_pg.auth import (
@@ -59,6 +59,7 @@ from langhost.core_api import (
     cron_create_root,
     cron_create_thread,
     cron_delete,
+    cron_get,
     cron_update,
     crons_count,
     crons_search,
@@ -173,64 +174,82 @@ async def _info(request: Request) -> JSONResponse:
     return JSONResponse(official_info_document())
 
 
+def _openapi_document() -> dict[str, Any]:
+    return {
+        "openapi": "3.1.0",
+        "info": {"title": "GraphHarbor Agent Server", "version": "1"},
+        "paths": {
+            "/ok": {"get": {"responses": {"200": {"description": "ready"}}}},
+            "/live": {"get": {"responses": {"200": {"description": "alive"}}}},
+            "/ready": {"get": {"responses": {"200": {"description": "ready"}}}},
+            "/info": {"get": {"responses": {"200": {"description": "capabilities"}}}},
+            "/metrics": {"get": {"responses": {"200": {"description": "Prometheus metrics"}}}},
+            "/assistants": {"get": {}, "post": {}},
+            "/assistants/search": {"post": {}},
+            "/assistants/count": {"post": {}},
+            "/assistants/{assistant_id}": {"get": {}, "patch": {}, "delete": {}},
+            "/assistants/{assistant_id}/versions": {"post": {}},
+            "/assistants/{assistant_id}/latest": {"post": {}},
+            "/assistants/{assistant_id}/graph": {"get": {}},
+            "/assistants/{assistant_id}/schemas": {"get": {}},
+            "/assistants/{assistant_id}/subgraphs": {"get": {}},
+            "/assistants/{assistant_id}/subgraphs/{namespace}": {"get": {}},
+            "/threads": {"get": {}, "post": {}},
+            "/threads/search": {"post": {}},
+            "/threads/count": {"post": {}},
+            "/threads/prune": {"post": {}},
+            "/threads/{thread_id}": {"get": {}, "patch": {}, "delete": {}},
+            "/threads/{thread_id}/copy": {"post": {}},
+            "/threads/{thread_id}/state": {"get": {}, "post": {}, "patch": {}},
+            "/threads/{thread_id}/state/checkpoint": {"post": {}},
+            "/threads/{thread_id}/state/{checkpoint_id}": {"get": {}},
+            "/threads/{thread_id}/history": {"get": {}, "post": {}},
+            "/threads/{thread_id}/stream": {"get": {}},
+            "/runs": {"post": {}},
+            "/runs/wait": {"post": {}},
+            "/runs/batch": {"post": {}},
+            "/runs/cancel": {"post": {}},
+            "/runs/stream": {"post": {}},
+            "/runs/{run_id}/stream": {"get": {}},
+            "/threads/{thread_id}/runs": {"get": {}, "post": {}},
+            "/threads/{thread_id}/runs/wait": {"post": {}},
+            "/threads/{thread_id}/runs/stream": {"post": {}},
+            "/threads/{thread_id}/runs/{run_id}/stream": {"get": {}},
+            "/threads/{thread_id}/runs/{run_id}": {"get": {}, "delete": {}},
+            "/threads/{thread_id}/runs/{run_id}/cancel": {"post": {}},
+            "/threads/{thread_id}/runs/{run_id}/join": {"get": {}},
+            "/threads/{thread_id}/commands": {"post": {}},
+            "/threads/{thread_id}/stream/events": {"post": {}},
+            "/store/items": {"get": {}, "put": {}, "delete": {}},
+            "/store/items/search": {"post": {}},
+            "/store/namespaces": {"post": {}},
+            "/runs/crons": {"post": {}},
+            "/runs/crons/search": {"post": {}},
+            "/runs/crons/count": {"post": {}},
+            "/runs/crons/{cron_id}": {"get": {}, "patch": {}, "delete": {}},
+            "/threads/{thread_id}/runs/crons": {"post": {}},
+        },
+    }
+
+
 async def _openapi(request: Request) -> JSONResponse:
     del request
-    return JSONResponse(
-        {
-            "openapi": "3.1.0",
-            "info": {"title": "GraphHarbor Agent Server", "version": "1"},
-            "paths": {
-                "/ok": {"get": {"responses": {"200": {"description": "ready"}}}},
-                "/live": {"get": {"responses": {"200": {"description": "alive"}}}},
-                "/ready": {"get": {"responses": {"200": {"description": "ready"}}}},
-                "/info": {"get": {"responses": {"200": {"description": "capabilities"}}}},
-                "/metrics": {"get": {"responses": {"200": {"description": "Prometheus metrics"}}}},
-                "/assistants": {"get": {}, "post": {}},
-                "/assistants/search": {"post": {}},
-                "/assistants/count": {"post": {}},
-                "/assistants/{assistant_id}": {"get": {}, "patch": {}, "delete": {}},
-                "/assistants/{assistant_id}/versions": {"post": {}},
-                "/assistants/{assistant_id}/latest": {"post": {}},
-                "/assistants/{assistant_id}/graph": {"get": {}},
-                "/assistants/{assistant_id}/schemas": {"get": {}},
-                "/assistants/{assistant_id}/subgraphs": {"get": {}},
-                "/assistants/{assistant_id}/subgraphs/{namespace}": {"get": {}},
-                "/threads": {"get": {}, "post": {}},
-                "/threads/search": {"post": {}},
-                "/threads/count": {"post": {}},
-                "/threads/prune": {"post": {}},
-                "/threads/{thread_id}": {"get": {}, "patch": {}, "delete": {}},
-                "/threads/{thread_id}/copy": {"post": {}},
-                "/threads/{thread_id}/state": {"get": {}, "post": {}, "patch": {}},
-                "/threads/{thread_id}/state/checkpoint": {"post": {}},
-                "/threads/{thread_id}/state/{checkpoint_id}": {"get": {}},
-                "/threads/{thread_id}/history": {"post": {}},
-                "/threads/{thread_id}/stream": {"get": {}},
-                "/runs": {"post": {}},
-                "/runs/wait": {"post": {}},
-                "/runs/batch": {"post": {}},
-                "/runs/cancel": {"post": {}},
-                "/runs/stream": {"post": {}},
-                "/runs/{run_id}/stream": {"get": {}},
-                "/threads/{thread_id}/runs": {"get": {}, "post": {}},
-                "/threads/{thread_id}/runs/wait": {"post": {}},
-                "/threads/{thread_id}/runs/stream": {"post": {}},
-                "/threads/{thread_id}/runs/{run_id}/stream": {"get": {}},
-                "/threads/{thread_id}/runs/{run_id}": {"get": {}, "delete": {}},
-                "/threads/{thread_id}/runs/{run_id}/cancel": {"post": {}},
-                "/threads/{thread_id}/runs/{run_id}/join": {"get": {}},
-                "/threads/{thread_id}/commands": {"post": {}},
-                "/threads/{thread_id}/stream/events": {"post": {}},
-                "/store/items": {"get": {}, "put": {}, "delete": {}},
-                "/store/items/search": {"post": {}},
-                "/store/namespaces": {"post": {}},
-                "/runs/crons": {"post": {}},
-                "/runs/crons/search": {"post": {}},
-                "/runs/crons/count": {"post": {}},
-                "/runs/crons/{cron_id}": {"patch": {}, "delete": {}},
-                "/threads/{thread_id}/runs/crons": {"post": {}},
-            },
-        }
+    return JSONResponse(_openapi_document())
+
+
+async def _docs(request: Request) -> HTMLResponse:
+    del request
+    configuration = json.dumps(
+        {"content": json.dumps(_openapi_document(), separators=(",", ":"))},
+        separators=(",", ":"),
+    )
+    return HTMLResponse(
+        "<!doctype html><html><head><title>GraphHarbor API Reference</title></head>"
+        f'<body><script id="api-reference"></script><script>var configuration = {configuration};'
+        "document.getElementById('api-reference').dataset.configuration = "
+        "JSON.stringify(configuration)</script>"
+        '<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>'
+        "</body></html>"
     )
 
 
@@ -727,6 +746,7 @@ def create_app(
         Route("/ready", _ready, methods=["GET"]),
         Route("/info", _info, methods=["GET"]),
         Route("/openapi.json", _openapi, methods=["GET"]),
+        Route("/docs", _docs, methods=["GET"]),
         Route("/metrics", _metrics, methods=["GET"]),
         Route("/assistants/search", assistants_search, methods=["POST"]),
         Route("/assistants/count", assistants_count, methods=["POST"]),
@@ -755,7 +775,7 @@ def create_app(
         Route("/threads/{thread_id}/state/{checkpoint_id}", threads_state, methods=["GET"]),
         Route("/threads/{thread_id}/state", threads_state, methods=["GET"]),
         Route("/threads/{thread_id}/state", threads_update_state, methods=["POST", "PATCH"]),
-        Route("/threads/{thread_id}/history", threads_history, methods=["POST"]),
+        Route("/threads/{thread_id}/history", threads_history, methods=["GET", "POST"]),
         Route("/threads/{thread_id}/stream", thread_stream, methods=["GET"]),
         Route("/threads/{thread_id}", threads_get, methods=["GET"]),
         Route("/threads/{thread_id}", threads_update, methods=["PATCH"]),
@@ -787,6 +807,7 @@ def create_app(
         Route("/runs/crons/count", crons_count, methods=["POST"]),
         Route("/runs/crons", cron_create_root, methods=["POST"]),
         Route("/runs/crons/{cron_id}", cron_update, methods=["PATCH"]),
+        Route("/runs/crons/{cron_id}", cron_get, methods=["GET"]),
         Route("/runs/crons/{cron_id}", cron_delete, methods=["DELETE"]),
     ]
     if custom_app is not None:

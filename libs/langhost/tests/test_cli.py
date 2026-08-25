@@ -84,6 +84,7 @@ async def test_owned_server_exposes_public_health_and_capabilities() -> None:
         ready = await client.get("/ready")
         info = await client.get("/info")
         schema = await client.get("/openapi.json")
+        docs = await client.get("/docs")
         metrics = await client.get("/metrics")
         stream = await client.post("/runs/stream", json={})
     assert ok.status_code == 200 and ok.json() == {"ok": True}
@@ -108,6 +109,10 @@ async def test_owned_server_exposes_public_health_and_capabilities() -> None:
         "version": info.json()["version"],
     }
     assert schema.status_code == 200 and schema.json()["openapi"] == "3.1.0"
+    assert docs.status_code == 200 and "text/html" in docs.headers["content-type"]
+    assert "@scalar/api-reference" in docs.text
+    assert "get" in schema.json()["paths"]["/threads/{thread_id}/history"]
+    assert "get" in schema.json()["paths"]["/runs/crons/{cron_id}"]
     assert metrics.status_code == 200 and "text/plain" in metrics.headers["content-type"]
     assert stream.status_code == 422 and stream.json()["detail"] == "assistant_id is required"
 

@@ -36,7 +36,7 @@ async def test_core_rest_contract_covers_resources_and_errors(pg_runtime, tmp_pa
         LifespanManager(app),
         AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
     ):
-        for path in ("/ok", "/live", "/info", "/openapi.json", "/metrics"):
+        for path in ("/ok", "/live", "/info", "/openapi.json", "/docs", "/metrics"):
             response = await client.get(path)
             assert response.status_code == 200, (path, response.text)
 
@@ -54,6 +54,8 @@ async def test_core_rest_contract_covers_resources_and_errors(pg_runtime, tmp_pa
             "/threads/{thread_id}/commands": {"post"},
             "/threads/{thread_id}/stream/events": {"post"},
             "/threads/{thread_id}/stream": {"get"},
+            "/threads/{thread_id}/history": {"get", "post"},
+            "/runs/crons/{cron_id}": {"get", "patch", "delete"},
             "/store/items": {"get", "put", "delete"},
             "/store/items/search": {"post"},
             "/store/namespaces": {"post"},
@@ -74,7 +76,9 @@ async def test_core_rest_contract_covers_resources_and_errors(pg_runtime, tmp_pa
                 "/store/items", json={"namespace": namespace, "key": "item", "value": {"n": 1}}
             )
         ).status_code == 204
-        item = await client.get("/store/items", params={"namespace": "rest.contract", "key": "item"})
+        item = await client.get(
+            "/store/items", params={"namespace": "rest.contract", "key": "item"}
+        )
         assert item.status_code == 200
         assert item.json()["namespace"] == namespace
         assert item.json()["value"] == {"n": 1}
@@ -130,6 +134,12 @@ async def test_core_rest_contract_covers_resources_and_errors(pg_runtime, tmp_pa
         assert (
             await client.post(f"/threads/{thread_id}/history", json={"limit": 5})
         ).status_code == 200
+        assert (
+            await client.get(f"/threads/{thread_id}/history", params={"limit": 5})
+        ).status_code == 200
+        assert (
+            await client.get(f"/threads/{thread_id}/history", params={"limit": 0})
+        ).status_code == 422
         copied_response = await client.post(f"/threads/{thread_id}/copy")
         assert copied_response.status_code == 201
         copied_thread_id = copied_response.json()["thread_id"]
@@ -158,6 +168,10 @@ async def test_core_rest_contract_covers_resources_and_errors(pg_runtime, tmp_pa
         )
         assert cron_response.status_code == 200
         cron_id = cron_response.json()["cron_id"]
+        cron_get = await client.get(f"/runs/crons/{cron_id}")
+        assert cron_get.status_code == 200
+        assert cron_get.json()["cron_id"] == cron_id
+        assert (await client.get("/runs/crons/not-a-uuid")).status_code == 404
         assert (
             await client.post("/runs/crons/search", json={"assistant_id": assistant_id})
         ).status_code == 200

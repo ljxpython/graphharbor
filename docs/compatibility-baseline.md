@@ -59,7 +59,7 @@ The following behavior is the contract to verify against the target official SDK
 
 | Surface | Required behavior | Evidence gate |
 |---|---|---|
-| Discovery | `GET /ok`, `GET /info`, `GET /openapi.json`, graph/assistant discovery | REST + Python/JS SDK |
+| Discovery | `GET /ok`, `GET /info`, `GET /openapi.json`, `GET /docs`, graph/assistant discovery | REST + Python/JS SDK |
 | Assistants | get/create/update/delete and standard response/error models | REST + SDK |
 | Threads | CRUD/search/count/copy/prune, state/history/update-state, thread-scoped stream/reconnect | REST + SDK + SSE |
 | Runs | create/get/list/delete/wait/join/stream | REST + SDK |
@@ -111,7 +111,7 @@ The baseline is complete only when all of the following are recorded as command/
 
 1. Target lockfile versions resolve on Python 3.11, 3.12 and 3.13.
 2. A no-License-Key server starts locally with host PostgreSQL and Redis.
-3. `/ok`, `/info`, `/openapi.json` and graph discovery succeed.
+3. `/ok`, `/info`, `/openapi.json`, `/docs` and graph discovery succeed.
 4. One P0 graph completes a persisted run through the official Python SDK.
 5. Current custom routes and auth remain reachable with the same Principal contract.
 6. The stream path explicitly passes and verifies `version="v2"`.

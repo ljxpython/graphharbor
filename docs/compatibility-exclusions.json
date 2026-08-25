@@ -1,7 +1,6 @@
 {
   "official_openapi_paths": [
     "/a2a/{assistant_id}",
-    "/docs",
     "/mcp/"
   ],
   "graphharbor_openapi_paths": [
@@ -12,23 +11,18 @@
   ],
   "openapi_methods": [
     "/assistants:GET",
-    "/runs/crons/{cron_id}:GET",
     "/threads:GET",
-    "/threads/{thread_id}/history:GET",
     "/threads/{thread_id}/state:PATCH"
   ],
   "notes": {
     "/a2a/{assistant_id}": "A2A transport is not in the GraphHarbor core profile.",
-    "/docs": "Swagger UI is not part of the production HTTP surface.",
     "/mcp/": "MCP transport is not in the GraphHarbor core profile.",
     "/live": "GraphHarbor operational health endpoint.",
     "/metrics": "GraphHarbor operational metrics endpoint.",
     "/ready": "GraphHarbor operational readiness endpoint.",
-    "/runs/{run_id}/stream": "GraphHarbor keeps this legacy alias for compatibility."
-    ,"/assistants:GET": "GraphHarbor retains a legacy listing alias.",
-    "/runs/crons/{cron_id}:GET": "GraphHarbor does not expose a cron GET handler.",
+    "/runs/{run_id}/stream": "GraphHarbor keeps this legacy alias for compatibility.",
+    "/assistants:GET": "GraphHarbor retains a legacy listing alias.",
     "/threads:GET": "GraphHarbor retains a legacy thread listing alias.",
-    "/threads/{thread_id}/history:GET": "GraphHarbor history is POST-only.",
     "/threads/{thread_id}/state:PATCH": "GraphHarbor state updates use POST."
   }
 }

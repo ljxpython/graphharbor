@@ -691,13 +691,22 @@ async def threads_history(request: Request) -> JSONResponse:
     row, _, thread_id = await _get_thread(request)
     if row is None or thread_id is None:
         return _error("thread not found", 404)
-    payload = await request.json()
+    payload: dict[str, Any] = {}
+    if request.method == "POST":
+        payload = await request.json()
     try:
         limit, _ = _pagination(request, payload)
     except ValueError as exc:
         return _error(str(exc))
     config = cast(RunnableConfig, _checkpoint_config(thread_id))
-    before = payload.get("before")
+    before = (
+        payload.get("before") if request.method == "POST" else request.query_params.get("before")
+    )
+    if request.method == "GET" and before:
+        try:
+            before = json.loads(before)
+        except (TypeError, json.JSONDecodeError):
+            return _error("before must be a JSON object")
     if isinstance(before, dict):
         before = {"configurable": before}
     items = []
@@ -1334,6 +1343,19 @@ async def cron_update(request: Request) -> JSONResponse:
         row.payload = {**row.payload, **payload}
         row.updated_at = datetime.now(UTC)
         await conn.session.flush()
+    return JSONResponse(_cron(row))
+
+
+async def cron_get(request: Request) -> JSONResponse:
+    principal = _principal(request)
+    try:
+        cron_id = UUID(request.path_params["cron_id"])
+    except ValueError:
+        return _error("cron not found", 404)
+    async with connect() as conn:
+        row = await conn.session.get(CronRow, cron_id)
+        if row is None or not in_principal_scope(row, principal):
+            return _error("cron not found", 404)
     return JSONResponse(_cron(row))
 
 
