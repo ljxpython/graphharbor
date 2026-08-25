@@ -506,18 +506,36 @@ def main() -> int:
                 graphharbor_path = _resolve_references(step["path"], graphharbor_responses)
                 official_body = _resolve_references(step["body"], official_responses)
                 graphharbor_body = _resolve_references(step["body"], graphharbor_responses)
+                official_headers = _resolve_references(step["headers"], official_responses)
+                graphharbor_headers = _resolve_references(step["headers"], graphharbor_responses)
             except ValueError as error:
                 parser.error(f"invalid scenario step {step['name']!r}: {error}")
-            official = _request(
-                args.official_url, step["method"], official_path, args.timeout, official_body
-            )
-            graphharbor = _request(
-                args.graphharbor_url,
-                step["method"],
-                graphharbor_path,
-                args.timeout,
-                graphharbor_body,
-            )
+            if step["stream"] is not None:
+                official, graphharbor = _triggered_streams(
+                    official_url=args.official_url,
+                    graphharbor_url=args.graphharbor_url,
+                    step=step,
+                    official_responses=official_responses,
+                    graphharbor_responses=graphharbor_responses,
+                    timeout=args.timeout,
+                )
+            else:
+                official = _request(
+                    args.official_url,
+                    step["method"],
+                    official_path,
+                    args.timeout,
+                    official_body,
+                    official_headers,
+                )
+                graphharbor = _request(
+                    args.graphharbor_url,
+                    step["method"],
+                    graphharbor_path,
+                    args.timeout,
+                    graphharbor_body,
+                    graphharbor_headers,
+                )
             differences.extend(compare(official, graphharbor, path=f"scenario.{step['name']}"))
             official_responses[step["name"]] = official.body
             graphharbor_responses[step["name"]] = graphharbor.body

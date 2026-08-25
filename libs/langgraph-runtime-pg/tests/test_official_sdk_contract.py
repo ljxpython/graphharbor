@@ -208,11 +208,11 @@ async def test_thread_stream_projects_durable_events_and_resumes(pg_runtime, mon
         )
 
     initial = await thread_stream(request("-"))
-    assert "id: 1-0\nevent: values\ndata: {\"value\":1}" in await anext(initial.body_iterator)
+    assert "event: values\ndata: {\"value\":1}\nid: 1-0" in await anext(initial.body_iterator)
     await initial.body_iterator.aclose()
 
     resumed = await thread_stream(request("1-0"))
-    assert "id: 2-0\nevent: values\ndata: {\"value\":2}" in await anext(resumed.body_iterator)
+    assert "event: values\ndata: {\"value\":2}\nid: 2-0" in await anext(resumed.body_iterator)
     await resumed.body_iterator.aclose()
 
 

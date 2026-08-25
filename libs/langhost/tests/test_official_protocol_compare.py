@@ -137,3 +137,44 @@ def test_compare_sse_treats_crlf_and_lf_as_the_same_frame_separator() -> None:
     )
 
     assert compare.compare(official, graphharbor, path="/runs/stream") == []
+
+
+def test_scenario_stream_uses_triggered_capture(monkeypatch, tmp_path: Path) -> None:
+    compare = _module()
+    scenario = tmp_path / "scenario.json"
+    scenario.write_text(
+        '[{"name":"thread","method":"POST","path":"/threads"},'
+        '{"name":"stream","method":"GET","path":"/threads/{{thread.thread_id}}/stream",'
+        '"headers":{"last-event-id":"-"},"stream":{"frames":1,'
+        '"trigger":{"method":"POST","path":"/threads/{{thread.thread_id}}/runs",'
+        '"body":{"input":{}}}}}]',
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def request(*_args, **_kwargs):
+        return compare.Response(200, {"content-type": "application/json"}, {"thread_id": "one"})
+
+    def triggered(**kwargs):
+        captured.update(kwargs)
+        response = compare.Response(200, {"content-type": "text/event-stream"}, "event: values\n\n")
+        return response, response
+
+    monkeypatch.setattr(compare, "_request", request)
+    monkeypatch.setattr(compare, "_triggered_streams", triggered)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "compare",
+            "--official-url",
+            "http://official",
+            "--graphharbor-url",
+            "http://graphharbor",
+            "--scenario",
+            str(scenario),
+        ],
+    )
+
+    assert compare.main() == 0
+    assert captured["step"] == compare._load_scenario(str(scenario))[1]

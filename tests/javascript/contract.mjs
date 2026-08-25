@@ -34,6 +34,21 @@ try {
   await client.assistants.getSchemas(assistant.assistant_id);
   await client.assistants.getSubgraphs(assistant.assistant_id);
   await client.assistants.update(assistant.assistant_id, { metadata: { updated: true } });
+  const namespace = ["js-contract", suffix];
+  await client.store.putItem(namespace, "item", { value: 1 });
+  if ((await client.store.getItem(namespace, "item"))?.value.value !== 1) {
+    throw new Error("store get did not return the written item");
+  }
+  if (!(await client.store.searchItems(["js-contract"])).items.some((item) => item.key === "item")) {
+    throw new Error("store search did not return the written item");
+  }
+  if (!(await client.store.listNamespaces({ prefix: ["js-contract"] })).namespaces.some((item) => item.join(".") === namespace.join("."))) {
+    throw new Error("store namespace listing did not return the written namespace");
+  }
+  await client.store.deleteItem(namespace, "item");
+  if (await client.store.getItem(namespace, "item")) {
+    throw new Error("store delete did not remove the item");
+  }
   const fetchedThread = await client.threads.get(thread.thread_id);
   if (fetchedThread.thread_id !== thread.thread_id) {
     throw new Error("thread lookup returned a different id");
@@ -49,6 +64,18 @@ try {
   await client.threads.getHistory(thread.thread_id, { limit: 5 });
   const copied = await client.threads.copy(thread.thread_id);
   await client.threads.patchState(copied.thread_id, { patched: true });
+
+  const threadEvents = client.threads.joinStream(thread.thread_id, {
+    lastEventId: "-",
+    streamMode: "run_modes",
+  });
+  const firstEvent = threadEvents.next();
+  await client.runs.create(thread.thread_id, assistant.assistant_id, { input: { value: 1 } });
+  const startEvent = await firstEvent;
+  await threadEvents.return();
+  if (startEvent.done || startEvent.value.event !== "metadata" || startEvent.value.data.attempt !== 1) {
+    throw new Error("thread stream did not return the initial lifecycle frame");
+  }
 
   const run = await client.runs.create(thread.thread_id, assistant.assistant_id, {
     input: { value: 1 },

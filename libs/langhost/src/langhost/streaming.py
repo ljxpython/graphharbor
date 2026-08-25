@@ -41,14 +41,22 @@ def _jsonable(value: Any) -> Any:
     return str(value)
 
 
-def _sse(event: str, data: Any = None, *, event_id: int | str | None = None) -> str:
+def _sse(
+    event: str,
+    data: Any = None,
+    *,
+    event_id: int | str | None = None,
+    event_id_last: bool = False,
+) -> str:
     lines: list[str] = []
-    if event_id is not None:
+    if event_id is not None and not event_id_last:
         lines.append(f"id: {event_id}")
     lines.append(f"event: {event}")
     if data is not None:
         encoded = json.dumps(_jsonable(data), ensure_ascii=False, separators=(",", ":"))
         lines.extend(f"data: {line}" for line in encoded.splitlines() or [encoded])
+    if event_id is not None and event_id_last:
+        lines.append(f"id: {event_id}")
     lines.append("")
     return "\n".join(lines) + "\n"
 
@@ -145,7 +153,7 @@ async def _thread_frame(row: RuntimeEventRow, modes: set[str]) -> tuple[str, Any
                 async with connect() as conn:
                     run = await conn.session.get(RunRow, row.run_id)
                 if run is not None:
-                    attempt = run.retry_count + 1
+                    attempt = max(run.retry_count, 1)
             return "metadata", {"run_id": str(row.run_id), "attempt": attempt}, f"{row.sequence}-0"
         if status in _TERMINAL:
             if "lifecycle" not in modes and "run_modes" not in modes:
@@ -187,7 +195,7 @@ async def thread_stream(request: Request) -> JSONResponse | StreamingResponse:
                     frame = await _thread_frame(row, modes)
                     if frame is not None:
                         name, data, event_id = frame
-                        yield _sse(name, data, event_id=event_id)
+                        yield _sse(name, data, event_id=event_id, event_id_last=True)
                 try:
                     await asyncio.wait_for(queue.get(), timeout=heartbeat)
                 except TimeoutError:

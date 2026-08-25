@@ -26,6 +26,60 @@
     "path": "/threads/{{thread_create.thread_id}}"
   },
   {
+    "name": "store_put",
+    "method": "PUT",
+    "path": "/store/items",
+    "body": {
+      "namespace": ["official-protocol", "store"],
+      "key": "item",
+      "value": {"value": 1}
+    }
+  },
+  {
+    "name": "store_get",
+    "method": "GET",
+    "path": "/store/items?namespace=official-protocol.store&key=item"
+  },
+  {
+    "name": "store_search",
+    "method": "POST",
+    "path": "/store/items/search",
+    "body": {"namespace_prefix": ["official-protocol"]}
+  },
+  {
+    "name": "store_namespaces",
+    "method": "POST",
+    "path": "/store/namespaces",
+    "body": {"prefix": ["official-protocol"]}
+  },
+  {
+    "name": "store_delete",
+    "method": "DELETE",
+    "path": "/store/items",
+    "body": {
+      "namespace": ["official-protocol", "store"],
+      "key": "item"
+    }
+  },
+  {
+    "name": "thread_stream",
+    "method": "GET",
+    "path": "/threads/{{thread_create.thread_id}}/stream?stream_modes=run_modes",
+    "headers": {"Last-Event-ID": "-"},
+    "stream": {
+      "frames": 4,
+      "trigger": {
+        "method": "POST",
+        "path": "/threads/{{thread_create.thread_id}}/runs",
+        "body": {
+          "assistant_id": "{{assistant_create.assistant_id}}",
+          "input": {"value": 1},
+          "stream_mode": ["values"]
+        }
+      }
+    }
+  },
+  {
     "name": "run_stream",
     "method": "POST",
     "path": "/threads/{{thread_create.thread_id}}/runs/stream",

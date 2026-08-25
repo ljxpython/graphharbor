@@ -61,10 +61,11 @@ The following behavior is the contract to verify against the target official SDK
 |---|---|---|
 | Discovery | `GET /ok`, `GET /info`, `GET /openapi.json`, graph/assistant discovery | REST + Python/JS SDK |
 | Assistants | get/create/update/delete and standard response/error models | REST + SDK |
-| Threads | CRUD/search/count/copy/prune, state/history/update-state | REST + SDK |
+| Threads | CRUD/search/count/copy/prune, state/history/update-state, thread-scoped stream/reconnect | REST + SDK + SSE |
 | Runs | create/get/list/delete/wait/join/stream | REST + SDK |
 | Run control | batch create, `/runs/cancel`, single cancel, `wait`, `interrupt`, `rollback` | REST + SDK |
 | Cron | global/thread create/search/count/update/delete | REST + SDK |
+| Store | item put/get/search/namespaces/delete with PostgreSQL persistence | REST + Python/JavaScript SDK |
 | Remote stream v2 | `client.runs.stream(..., version="v2")`, modes, subgraphs, heartbeat, terminal event, replay | Real SSE decode |
 | Protocol v2 events | thread event stream, channel/namespace filters, `since`, command envelope | Real SSE + command tests |
 | Graph v3 | `stream_events(version="v3")`, typed projections, lifecycle and subgraph namespace | Graph + remote projection tests |

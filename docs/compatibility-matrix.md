@@ -9,10 +9,10 @@
 | `langgraph-sdk` | 0.4.3 | Python SDK 契约 |
 | `langgraph-cli` | 0.4.31 | `langgraph.json` 校验 |
 | 官方 Agent Server | `langgraph-api==0.13.0` / `langgraph dev` | 升级时作为公开输出比较基线 |
-| 官方协议对照 | passed（含已记录 core profile exclusions） | 2026-08-25 本地双服务对照通过 |
+| 官方协议对照 | passed（含已记录 core profile exclusions） | 2026-08-25 本地双服务对照通过；Store 与 thread stream 已纳入门禁 |
 | PostgreSQL | 16 | 本地/CI 基线 |
 | Redis | 7 | 本地/CI 基线 |
 
 `langgraph-api==0.13.0` 仅用于 `compatibility` extra 的内部对照，不是生产启动依赖。每次更新本表任一版本前，必须完成锁文件、官方输出差分、Python/JavaScript SDK、持久化/故障、P0 graph 和主机部署验收。完整步骤见 [compatibility-upgrades.md](compatibility-upgrades.md)。
 
-当前 core profile 的明确协议排除项见 [compatibility-exclusions.json](compatibility-exclusions.json)。排除项只覆盖未实现的官方扩展能力和 GraphHarbor 自有运维端点；新增排除项必须同时补充原因并经过评审。
+当前 core profile 的明确协议排除项见 [compatibility-exclusions.json](compatibility-exclusions.json)。Store 与 `/threads/{thread_id}/stream` 不再属于排除项；剩余排除项只覆盖未实现的官方扩展能力和 GraphHarbor 自有运维端点。新增排除项必须同时补充原因并经过评审。
