@@ -240,14 +240,14 @@ async def test_official_python_sdk_protocol_v2_multi_interrupt_resume(
                 self.queues.pop(thread_id, None)
 
         async def push(self, thread_id: UUID, wire: dict) -> None:
-            await self.queues[thread_id].put(
-                Message(topic=b"protocol:event", data=json.dumps(wire).encode())
-            )
+            queue = self.queues.get(thread_id)
+            if queue is not None:
+                await queue.put(Message(topic=b"protocol:event", data=json.dumps(wire).encode()))
 
     manager = FakeManager()
     monkeypatch.setattr("langhost.protocol_api.get_stream_manager", lambda: manager)
     monkeypatch.setenv("GRAPHHARBOR_PROTOCOL_HEARTBEAT_SECONDS", "0.01")
-    monkeypatch.setenv("GRAPHHARBOR_PROTOCOL_TIMEOUT_SECONDS", "1")
+    monkeypatch.setenv("GRAPHHARBOR_PROTOCOL_TIMEOUT_SECONDS", "0.05")
     app = create_app({"graphs": _write_graph_project(tmp_path)}, base_dir=tmp_path)
 
     from httpx import ASGITransport, AsyncClient
