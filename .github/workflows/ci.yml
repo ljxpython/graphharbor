@@ -359,6 +359,15 @@ jobs:
           tail -n 200 /tmp/graphharbor-js-contract.log
           exit 1
 
+      - name: Start GraphHarbor worker
+        run: |
+          uv run graphharbor worker \
+            --config tests/javascript/fixtures/langgraph.json \
+            --database-uri "${DATABASE_URI}" \
+            --redis-uri "${REDIS_URI}" \
+            --n-jobs-per-worker 1 > /tmp/graphharbor-js-contract-worker.log 2>&1 &
+          echo $! > /tmp/graphharbor-js-contract-worker.pid
+
       - name: Run JavaScript SDK contract
         run: node scripts/test_js_sdk.mjs
 
@@ -368,6 +377,12 @@ jobs:
           if [[ -f /tmp/graphharbor-js-contract.pid ]]; then
             kill "$(cat /tmp/graphharbor-js-contract.pid)" 2>/dev/null || true
           fi
+          if [[ -f /tmp/graphharbor-js-contract-worker.pid ]]; then
+            kill "$(cat /tmp/graphharbor-js-contract-worker.pid)" 2>/dev/null || true
+          fi
           if [[ -f /tmp/graphharbor-js-contract.log ]]; then
             tail -n 200 /tmp/graphharbor-js-contract.log || true
+          fi
+          if [[ -f /tmp/graphharbor-js-contract-worker.log ]]; then
+            tail -n 200 /tmp/graphharbor-js-contract-worker.log || true
           fi
