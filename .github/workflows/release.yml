@@ -177,15 +177,12 @@ jobs:
         run: |
           RUNTIME_WHL="$(ls dist/graphharbor_runtime-*.whl | head -n1)"
           VERSION="$(basename "${RUNTIME_WHL}" | sed -E 's/^graphharbor_runtime-(.+)-py3-none-any\.whl$/\1/')"
-          # TestPyPI's simple index can take more than five minutes to expose
-          # a newly uploaded release to a GitHub-hosted runner.
+          # Wait until both uploaded artifacts are visible in TestPyPI's simple index.
           for attempt in $(seq 1 36); do
-            if uv run --isolated --no-project \
-              --index-strategy unsafe-best-match \
-              --default-index https://test.pypi.org/simple \
-              --index https://pypi.org/simple \
-              --with "graphharbor==${VERSION}" \
-              python -c "import importlib.metadata as m; assert m.version('graphharbor') == '${VERSION}'; assert m.version('graphharbor-runtime') == '${VERSION}'"; then
+            if curl --fail --silent --show-error https://test.pypi.org/simple/graphharbor/ \
+              | grep --fixed-strings --quiet "graphharbor-${VERSION}-" \
+              && curl --fail --silent --show-error https://test.pypi.org/simple/graphharbor-runtime/ \
+              | grep --fixed-strings --quiet "graphharbor_runtime-${VERSION}-"; then
               break
             fi
             if [[ "${attempt}" == "36" ]]; then
@@ -193,12 +190,13 @@ jobs:
             fi
             sleep 15
           done
-          uv run --isolated --no-project \
+          uv pip install --system \
             --index-strategy unsafe-best-match \
             --default-index https://test.pypi.org/simple \
             --index https://pypi.org/simple \
-            --with "graphharbor==${VERSION}" \
-            graphharbor --version
+            "graphharbor==${VERSION}"
+          python -c "import importlib.metadata as m; assert m.version('graphharbor') == '${VERSION}'; assert m.version('graphharbor-runtime') == '${VERSION}'"
+          graphharbor --version
 
   github-release:
     name: GitHub Release
