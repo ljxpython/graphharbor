@@ -363,7 +363,7 @@ Redis：独立服务或托管 Redis
 runtime 兼容测试通过
 custom routes + lifespan 通过
 v2/v3 协议测试通过
-当前项目 P0 graph 通过
+当前 acceptance P0 fixture 通过；外部业务 graph 需在其源码仓库单独验收
 多 worker 通过
 故障恢复通过
 生产部署文档完成
@@ -435,7 +435,8 @@ GraphHarbor 只有在以下条件全部满足时，才可以称为“生产级 L
 - 自有 server 已提供 health/discovery、assistants、threads、run CRUD/cancel、v2 SSE 和
   Protocol v2 thread events；当前核心回归与生产契约测试通过。
 - 官方 Python/JavaScript SDK Core、REST 契约、runtime-service custom routes/lifespan 与五个
-  P0 graph 的真实 HTTP/SDK E2E 已通过；结构化日志与 Prometheus 兼容指标已实测导出。
+  P0 graph 的历史外部验收已有记录；当前仓库新增 acceptance fixture 的真实 HTTP/SDK E2E，
+  但不能替代外部 runtime-service 源码的重新验证。
 - 本地故障验收已覆盖 API/worker/PG/Redis 重启、worker 滚动停机与替换 worker 接管、队列积压、
   SSE `Last-Event-ID` replay；重启窗口的 run 持久化为 `success`，基础设施重试计数为 1、1、2。
 

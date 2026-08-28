@@ -86,6 +86,7 @@ from langhost.core_api import (
     threads_update,
     threads_update_state,
 )
+from langhost.mcp_transport import create_mcp_transport
 from langhost.protocol_api import protocol_commands, protocol_event_stream
 from langhost.store_api import (
     store_delete,
@@ -95,6 +96,11 @@ from langhost.store_api import (
     store_search,
 )
 from langhost.streaming import runs_stream, runs_stream_existing, thread_stream
+
+
+@asynccontextmanager
+async def _empty_context():
+    yield
 
 
 def _plain(value: Any) -> Any:
@@ -183,7 +189,9 @@ def _openapi_document() -> dict[str, Any]:
             "/live": {"get": {"responses": {"200": {"description": "alive"}}}},
             "/ready": {"get": {"responses": {"200": {"description": "ready"}}}},
             "/info": {"get": {"responses": {"200": {"description": "capabilities"}}}},
+            "/docs": {"get": {"responses": {"200": {"description": "API documentation"}}}},
             "/metrics": {"get": {"responses": {"200": {"description": "Prometheus metrics"}}}},
+            "/mcp/": {"delete": {}, "get": {}, "post": {}},
             "/assistants": {"get": {}, "post": {}},
             "/assistants/search": {"post": {}},
             "/assistants/count": {"post": {}},
@@ -723,6 +731,16 @@ def create_app(
     auth_config = _config_value(config, "auth", {}) or {}
     auth_spec = auth_config if isinstance(auth_config, str) else _config_value(auth_config, "path")
     auth_handler = _load_symbol(auth_spec, base_dir) if auth_spec else None
+    mcp_enabled = not bool(_config_value(http_config, "disable_mcp", False))
+    mcp_holder: dict[str, Any] = {}
+
+    async def _mcp_dispatch(scope: Any, receive: Any, send: Any) -> None:
+        endpoint = mcp_holder.get("app")
+        if endpoint is None:
+            response = JSONResponse({"detail": "MCP transport is not ready"}, status_code=503)
+            await response(scope, receive, send)
+            return
+        await endpoint(scope, receive, send)
 
     @asynccontextmanager
     async def lifespan(app: Starlette):
@@ -732,13 +750,20 @@ def create_app(
         async with runtime_lifespan(app, readiness=readiness):
             if len(app.state.graph_registry) > 0:
                 app.state.graph_registry.attach_checkpointer(get_checkpointer())
-            if custom_app is not None and hasattr(
-                getattr(custom_app, "router", None), "lifespan_context"
+            mcp_server = None
+            if mcp_enabled:
+                mcp_server, mcp_holder["app"] = create_mcp_transport(app.state.graph_registry)
+                mcp_holder["server"] = mcp_server
+            async with (
+                mcp_server.session_manager.run() if mcp_server is not None else _empty_context()
             ):
-                async with custom_app.router.lifespan_context(custom_app):
+                if custom_app is not None and hasattr(
+                    getattr(custom_app, "router", None), "lifespan_context"
+                ):
+                    async with custom_app.router.lifespan_context(custom_app):
+                        yield
+                else:
                     yield
-            else:
-                yield
 
     routes: list[Any] = [
         Route("/ok", _ok, methods=["GET"]),
@@ -810,6 +835,8 @@ def create_app(
         Route("/runs/crons/{cron_id}", cron_get, methods=["GET"]),
         Route("/runs/crons/{cron_id}", cron_delete, methods=["DELETE"]),
     ]
+    if mcp_enabled:
+        routes.append(Mount("/mcp", app=_mcp_dispatch))
     if custom_app is not None:
         routes.append(Mount("/", app=custom_app))
     validator = None

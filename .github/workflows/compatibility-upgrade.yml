@@ -7,6 +7,41 @@ on:
         description: "Official LangGraph version being evaluated"
         required: true
         type: string
+      run_real_acceptance:
+        description: "Run the optional DeepSeek-backed P0/MCP acceptance gate"
+        required: true
+        default: false
+        type: boolean
+      baseline_path:
+        description: "Previous compatibility result JSON used by the upgrade gate"
+        required: true
+        default: "tests/acceptance_app/baselines/compatibility-result.langgraph-1.2.11.json"
+        type: string
+      cross_network_sse_url:
+        description: "Optional independently hosted GraphHarbor URL for cross-network SSE acceptance"
+        required: false
+        default: ""
+        type: string
+      official_old_snapshot:
+        description: "Optional old fixed-version langgraph dev acceptance snapshot for four-quadrant comparison"
+        required: false
+        default: ""
+        type: string
+      official_new_snapshot:
+        description: "Optional new fixed-version langgraph dev acceptance snapshot for four-quadrant comparison"
+        required: false
+        default: ""
+        type: string
+      graphharbor_old_snapshot:
+        description: "Optional old GraphHarbor acceptance snapshot for four-quadrant comparison"
+        required: false
+        default: ""
+        type: string
+      graphharbor_new_snapshot:
+        description: "Optional new GraphHarbor acceptance snapshot for four-quadrant comparison"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -53,7 +88,7 @@ jobs:
           python-version: "3.11"
 
       - name: Sync upgraded dependency set
-        run: uv sync --group dev
+        run: uv sync --group dev --group acceptance
 
       - name: Record official Agent Server version
         run: |
@@ -128,6 +163,111 @@ jobs:
           raise SystemExit(subprocess.call(args))
           PY
 
+      - name: Check acceptance fixtures and gates
+        run: |
+          uv run --group acceptance pytest \
+            tests/acceptance_app/test_p0_graphs.py \
+            tests/acceptance_app/test_compare_p0_graphs.py \
+            tests/acceptance_app/test_compare_compatibility_results.py \
+            libs/langhost/tests/test_mcp_transport.py
+
+      - name: Start DeepSeek-backed acceptance services
+        if: ${{ inputs.run_real_acceptance }}
+        env:
+          DEEPSEEK_PROXY_URL: ${{ secrets.DEEPSEEK_PROXY_URL }}
+          DEEPSEEK_PROXY_API_KEY: ${{ secrets.DEEPSEEK_PROXY_API_KEY }}
+          DEEPSEEK_PROXY_DEFAULT_MODEL: ${{ secrets.DEEPSEEK_PROXY_DEFAULT_MODEL }}
+          ACCEPTANCE_DATABASE_URI: postgresql+asyncpg://postgres:postgres@localhost:5432/graphharbor_acceptance_candidate
+          ACCEPTANCE_OFFICIAL_DATABASE_URI: postgresql+asyncpg://postgres:postgres@localhost:5432/langgraph_acceptance_official
+          ACCEPTANCE_REDIS_URI: redis://localhost:6379/3
+        run: |
+          test -n "${DEEPSEEK_PROXY_URL}" && test -n "${DEEPSEEK_PROXY_API_KEY}" && test -n "${DEEPSEEK_PROXY_DEFAULT_MODEL}"
+          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -c 'CREATE DATABASE graphharbor_acceptance_candidate;'
+          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -c 'CREATE DATABASE langgraph_acceptance_official;'
+          DATABASE_URI="${ACCEPTANCE_DATABASE_URI}" REDIS_URI="${ACCEPTANCE_REDIS_URI}" uv run graphharbor migrate upgrade
+          (
+            cd tests/acceptance_app
+            DATABASE_URI="${ACCEPTANCE_OFFICIAL_DATABASE_URI}" LANGGRAPH_ALLOW_BLOCKING=true \
+              uv run --project "${GITHUB_WORKSPACE}" langgraph dev --config langgraph.json \
+              --host 127.0.0.1 --port 31399 --no-browser --no-reload --allow-blocking
+          ) > /tmp/acceptance-official.log 2>&1 &
+          echo $! > /tmp/acceptance-official.pid
+          DATABASE_URI="${ACCEPTANCE_DATABASE_URI}" REDIS_URI="${ACCEPTANCE_REDIS_URI}" \
+            uv run graphharbor serve --config tests/acceptance_app/langgraph.json \
+            --host 127.0.0.1 --port 31296 --no-browser > /tmp/acceptance-graphharbor.log 2>&1 &
+          echo $! > /tmp/acceptance-graphharbor.pid
+          DATABASE_URI="${ACCEPTANCE_DATABASE_URI}" REDIS_URI="${ACCEPTANCE_REDIS_URI}" \
+            uv run graphharbor worker --config tests/acceptance_app/langgraph.json \
+            --n-jobs-per-worker 1 > /tmp/acceptance-worker.log 2>&1 &
+          echo $! > /tmp/acceptance-worker.pid
+          uv run --group acceptance python tests/acceptance_app/mcp_server.py > /tmp/acceptance-mcp.log 2>&1 &
+          echo $! > /tmp/acceptance-mcp.pid
+          for url in http://127.0.0.1:31399/ok http://127.0.0.1:31296/ready; do
+            for _ in $(seq 1 90); do
+              curl -fsS "${url}" >/dev/null && break
+              sleep 1
+            done
+            curl -fsS "${url}" >/dev/null
+          done
+
+      - name: Run DeepSeek-backed P0/MCP acceptance
+        if: ${{ inputs.run_real_acceptance }}
+        env:
+          DEEPSEEK_PROXY_URL: ${{ secrets.DEEPSEEK_PROXY_URL }}
+          DEEPSEEK_PROXY_API_KEY: ${{ secrets.DEEPSEEK_PROXY_API_KEY }}
+          DEEPSEEK_PROXY_DEFAULT_MODEL: ${{ secrets.DEEPSEEK_PROXY_DEFAULT_MODEL }}
+          CROSS_NETWORK_SSE_URL: ${{ inputs.cross_network_sse_url }}
+        run: |
+          extra_args=()
+          if [[ -n "${CROSS_NETWORK_SSE_URL}" ]]; then
+            extra_args+=(--cross-network-sse-url "${CROSS_NETWORK_SSE_URL}")
+          fi
+          uv run --group acceptance python tests/acceptance_app/run_acceptance.py \
+            --base-url http://127.0.0.1:31296 \
+            --official-url http://127.0.0.1:31399 \
+            --require-official \
+            --with-chat --with-agents --with-p0 --with-mcp --with-network-sse \
+            "${extra_args[@]}"
+
+      - name: Compare acceptance result with baseline
+        if: ${{ inputs.run_real_acceptance }}
+        run: |
+          uv run python scripts/check_acceptance_mapping.py \
+            --result artifacts/compatibility-result.json \
+            --mapping docs/acceptance-capability-map.json
+          uv run python scripts/compare_compatibility_results.py \
+            --baseline "${{ inputs.baseline_path }}" \
+            --current artifacts/compatibility-result.json \
+            --out artifacts/compatibility-diff.json \
+            --followups artifacts/compatibility-followups.md
+
+      - name: Compare four compatibility quadrants
+        if: ${{ inputs.run_real_acceptance && inputs.official_old_snapshot != '' && inputs.official_new_snapshot != '' && inputs.graphharbor_old_snapshot != '' && inputs.graphharbor_new_snapshot != '' }}
+        run: |
+          uv run python scripts/compare_compatibility_quadrants.py \
+            --official-old "${{ inputs.official_old_snapshot }}" \
+            --official-new "${{ inputs.official_new_snapshot }}" \
+            --graphharbor-old "${{ inputs.graphharbor_old_snapshot }}" \
+            --graphharbor-new "${{ inputs.graphharbor_new_snapshot }}" \
+            --out artifacts/compatibility-quadrants.json
+
+      - name: Upload acceptance evidence
+        if: ${{ always() && inputs.run_real_acceptance }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: compatibility-acceptance-evidence
+          path: |
+            artifacts/compatibility-result.json
+            artifacts/compatibility-diff.json
+            artifacts/compatibility-followups.md
+            artifacts/compatibility-quadrants.json
+            artifacts/official-langgraph-dev-p0-comparison.json
+            /tmp/acceptance-official.log
+            /tmp/acceptance-graphharbor.log
+            /tmp/acceptance-worker.log
+            /tmp/acceptance-mcp.log
+          if-no-files-found: warn
+
       - name: Upload comparison logs
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -142,6 +282,6 @@ jobs:
       - name: Stop services
         if: always()
         run: |
-          for pid_file in /tmp/langgraph-dev.pid /tmp/graphharbor.pid /tmp/graphharbor-worker.pid; do
+          for pid_file in /tmp/langgraph-dev.pid /tmp/graphharbor.pid /tmp/graphharbor-worker.pid /tmp/acceptance-official.pid /tmp/acceptance-graphharbor.pid /tmp/acceptance-worker.pid /tmp/acceptance-mcp.pid; do
             if [[ -f "${pid_file}" ]]; then kill "$(cat "${pid_file}")" 2>/dev/null || true; fi
           done

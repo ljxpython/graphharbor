@@ -49,6 +49,22 @@ def _plain(value: Any) -> Any:
         return {str(key): _plain(item) for key, item in value.items()}
     if isinstance(value, (tuple, list, set)):
         return [_plain(item) for item in value]
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            return _plain(model_dump(mode="json"))
+        except TypeError:
+            return _plain(model_dump())
+    slots = getattr(value.__class__, "__slots__", ())
+    if slots:
+        names = (slots,) if isinstance(slots, str) else slots
+        return _plain(
+            {
+                name: getattr(value, name)
+                for name in names
+                if hasattr(value, name) and getattr(value, name) is not None
+            }
+        )
     if hasattr(value, "value") and value.__class__.__module__.startswith("langgraph"):
         return _plain(value.value)
     return value
@@ -658,6 +674,11 @@ def _state_from_tuple(item: Any) -> dict[str, Any]:
     )
 
 
+def _has_projected_values(values: Any) -> bool:
+    """Return whether a checkpoint contains user-visible channel values."""
+    return isinstance(values, dict) and any(key != "__pregel_tasks" for key in values)
+
+
 async def threads_state(request: Request) -> JSONResponse:
     row, _, thread_id = await _get_thread(request)
     if row is None or thread_id is None:
@@ -684,7 +705,13 @@ async def threads_state(request: Request) -> JSONResponse:
                 }
             )
         )
-    return JSONResponse(_state_from_tuple(item))
+    state = _state_from_tuple(item)
+    # Some LangChain/Deep Agents checkpoints keep only scheduler bookkeeping in
+    # channel_values while the durable thread row has the final projected state.
+    # Expose that state instead of returning the misleading bare __pregel_tasks.
+    if checkpoint_id is None and not _has_projected_values(state.get("values")) and row.values_:
+        state["values"] = _plain(row.values_)
+    return JSONResponse(state)
 
 
 async def threads_history(request: Request) -> JSONResponse:

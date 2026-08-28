@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "baseline_for": {
+    "langgraph": "1.2.11",
+    "langgraph_sdk": "0.4.3",
+    "langchain": "1.3.17",
+    "deepagents": "0.7.9"
+  },
+  "results": [
+    {"capability_id": "runtime_health", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "basic_run_persistence", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "subgraph_namespace_v3", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "hitl_interrupt_resume", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "tool_call_state", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "store_lifecycle", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "real_deepseek_agent", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "langchain_agent_loop", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "deep_agent_loop", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "p0_assistant_supervisor", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "p0_customer_support_handoff", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "p0_test_case_agent", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "p0_personal_assistant", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "p0_deepagent_demo", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "mcp_external_tool_call", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "mcp_graphharbor_transport", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "cross_network_sse_fixture", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "sse_replay_cursor", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "javascript_sdk_contract", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "langgraph_dev_pair_comparison", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}},
+    {"capability_id": "langgraph_dev_p0_pair_comparison", "status": "passed", "versions": {"langgraph": "1.2.11", "langgraph-sdk": "0.4.3", "langchain": "1.3.17", "deepagents": "0.7.9"}}
+  ]
+}

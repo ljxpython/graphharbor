@@ -1,0 +1,24 @@
+{
+  "dependencies": ["./"],
+  "graphs": {
+    "assistant": "./graphs.py:basic",
+    "basic": "./graphs.py:basic",
+    "chat": "./graphs.py:chat",
+    "langchain_agent": "./graphs.py:langchain_agent",
+    "deep_agent": "./graphs.py:deep_agent",
+    "subgraph": "./graphs.py:subgraph",
+    "hitl": "./graphs.py:hitl",
+    "tool": "./graphs.py:tool",
+    "assistant_supervisor": "./p0_graphs.py:assistant_supervisor",
+    "p0_assistant": "./p0_graphs.py:assistant_supervisor",
+    "customer_support_handoff": "./p0_graphs.py:customer_support_handoff",
+    "customer_support_handoffs_demo": "./p0_graphs.py:customer_support_handoff",
+    "test_case_agent": "./p0_graphs.py:test_case_agent",
+    "test_case_agent_v2": "./p0_graphs.py:test_case_agent",
+    "personal_assistant": "./p0_graphs.py:personal_assistant",
+    "personal_assistant_demo": "./p0_graphs.py:personal_assistant_demo",
+    "deepagent_demo": "./p0_graphs.py:deepagent_demo",
+    "mcp_agent": "./p0_graphs.py:mcp_agent",
+    "network_sse": "./p0_graphs.py:network_sse"
+  }
+}

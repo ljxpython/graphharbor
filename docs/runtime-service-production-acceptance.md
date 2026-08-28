@@ -40,12 +40,14 @@
 真实 provider 和 MCP 集成应使用独立的 live 测试标记，凭据缺失时跳过并输出明确原因，
 不得把跳过当成生产通过。
 
-## 当前 live P0 结果
+## 历史 runtime-service live P0 结果
 
-2026-08-25 已使用 `open-swe/.env` 的 DeepSeek 配置（仅在验收进程中注入）完成真实验收：五个
+2026-08-25 曾使用外部 `runtime_service` 项目的 DeepSeek 配置（仅在验收进程中注入）完成真实验收：五个
 P0 graph 的官方 Python SDK v2 stream 全部通过，耗时 21.11 秒；API、worker、认证、PostgreSQL、
 Redis、模型调用和 run 持久化链路均已打通。此前 provider 返回 Cloudflare 403 的旧结果已被替换。
-MCP/skills 等外部集成仍需按上表分别满足依赖并做专门场景验收。
+这是外部项目当时的历史证据，不是当前 GraphHarbor 工作区可独立重跑的证明；当前仓库的五个
+acceptance P0 fixture 另见 `docs/current-capability-assessment.md` 和
+`artifacts/official-langgraph-dev-p0-comparison.json`。MCP/skills 等外部集成仍需按上表分别满足依赖并做专门场景验收。
 
 ## 本地可靠性结果
 

@@ -1,6 +1,6 @@
 {
-  "graphharbor": "0.13.0.post8",
-  "graphharbor-runtime": "0.13.0.post8",
+  "graphharbor": "0.13.0.post9",
+  "graphharbor-runtime": "0.13.0.post9",
   "langgraph": "1.2.11",
   "langgraph-sdk": "0.4.3",
   "langgraph-cli": "0.4.31",
@@ -9,6 +9,8 @@
   "official-agent-server": "langgraph-api==0.13.0 via langgraph dev",
   "protocol-comparison": "required before any LangGraph dependency upgrade",
   "official-protocol-status": "passed with documented core-profile exclusions",
+  "mcp-transport": "Streamable HTTP /mcp/ local discovery/call and outbound MCP fixture passed; production auth, tenant isolation, and remote failure acceptance pending",
+  "p0-graph-pair-status": "five acceptance P0 fixtures passed against pinned langgraph dev on 2026-08-28; real Agent projections compare ordered tool traces and Deep Agent task delegation phases, not natural-language text; this does not prove an unavailable external runtime_service graph set",
   "official-protocol-verified-at": "2026-08-25",
   "protocol-exclusions": "docs/compatibility-exclusions.json"
 }

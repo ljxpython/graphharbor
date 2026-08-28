@@ -13,7 +13,7 @@ import json
 import re
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
@@ -166,9 +166,7 @@ def _request(
     )
 
 
-def _read_sse(
-    response: Any, *, frames: int, ready: threading.Event | None = None
-) -> Response:
+def _read_sse(response: Any, *, frames: int, ready: threading.Event | None = None) -> Response:
     if ready is not None:
         ready.set()
     lines: list[str] = []
@@ -261,7 +259,11 @@ def _load_scenario(path: str) -> list[dict[str, Any]]:
         name = raw.get("name")
         method = raw.get("method")
         request_path = raw.get("path")
-        if not isinstance(name, str) or not _REFERENCE.match(f"{{{{{name}.field}}}}") or name in names:
+        if (
+            not isinstance(name, str)
+            or not _REFERENCE.match(f"{{{{{name}.field}}}}")
+            or name in names
+        ):
             raise ValueError(f"scenario step {index} needs a unique identifier name")
         if not isinstance(method, str) or method.upper() not in _HTTP_METHODS:
             raise ValueError(f"scenario step {name!r} has an invalid HTTP method")
@@ -349,9 +351,7 @@ def _capture_stream(
 ) -> None:
     try:
         target.append(
-            _request_sse(
-                base_url, method, path, timeout, frames, headers=headers, ready=ready
-            )
+            _request_sse(base_url, method, path, timeout, frames, headers=headers, ready=ready)
         )
     except BaseException as error:
         target.append(error)
@@ -458,6 +458,11 @@ def main() -> int:
         "--scenario",
         help="JSON request sequence with per-service response references",
     )
+    parser.add_argument(
+        "--result-out",
+        type=Path,
+        help="write a structured comparison result JSON to this path",
+    )
     parser.add_argument("--timeout", type=float, default=15.0)
     args = parser.parse_args()
 
@@ -539,6 +544,21 @@ def main() -> int:
             differences.extend(compare(official, graphharbor, path=f"scenario.{step['name']}"))
             official_responses[step["name"]] = official.body
             graphharbor_responses[step["name"]] = graphharbor.body
+
+    result = {
+        "schema_version": 1,
+        "comparison": "langgraph_dev_vs_graphharbor",
+        "status": "passed" if not differences else "failed",
+        "official_url": args.official_url,
+        "graphharbor_url": args.graphharbor_url,
+        "scenario": args.scenario,
+        "differences": [asdict(item) for item in differences],
+    }
+    if args.result_out:
+        args.result_out.parent.mkdir(parents=True, exist_ok=True)
+        args.result_out.write_text(
+            json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
 
     if not differences:
         sys.stdout.write("official protocol comparison: OK\n")

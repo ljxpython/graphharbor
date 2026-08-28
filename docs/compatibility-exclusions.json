@@ -1,7 +1,6 @@
 {
   "official_openapi_paths": [
-    "/a2a/{assistant_id}",
-    "/mcp/"
+    "/a2a/{assistant_id}"
   ],
   "graphharbor_openapi_paths": [
     "/live",
@@ -16,7 +15,6 @@
   ],
   "notes": {
     "/a2a/{assistant_id}": "A2A transport is not in the GraphHarbor core profile.",
-    "/mcp/": "MCP transport is not in the GraphHarbor core profile.",
     "/live": "GraphHarbor operational health endpoint.",
     "/metrics": "GraphHarbor operational metrics endpoint.",
     "/ready": "GraphHarbor operational readiness endpoint.",

@@ -9,6 +9,35 @@ from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
 
 
+def test_rest_plain_serializes_langchain_messages() -> None:
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    from langhost.core_api import _plain
+
+    messages = [
+        HumanMessage(content="hello"),
+        AIMessage(
+            content="lookup", tool_calls=[{"name": "lookup_fact", "args": {}, "id": "call-1"}]
+        ),
+        ToolMessage(content="fact", tool_call_id="call-1"),
+    ]
+    encoded = _plain(messages)
+    assert [item["type"] for item in encoded] == ["human", "ai", "tool"]
+    assert encoded[1]["tool_calls"][0]["name"] == "lookup_fact"
+
+
+def test_agent_state_projection_keeps_durable_values() -> None:
+    from langchain_core.messages import HumanMessage
+
+    from langgraph_runtime_pg.production_worker import _jsonable
+    from langhost.core_api import _has_projected_values
+
+    encoded = _jsonable({"messages": [HumanMessage(content="hello")]})
+    assert encoded["messages"][0]["type"] == "human"
+    assert _has_projected_values({"__pregel_tasks": []}) is False
+    assert _has_projected_values(encoded) is True
+
+
 def _graph_config(root: Path) -> dict[str, dict[str, str]]:
     (root / "graphs.py").write_text(
         "from typing import TypedDict\n"

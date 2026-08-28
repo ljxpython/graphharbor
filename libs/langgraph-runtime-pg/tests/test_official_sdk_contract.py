@@ -223,7 +223,7 @@ async def test_official_python_sdk_protocol_v2_multi_interrupt_resume(
     tmp_path: Path, monkeypatch
 ) -> None:
     from langgraph_runtime_pg.database import connect, truncate_all
-    from langgraph_runtime_pg.models import RuntimeEventRow, ThreadRow
+    from langgraph_runtime_pg.models import RunRow, RuntimeEventRow, ThreadRow
     from langgraph_runtime_pg.protocol import protocol_event
     from langgraph_runtime_pg.redis_stream import Message
     from langhost.server import create_app
@@ -267,15 +267,26 @@ async def test_official_python_sdk_protocol_v2_multi_interrupt_resume(
         async with client.threads.stream(
             thread_id=str(thread_id), assistant_id=assistant["assistant_id"]
         ) as stream:
-            started = await stream.run.start(input={"value": 1})
-            run_id = UUID(started["run_id"])
             for _ in range(100):
                 if thread_id in manager.queues:
                     break
                 await asyncio.sleep(0.001)
             assert thread_id in manager.queues
 
+            # Keep the fixture run out of the worker queue.  The test supplies
+            # its own protocol events and only exercises the public SDK path.
+            run_id = uuid4()
+
             async with connect() as conn:
+                conn.session.add(
+                    RunRow(
+                        run_id=run_id,
+                        thread_id=thread_id,
+                        assistant_id=UUID(assistant["assistant_id"]),
+                        status="interrupted",
+                        reason="hitl_interrupt",
+                    )
+                )
                 row = await conn.session.get(ThreadRow, thread_id)
                 assert row is not None
                 row.status = "interrupted"
@@ -355,7 +366,7 @@ async def test_official_python_sdk_protocol_v2_multi_interrupt_resume(
             resumed = await stream.run.respond("yes", interrupt_id="interrupt-1")
             duplicate = await stream.run.respond("yes", interrupt_id="interrupt-1")
             assert resumed["run_id"] == duplicate["run_id"]
-            assert resumed["run_id"] != started["run_id"]
+            assert resumed["run_id"] != str(run_id)
 
         async with connect() as conn:
             persisted = await conn.session.get(ThreadRow, thread_id)

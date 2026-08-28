@@ -18,6 +18,7 @@ from langgraph_runtime_pg.database import to_psycopg_uri
 _POOL: AsyncConnectionPool[Any] | None = None
 _CHECKPOINTER: AsyncPostgresSaver | None = None
 _SETUP_LOCK = asyncio.Lock()
+_SETUP_ADVISORY_KEY = 716_203_117
 
 
 async def setup_checkpointer() -> AsyncPostgresSaver:
@@ -49,7 +50,16 @@ async def setup_checkpointer() -> AsyncPostgresSaver:
         try:
             await pool.open()
             saver = AsyncPostgresSaver(cast(Any, pool))
-            await saver.setup()
+            # ``AsyncPostgresSaver.setup`` creates shared PostgreSQL types and
+            # tables without an inter-process lock. API and worker commonly
+            # start together, so serialize that one-time migration step across
+            # processes (the in-process asyncio lock is not sufficient).
+            async with pool.connection() as lock_conn:
+                await lock_conn.execute("SELECT pg_advisory_lock(%s)", (_SETUP_ADVISORY_KEY,))
+                try:
+                    await saver.setup()
+                finally:
+                    await lock_conn.execute("SELECT pg_advisory_unlock(%s)", (_SETUP_ADVISORY_KEY,))
         except Exception:
             try:
                 await pool.close()

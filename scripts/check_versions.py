@@ -7,7 +7,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_GRAPHARBOR = "0.13.0.post8"
+EXPECTED_GRAPHARBOR = "0.13.0.post9"
 EXPECTED_DEPENDENCIES = {
     "langgraph": "1.2.11",
     "langgraph-sdk": "0.4.3",
@@ -46,7 +46,7 @@ def main() -> None:
         if pkg_license != root_license:
             raise SystemExit(f"{rel} must match root LICENSE (copy after editing)")
 
-    print(f"ok: graphharbor={runtime}; dependencies={EXPECTED_DEPENDENCIES}")
+    print(f"ok: graphharbor={runtime}; dependencies={EXPECTED_DEPENDENCIES}")  # noqa: T201
 
 
 if __name__ == "__main__":

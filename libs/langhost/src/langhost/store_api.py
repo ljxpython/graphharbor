@@ -9,7 +9,13 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from langgraph_runtime_pg.auth import principal_from_scope
-from langgraph_runtime_pg.store import Store
+
+
+def _store():
+    """Resolve the current runtime Store after test/runtime module reloads."""
+    from langgraph_runtime_pg.store import Store
+
+    return Store()
 
 
 def _namespace_error(namespace: Sequence[str]) -> Response | None:
@@ -78,7 +84,7 @@ async def store_put(request: Request) -> Response:
     ttl = payload.get("ttl")
     if ttl is not None and (isinstance(ttl, bool) or not isinstance(ttl, (int, float))):
         return JSONResponse({"detail": "ttl must be a number or null"}, status_code=422)
-    await Store().aput(namespace, payload["key"], payload["value"], index=index, ttl=ttl)
+    await _store().aput(namespace, payload["key"], payload["value"], index=index, ttl=ttl)
     return Response(status_code=204)
 
 
@@ -93,7 +99,7 @@ async def store_get(request: Request) -> JSONResponse | Response:
     if not key:
         return JSONResponse({"error": "Key is required"}, status_code=400)
     refresh = request.query_params.get("refresh_ttl")
-    item = await Store().aget(
+    item = await _store().aget(
         namespace, key, refresh_ttl=refresh.lower() == "true" if refresh else None
     )
     return JSONResponse(None if item is None else _item(request, item))
@@ -110,7 +116,7 @@ async def store_delete(request: Request) -> JSONResponse | Response:
         return error
     if not isinstance(payload["key"], str):
         return JSONResponse({"detail": "key must be a string"}, status_code=422)
-    await Store().adelete(namespace, payload["key"])
+    await _store().adelete(namespace, payload["key"])
     return Response(status_code=204)
 
 
@@ -136,7 +142,7 @@ async def store_search(request: Request) -> JSONResponse | Response:
         or not isinstance(offset, int)
     ):
         return JSONResponse({"detail": "limit and offset must be integers"}, status_code=422)
-    items = await Store().asearch(
+    items = await _store().asearch(
         namespace,
         filter=payload.get("filter"),
         limit=limit,
@@ -166,7 +172,7 @@ async def store_list_namespaces(request: Request) -> JSONResponse | Response:
     if suffix and (error := _namespace_error(suffix)):
         return error
     scoped_prefix = _namespace(request, prefix) if prefix is not None else _namespace(request, [])
-    namespaces = await Store().alist_namespaces(
+    namespaces = await _store().alist_namespaces(
         prefix=scoped_prefix,
         suffix=tuple(suffix) if suffix is not None else None,
         max_depth=payload.get("max_depth"),

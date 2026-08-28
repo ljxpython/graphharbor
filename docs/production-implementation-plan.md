@@ -307,6 +307,6 @@ docs/runbooks/incident-recovery.md
 SDK 契约测试。现在可以进入完整生产重写实施阶段，但这不等于已达到最终生产发布门禁：
 
 1. 补齐官方 JavaScript SDK/REST 全量契约，并在真实网络传输下验证长连接重连。
-2. 对当前 `runtime_service/langgraph.json` 的 P0 graphs 做真实 HTTP + 官方 SDK E2E，验证 custom routes、auth 和 lifespan。
+2. 对当前 `runtime_service/langgraph.json` 的 P0 graphs 做真实 HTTP + 官方 SDK E2E，验证 custom routes、auth 和 lifespan；该外部源码不在当前工作区，acceptance fixture 通过不能替代此项。
 3. 完成双 API/双 worker、PG/Redis/API 重启、跨实例 SSE replay 和观测信号验证。
 4. 通过 Python 3.11/3.12/3.13、Python/JavaScript SDK、租户隔离和故障恢复门禁后，才进入 TestPyPI。
