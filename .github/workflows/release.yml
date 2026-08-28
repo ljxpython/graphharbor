@@ -158,7 +158,7 @@ jobs:
     needs: [publish-graphharbor, publish-graphharbor-runtime]
     if: github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
 
@@ -177,7 +177,9 @@ jobs:
         run: |
           RUNTIME_WHL="$(ls dist/graphharbor_runtime-*.whl | head -n1)"
           VERSION="$(basename "${RUNTIME_WHL}" | sed -E 's/^graphharbor_runtime-(.+)-py3-none-any\.whl$/\1/')"
-          for attempt in $(seq 1 20); do
+          # TestPyPI's simple index can take more than five minutes to expose
+          # a newly uploaded release to a GitHub-hosted runner.
+          for attempt in $(seq 1 36); do
             if uv run --isolated --no-project \
               --index-strategy unsafe-best-match \
               --default-index https://pypi.org/simple \
@@ -186,7 +188,7 @@ jobs:
               python -c "import importlib.metadata as m; assert m.version('graphharbor') == '${VERSION}'; assert m.version('graphharbor-runtime') == '${VERSION}'"; then
               break
             fi
-            if [[ "${attempt}" == "20" ]]; then
+            if [[ "${attempt}" == "36" ]]; then
               exit 1
             fi
             sleep 15
