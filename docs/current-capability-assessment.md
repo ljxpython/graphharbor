@@ -1,7 +1,7 @@
 # GraphHarbor 当前能力评估与真实验收方案
 
 更新日期：2026-08-28  
-评估对象：GraphHarbor `v0.13.0.post10`（待发布本次变更）
+评估对象：GraphHarbor `v0.13.0.post11`（待发布本次变更）
 
 ## 1. 结论
 
