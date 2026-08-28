@@ -27,7 +27,7 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if is_dataclass(value):
-        return _jsonable(asdict(value))
+        return _jsonable(asdict(value))  # type: ignore[arg-type]
     if isinstance(value, (list, tuple, set)):
         return [_jsonable(item) for item in value]
     return str(value)
@@ -87,7 +87,7 @@ def _tool_for_graph(graph_id: str, graph: Any):
 
     invoke.__name__ = f"graph_{graph_id.replace('-', '_')}"
     invoke.__doc__ = f"Invoke the {graph_id} LangGraph agent."
-    invoke.__signature__ = _input_signature(graph, graph_id)
+    invoke.__signature__ = _input_signature(graph, graph_id)  # type: ignore[attr-defined]
     return invoke
 
 
