@@ -1,0 +1,244 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-28T01:49:35.664973+00:00",
+  "base_url": "http://127.0.0.1:31296",
+  "with_chat": false,
+  "with_agents": false,
+  "with_javascript": false,
+  "with_p0": false,
+  "with_mcp": false,
+  "with_network_sse": false,
+  "cross_network_sse_url": null,
+  "results": [
+    {
+      "capability_id": "runtime_health",
+      "tier": "deterministic_protocol",
+      "tests": [
+        "health"
+      ],
+      "status": "passed",
+      "versions": {
+        "graphharbor": "0.13.0.post9",
+        "graphharbor-runtime": "0.13.0.post9",
+        "langgraph": "1.2.11",
+        "langgraph-sdk": "0.4.3",
+        "langgraph-cli": "0.4.31",
+        "langchain": "1.3.17",
+        "langchain-openai": "1.6.0",
+        "deepagents": "0.7.9",
+        "mcp": "1.29.1",
+        "langchain-mcp-adapters": "0.2.2"
+      },
+      "evidence": {
+        "/ok": 200,
+        "/ready": 200,
+        "/info": 200,
+        "/metrics": 200
+      },
+      "failure": null
+    },
+    {
+      "capability_id": "basic_run_persistence",
+      "tier": "deterministic_protocol",
+      "tests": [
+        "python_sdk_runs_stream",
+        "postgres_run_persistence"
+      ],
+      "status": "passed",
+      "versions": {
+        "graphharbor": "0.13.0.post9",
+        "graphharbor-runtime": "0.13.0.post9",
+        "langgraph": "1.2.11",
+        "langgraph-sdk": "0.4.3",
+        "langgraph-cli": "0.4.31",
+        "langchain": "1.3.17",
+        "langchain-openai": "1.6.0",
+        "deepagents": "0.7.9",
+        "mcp": "1.29.1",
+        "langchain-mcp-adapters": "0.2.2"
+      },
+      "evidence": {
+        "status": "success",
+        "stream_events": 4,
+        "value_2_seen": true,
+        "history_entries": 3
+      },
+      "failure": null
+    },
+    {
+      "capability_id": "subgraph_namespace_v3",
+      "tier": "deterministic_protocol",
+      "tests": [
+        "python_sdk_subgraph_stream_v3",
+        "typed_lifecycle_projection"
+      ],
+      "status": "passed",
+      "versions": {
+        "graphharbor": "0.13.0.post9",
+        "graphharbor-runtime": "0.13.0.post9",
+        "langgraph": "1.2.11",
+        "langgraph-sdk": "0.4.3",
+        "langgraph-cli": "0.4.31",
+        "langchain": "1.3.17",
+        "langchain-openai": "1.6.0",
+        "deepagents": "0.7.9",
+        "mcp": "1.29.1",
+        "langchain-mcp-adapters": "0.2.2"
+      },
+      "evidence": {
+        "status": "success",
+        "namespaced_events": 8,
+        "typed_events": 18,
+        "lifecycle_event": true
+      },
+      "failure": null
+    },
+    {
+      "capability_id": "hitl_interrupt_resume",
+      "tier": "deterministic_protocol",
+      "tests": [
+        "python_sdk_interrupt",
+        "command_resume"
+      ],
+      "status": "passed",
+      "versions": {
+        "graphharbor": "0.13.0.post9",
+        "graphharbor-runtime": "0.13.0.post9",
+        "langgraph": "1.2.11",
+        "langgraph-sdk": "0.4.3",
+        "langgraph-cli": "0.4.31",
+        "langchain": "1.3.17",
+        "langchain-openai": "1.6.0",
+        "deepagents": "0.7.9",
+        "mcp": "1.29.1",
+        "langchain-mcp-adapters": "0.2.2"
+      },
+      "evidence": {
+        "interrupt_id_present": true,
+        "resumed": true,
+        "duplicate_resume_idempotent": true,
+        "terminal_status": "success"
+      },
+      "failure": null
+    },
+    {
+      "capability_id": "tool_call_state",
+      "tier": "deterministic_protocol",
+      "tests": [
+        "python_sdk_tool_graph"
+      ],
+      "status": "passed",
+      "versions": {
+        "graphharbor": "0.13.0.post9",
+        "graphharbor-runtime": "0.13.0.post9",
+        "langgraph": "1.2.11",
+        "langgraph-sdk": "0.4.3",
+        "langgraph-cli": "0.4.31",
+        "langchain": "1.3.17",
+        "langchain-openai": "1.6.0",
+        "deepagents": "0.7.9",
+        "mcp": "1.29.1",
+        "langchain-mcp-adapters": "0.2.2"
+      },
+      "evidence": {
+        "status": "success",
+        "tool": "multiply",
+        "result": 12
+      },
+      "failure": null
+    },
+    {
+      "capability_id": "inprocess_streaming_all_modes",
+      "tier": "deterministic_protocol",
+      "tests": [
+        "python_sdk_v2_stream_parts",
+        "durable_remote_replay"
+      ],
+      "status": "passed",
+      "versions": {
+        "graphharbor": "0.13.0.post9",
+        "graphharbor-runtime": "0.13.0.post9",
+        "langgraph": "1.2.11",
+        "langgraph-sdk": "0.4.3",
+        "langgraph-cli": "0.4.31",
+        "langchain": "1.3.17",
+        "langchain-openai": "1.6.0",
+        "deepagents": "0.7.9",
+        "mcp": "1.29.1",
+        "langchain-mcp-adapters": "0.2.2"
+      },
+      "evidence": {
+        "modes": [
+          "values",
+          "updates",
+          "messages",
+          "custom",
+          "checkpoints",
+          "tasks",
+          "debug"
+        ],
+        "emitted": [
+          "checkpoints",
+          "custom",
+          "debug",
+          "messages",
+          "metadata",
+          "tasks",
+          "updates",
+          "values"
+        ],
+        "events": 16
+      },
+      "failure": null
+    },
+    {
+      "capability_id": "store_lifecycle",
+      "tier": "deterministic_protocol",
+      "tests": [
+        "python_sdk_store_put_get_search_namespaces_delete"
+      ],
+      "status": "passed",
+      "versions": {
+        "graphharbor": "0.13.0.post9",
+        "graphharbor-runtime": "0.13.0.post9",
+        "langgraph": "1.2.11",
+        "langgraph-sdk": "0.4.3",
+        "langgraph-cli": "0.4.31",
+        "langchain": "1.3.17",
+        "langchain-openai": "1.6.0",
+        "deepagents": "0.7.9",
+        "mcp": "1.29.1",
+        "langchain-mcp-adapters": "0.2.2"
+      },
+      "evidence": {
+        "get": true,
+        "search": true,
+        "namespaces": true,
+        "delete": true
+      },
+      "failure": null
+    },
+    {
+      "capability_id": "sse_replay_cursor",
+      "tier": "deterministic_protocol",
+      "tests": [
+        "rest_last_event_id"
+      ],
+      "status": "failed",
+      "versions": {
+        "graphharbor": "0.13.0.post9",
+        "graphharbor-runtime": "0.13.0.post9",
+        "langgraph": "1.2.11",
+        "langgraph-sdk": "0.4.3",
+        "langgraph-cli": "0.4.31",
+        "langchain": "1.3.17",
+        "langchain-openai": "1.6.0",
+        "deepagents": "0.7.9",
+        "mcp": "1.29.1",
+        "langchain-mcp-adapters": "0.2.2"
+      },
+      "evidence": {},
+      "failure": "AssertionError: acceptance invariant failed"
+    }
+  ]
+}

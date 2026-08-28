@@ -13,3 +13,7 @@ build/
 .DS_Store
 .env
 *.pckl
+.codex/
+dump.rdb
+graphify-out/
+tests/javascript/node_modules/

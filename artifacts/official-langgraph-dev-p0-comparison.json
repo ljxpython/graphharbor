@@ -1,0 +1,376 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "official_url": "http://127.0.0.1:31398",
+  "graphharbor_url": "http://127.0.0.1:31296",
+  "graphs": {
+    "p0_assistant": {
+      "status": "passed",
+      "official": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": null,
+          "booking": null,
+          "route": null,
+          "specialist": null,
+          "approved": null,
+          "findings": 2,
+          "summary_present": true,
+          "interrupts": false,
+          "messages": 0,
+          "tool_trace": [],
+          "message_kinds": []
+        },
+        "projection": {
+          "status": "success",
+          "findings": 2,
+          "summary_present": true
+        }
+      },
+      "graphharbor": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": null,
+          "booking": null,
+          "route": null,
+          "specialist": null,
+          "approved": null,
+          "findings": 2,
+          "summary_present": true,
+          "interrupts": false,
+          "messages": 0,
+          "tool_trace": [],
+          "message_kinds": []
+        },
+        "projection": {
+          "status": "success",
+          "findings": 2,
+          "summary_present": true
+        }
+      },
+      "differences": []
+    },
+    "customer_support_handoffs_demo": {
+      "status": "passed",
+      "official": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": "refund approved",
+          "booking": null,
+          "route": "billing",
+          "specialist": "billing",
+          "approved": true,
+          "findings": 0,
+          "summary_present": false,
+          "interrupts": false,
+          "messages": 0,
+          "tool_trace": [],
+          "message_kinds": []
+        },
+        "projection": {
+          "status": "success",
+          "route": "billing",
+          "specialist": "billing",
+          "approved": true,
+          "response": "refund approved"
+        }
+      },
+      "graphharbor": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": "refund approved",
+          "booking": null,
+          "route": "billing",
+          "specialist": "billing",
+          "approved": true,
+          "findings": 0,
+          "summary_present": false,
+          "interrupts": false,
+          "messages": 0,
+          "tool_trace": [],
+          "message_kinds": []
+        },
+        "projection": {
+          "status": "success",
+          "route": "billing",
+          "specialist": "billing",
+          "approved": true,
+          "response": "refund approved"
+        }
+      },
+      "differences": []
+    },
+    "test_case_agent_v2": {
+      "status": "passed",
+      "official": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": null,
+          "booking": null,
+          "route": null,
+          "specialist": null,
+          "approved": null,
+          "findings": 0,
+          "summary_present": false,
+          "interrupts": false,
+          "messages": 7,
+          "tool_trace": [
+            "read_project_scope",
+            "fetch_requirements",
+            "run_validation"
+          ],
+          "message_kinds": [
+            "human",
+            "ai",
+            "tool",
+            "tool",
+            "ai",
+            "tool",
+            "ai"
+          ]
+        },
+        "projection": {
+          "status": "success",
+          "required_tool_trace": [
+            "read_project_scope",
+            "fetch_requirements",
+            "run_validation"
+          ],
+          "observed_tool_trace": [
+            "read_project_scope",
+            "fetch_requirements",
+            "run_validation"
+          ]
+        }
+      },
+      "graphharbor": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": null,
+          "booking": null,
+          "route": null,
+          "specialist": null,
+          "approved": null,
+          "findings": 0,
+          "summary_present": false,
+          "interrupts": false,
+          "messages": 7,
+          "tool_trace": [
+            "read_project_scope",
+            "fetch_requirements",
+            "run_validation"
+          ],
+          "message_kinds": [
+            "human",
+            "ai",
+            "tool",
+            "tool",
+            "ai",
+            "tool",
+            "ai"
+          ]
+        },
+        "projection": {
+          "status": "success",
+          "required_tool_trace": [
+            "read_project_scope",
+            "fetch_requirements",
+            "run_validation"
+          ],
+          "observed_tool_trace": [
+            "read_project_scope",
+            "fetch_requirements",
+            "run_validation"
+          ]
+        }
+      },
+      "differences": []
+    },
+    "personal_assistant_demo": {
+      "status": "passed",
+      "official": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": null,
+          "booking": "booking confirmed",
+          "route": null,
+          "specialist": null,
+          "approved": null,
+          "findings": 0,
+          "summary_present": false,
+          "interrupts": false,
+          "messages": 8,
+          "tool_trace": [
+            "read_preference",
+            "coordinate_delegate",
+            "draft_schedule"
+          ],
+          "message_kinds": [
+            "human",
+            "ai",
+            "tool",
+            "ai",
+            "tool",
+            "ai",
+            "tool",
+            "ai"
+          ]
+        },
+        "projection": {
+          "status": "success",
+          "booking": "booking confirmed",
+          "required_tool_trace": [
+            "read_preference",
+            "coordinate_delegate",
+            "draft_schedule"
+          ],
+          "observed_tool_trace": [
+            "read_preference",
+            "coordinate_delegate",
+            "draft_schedule"
+          ]
+        }
+      },
+      "graphharbor": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": null,
+          "booking": "booking confirmed",
+          "route": null,
+          "specialist": null,
+          "approved": null,
+          "findings": 0,
+          "summary_present": false,
+          "interrupts": false,
+          "messages": 7,
+          "tool_trace": [
+            "read_preference",
+            "coordinate_delegate",
+            "draft_schedule"
+          ],
+          "message_kinds": [
+            "human",
+            "ai",
+            "tool",
+            "tool",
+            "ai",
+            "tool",
+            "ai"
+          ]
+        },
+        "projection": {
+          "status": "success",
+          "booking": "booking confirmed",
+          "required_tool_trace": [
+            "read_preference",
+            "coordinate_delegate",
+            "draft_schedule"
+          ],
+          "observed_tool_trace": [
+            "read_preference",
+            "coordinate_delegate",
+            "draft_schedule"
+          ]
+        }
+      },
+      "differences": []
+    },
+    "deepagent_demo": {
+      "status": "passed",
+      "official": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": null,
+          "booking": null,
+          "route": null,
+          "specialist": null,
+          "approved": null,
+          "findings": 0,
+          "summary_present": false,
+          "interrupts": false,
+          "messages": 10,
+          "tool_trace": [
+            "write_todos",
+            "write_todos",
+            "task",
+            "write_todos"
+          ],
+          "message_kinds": [
+            "human",
+            "ai",
+            "tool",
+            "ai",
+            "tool",
+            "ai",
+            "tool",
+            "ai",
+            "tool",
+            "ai"
+          ]
+        },
+        "projection": {
+          "status": "success",
+          "required_tool_trace": [
+            "write_todos",
+            "task",
+            "write_todos"
+          ],
+          "tool_trace_contract": "matched"
+        }
+      },
+      "graphharbor": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": null,
+          "booking": null,
+          "route": null,
+          "specialist": null,
+          "approved": null,
+          "findings": 0,
+          "summary_present": false,
+          "interrupts": false,
+          "messages": 10,
+          "tool_trace": [
+            "write_todos",
+            "write_todos",
+            "task",
+            "write_todos"
+          ],
+          "message_kinds": [
+            "human",
+            "ai",
+            "tool",
+            "ai",
+            "tool",
+            "ai",
+            "tool",
+            "ai",
+            "tool",
+            "ai"
+          ]
+        },
+        "projection": {
+          "status": "success",
+          "required_tool_trace": [
+            "write_todos",
+            "task",
+            "write_todos"
+          ],
+          "tool_trace_contract": "matched"
+        }
+      },
+      "differences": []
+    }
+  },
+  "difference_count": 0
+}
