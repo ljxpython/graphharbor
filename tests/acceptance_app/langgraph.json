@@ -9,6 +9,7 @@
     "subgraph": "./graphs.py:subgraph",
     "hitl": "./graphs.py:hitl",
     "tool": "./graphs.py:tool",
+    "streaming_all_modes": "./graphs.py:streaming_all_modes",
     "assistant_supervisor": "./p0_graphs.py:assistant_supervisor",
     "p0_assistant": "./p0_graphs.py:assistant_supervisor",
     "customer_support_handoff": "./p0_graphs.py:customer_support_handoff",

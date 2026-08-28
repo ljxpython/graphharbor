@@ -226,6 +226,47 @@ async def _tool_case(client: Any) -> dict[str, Any]:
     )
 
 
+async def _inprocess_streaming_case(client: Any) -> dict[str, Any]:
+    assistant = await client.assistants.create(
+        graph_id="streaming_all_modes", name="acceptance-streaming-all-modes"
+    )
+    thread = await client.threads.create(graph_id="streaming_all_modes")
+    modes = ["values", "updates", "messages", "custom", "checkpoints", "tasks", "debug"]
+    try:
+        parts = [
+            part
+            async for part in client.runs.stream(
+                thread["thread_id"],
+                assistant["assistant_id"],
+                input={"value": 1},
+                stream_mode=modes,
+                stream_subgraphs=True,
+                stream_resumable=True,
+                version="v2",
+            )
+        ]
+        emitted = {
+            str(part.get("event") or part.get("type"))
+            for part in parts
+            if isinstance(part, dict) and (part.get("event") or part.get("type"))
+        }
+        assert set(modes) <= emitted, {
+            "expected": modes,
+            "emitted": sorted(emitted),
+            "parts": parts,
+        }
+        return _record(
+            "inprocess_streaming_all_modes",
+            "deterministic_protocol",
+            ["python_sdk_v2_stream_parts", "durable_remote_replay"],
+            "passed",
+            evidence={"modes": modes, "emitted": sorted(emitted), "events": len(parts)},
+        )
+    finally:
+        await client.threads.delete(thread["thread_id"])
+        await client.assistants.delete(assistant["assistant_id"])
+
+
 async def _replay_case(client: Any, base_url: str) -> dict[str, Any]:
     assistant = await client.assistants.create(graph_id="basic", name="acceptance-replay")
     thread = await client.threads.create(graph_id="basic")
@@ -822,6 +863,7 @@ async def _run(args: argparse.Namespace) -> list[dict[str, Any]]:
         ("subgraph", _subgraph_case),
         ("hitl", lambda c: _hitl_case(c, args.base_url)),
         ("tool", _tool_case),
+        ("inprocess_streaming", _inprocess_streaming_case),
         ("store", _store_case),
     ]
     if args.with_chat:
@@ -902,6 +944,7 @@ async def _run(args: argparse.Namespace) -> list[dict[str, Any]]:
                         "subgraph": "subgraph_namespace_v3",
                         "hitl": "hitl_interrupt_resume",
                         "tool": "tool_call_state",
+                        "inprocess_streaming": "inprocess_streaming_all_modes",
                         "store": "store_lifecycle",
                         "chat": "real_deepseek_agent",
                         "langchain_agent": "langchain_agent_loop",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
+from time import time
 from typing import Any, cast
 
 from langchain_core.runnables import RunnableConfig
@@ -70,40 +71,46 @@ async def invoke_graph(
     config: RunnableConfig,
     on_event: EventCallback | None = None,
 ) -> Any:
-    """Run with v2 explicitly and optionally project v3 events."""
+    """Run once while retaining every documented v2 stream part."""
     if on_event is None:
         # LangGraph v2 returns GraphOutput(value, interrupts); preserve both fields.
         return await graph.ainvoke(input_value, config=config, version="v2")
 
-    stream = graph.astream_events(input_value, config=config, version="v3")
+    stream = graph.astream(
+        input_value,
+        config=config,
+        stream_mode=("values", "updates", "messages", "custom", "checkpoints", "tasks", "debug"),
+        subgraphs=True,
+        version="v2",
+    )
     if inspect.isawaitable(stream):
         stream = await stream
-    async for raw_event in stream:
-        event = dict(raw_event)
-        if event.get("type") == "event":
-            params = event.get("params") or {}
-            method = str(event.get("method", "custom"))
-            projected = {
-                # Keep the v2-friendly ``event`` key while exposing the raw v3
-                # protocol envelope for clients that need typed projections.
-                "event": method,
-                "method": method,
-                "data": _jsonable(params.get("data")),
-                "namespace": _jsonable(params.get("namespace", [])),
-                "timestamp": params.get("timestamp"),
-                "seq": event.get("seq"),
-                "interrupts": _jsonable(params.get("interrupts", ())),
-                "params": _jsonable(params),
-            }
-        else:
-            projected = event
+    output: Any = None
+    interrupts: tuple[Any, ...] = ()
+    async for part in stream:
+        event = dict(part)
+        method = str(event.get("type", "custom"))
+        namespace = _jsonable(event.get("ns", ()))
+        data = _jsonable(event.get("data"))
+        raw_interrupts = event.get("interrupts") or ()
+        if method == "values":
+            output = data
+            interrupts = tuple(raw_interrupts)
+        projected = {
+            "event": method,
+            "method": method,
+            "data": data,
+            "namespace": namespace,
+            "timestamp": int(time() * 1000),
+            "interrupts": _jsonable(raw_interrupts),
+            "params": {
+                "namespace": namespace,
+                "timestamp": int(time() * 1000),
+                "data": data,
+                "interrupts": _jsonable(raw_interrupts),
+            },
+        }
         await on_event(projected)
-    output = stream.output() if hasattr(stream, "output") else None
-    if inspect.isawaitable(output):
-        output = await output
-    interrupts = stream.interrupts() if hasattr(stream, "interrupts") else ()
-    if inspect.isawaitable(interrupts):
-        interrupts = await interrupts
     return GraphOutput(value=output, interrupts=tuple(interrupts or ()))
 
 

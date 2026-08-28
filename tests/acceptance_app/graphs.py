@@ -8,8 +8,11 @@ import os
 import httpx
 from deepagents import create_deep_agent
 from langchain.agents import create_agent
+from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+from langchain_core.messages import AIMessage
 from langchain_core.tools import tool as langchain_tool
 from langchain_openai import ChatOpenAI
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 from typing_extensions import TypedDict
@@ -97,6 +100,26 @@ _tool_builder.add_node("tool", _tool_node)
 _tool_builder.add_edge(START, "tool")
 _tool_builder.add_edge("tool", END)
 tool = _tool_builder.compile()
+
+
+class StreamingState(TypedDict, total=False):
+    value: int
+
+
+_streaming_model = FakeMessagesListChatModel(responses=[AIMessage(content="streamed")])
+
+
+def _streaming_node(state: StreamingState) -> StreamingState:
+    _streaming_model.invoke([])
+    get_stream_writer()({"progress": 1})
+    return {"value": int(state.get("value", 0)) + 1}
+
+
+_streaming_builder = StateGraph(StreamingState)
+_streaming_builder.add_node("emit", _streaming_node)
+_streaming_builder.add_edge(START, "emit")
+_streaming_builder.add_edge("emit", END)
+streaming_all_modes = _streaming_builder.compile()
 
 
 class ChatState(TypedDict, total=False):

@@ -200,6 +200,43 @@ def test_v3_projection_normalizes_typed_channels_and_lifecycle() -> None:
     assert input_event["params"]["data"]["event"] == "requested"
 
 
+def test_run_sse_v3_preserves_every_standard_stream_channel() -> None:
+    from langhost.streaming import _event_frame
+
+    for method, data in (
+        ("values", {"value": 1}),
+        ("updates", {"node": {"value": 2}}),
+        ("messages", [{"content": "token"}, {"langgraph_node": "agent"}]),
+        ("custom", {"progress": 1}),
+        ("checkpoints", {"values": {"value": 1}}),
+        ("tasks", {"name": "node", "result": {"value": 1}}),
+        ("debug", {"type": "checkpoint"}),
+    ):
+        frame = _event_frame(
+            {
+                "seq": 7,
+                "event": {
+                    "method": method,
+                    "params": {
+                        "namespace": ["child:run-1"],
+                        "timestamp": 123,
+                        "data": data,
+                    },
+                },
+            },
+            modes={method},
+            stream_subgraphs=True,
+            version="v3",
+        )
+        assert frame is not None
+        name, typed, sequence = frame
+        assert name == method
+        assert sequence == 7
+        assert typed["method"] == method
+        assert typed["params"]["namespace"] == ["child:run-1"]
+        assert typed["params"]["data"] == data
+
+
 def test_delegation_principal_and_hs256_validation() -> None:
     from langgraph_runtime_pg.auth import DelegationJWTValidator
 

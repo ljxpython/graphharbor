@@ -106,6 +106,11 @@ Core 覆盖：
 - run_id、thread_id、namespace 和 metadata 不丢失。
 - 多 worker、多 API 实例行为一致。
 
+实现边界：worker 使用一次 LangGraph `astream(version="v2")` 捕获全部标准
+StreamPart 模式（`values`、`updates`、`messages`、`custom`、`checkpoints`、
+`tasks`、`debug`），再通过远程 SSE 的 typed event envelope 重放。远程接口不暴露
+Python `RunStream` 对象本身。
+
 ### 3.4 v3 事件流、子图和 HITL
 
 Core 包含未来前端需要的事件能力：
@@ -124,6 +129,14 @@ graph.stream_events(..., version="v3")
 - interrupt requested、resume accepted。
 - completed、failed、interrupted。
 - sequence/cursor、reconnect/replay。
+
+标准 v2 模式的 payload、`ns`/namespace、timestamp 和 interrupts 会进入 v3
+projection。`stream.messages`、`stream.values`、`stream.subgraphs`、
+`stream.lifecycle`、`stream.output`、`stream.interrupted`、`stream.interrupts`、
+`stream.extensions` 和 `interleave()` 是图进程内的 LangGraph 对象 API；GraphHarbor
+不把这些 Python 对象作为 HTTP 对象承诺。标准 `custom` mode 会转发；自定义
+transformer 的 `custom:<name>` extension 只保证在调用方 LangGraph 进程内可用，
+不宣称跨网络重建。
 
 ### 3.5 HITL
 

@@ -1,7 +1,7 @@
 # GraphHarbor 当前能力评估与真实验收方案
 
 更新日期：2026-08-28  
-评估对象：GraphHarbor `v0.13.0.post9`（待发布本次变更）
+评估对象：GraphHarbor `v0.13.0.post10`（待发布本次变更）
 
 ## 1. 结论
 
@@ -90,6 +90,8 @@ LangGraph/ LangChain MCP 可用于查阅官方协议与 API；本会话已启用
 5. 若要重跑文档中五个 P0 graph，必须提供实际 `runtime_service` 项目根目录及其外部
    依赖、custom auth、MCP/skills 服务的测试配置。
 6. 跨网络 SSE 验收必须由第二台受控主机或受控隧道执行；本机 loopback 不可替代。
+7. 运行会调用 `claim_next()` 的 API/worker 不得与会 `TRUNCATE` 的 fixture 共享验收库；
+   跑 runtime contract 前先停止 acceptance API/worker，或改用独占数据库。
 
 ## 6. 验收顺序与通过标准
 
@@ -462,3 +464,40 @@ URL 执行才算跨网络证据；`--with-network-sse` 仅是本地多阶段 str
 本次还修复了两处闭环缺口：worker 序列化支持 LangChain `model_dump(mode="json")`，
 并在 checkpoint 只有 `__pregel_tasks` 时回退到已持久化的 `threads.values`，因此
 DeepAgent 的真实消息不会再出现“run success 但 state 为空”的假失败。
+
+## 14. In-process Streaming 完整兼容边界
+
+基于锁定的 `langgraph==1.2.11`，worker 现在通过一次
+`graph.astream(..., version="v2")` 捕获并持久化全部标准 StreamPart 模式：
+`values`、`updates`、`messages`、`custom`、`checkpoints`、`tasks`、`debug`。
+每个事件保留 `type` 对应的 `method`、`ns` 对应的 `namespace`、`data` 和
+`interrupts`；子图 namespace、LangChain 消息及其 metadata 也通过 JSON-safe
+序列化保留。新增 `streaming_all_modes` fixture 和执行器测试逐项验证了这些模式。
+
+这意味着 GraphHarbor 的远程 run SSE/Protocol stream 对上述原始模式提供可重放的
+等价事件投影，且能被官方 SDK 消费。锁定版本的 in-process `RunStream` 投影则由用户
+图内的 LangGraph 直接提供，并已按下表验证：
+
+| 文档投影或模式 | 已验证行为 | GraphHarbor 网络承诺 |
+|---|---|---|
+| raw `stream` / `ProtocolEvent` | `type`、`method`、`seq`、namespace、payload；同步和异步消费 | 七个标准 v2 mode 以 durable typed event 重放 |
+| `stream.values` / `stream.output` | 状态快照与最终状态 | `values` durable event |
+| `stream.messages` | content-block 消息流与 `.text.get()` 最终文本 | `messages` durable event，不保留 Python 对象身份 |
+| `stream.subgraphs` / `stream.lifecycle` | 子图 handle、path、started/completed lifecycle | namespace 与 lifecycle typed event |
+| `stream.interrupted` / `stream.interrupts` | checkpoint 驱动的 HITL interrupt | `values` event 的 interrupts + run interrupted 状态 |
+| `stream.extensions` | 调用方 transformer 创建的命名 projection；本轮 `audit` 真实验证 | 不承诺把 Python projection 对象序列化为 HTTP |
+| `interleave()` | `values` 与 extension channel 的单消费者到达顺序 | 不适用，属于 Python 进程内消费 API |
+
+v3 会按已注册 transformer 的 `required_stream_modes` 选择原始 v2 输入；因此
+`updates`、`custom`、`checkpoints`、`tasks`、`debug` 的 in-process 派生 projection
+由调用方 transformer 负责声明。GraphHarbor 不伪造固定的 `extensions` HTTP API，也
+不承诺自定义 transformer 生成的 `custom:<name>` Python channel 可跨进程重建；由
+`get_stream_writer()` 写入的标准 `custom` mode 则会被完整持久化和重放。
+
+完整声明的证据入口：
+
+- `libs/langgraph-runtime-pg/tests/test_public_runtime.py::test_executor_captures_all_v2_stream_parts`
+- `libs/langgraph-runtime-pg/tests/test_public_runtime.py::test_langgraph_v3_inprocess_projections_and_interleave`
+- `libs/langgraph-runtime-pg/tests/test_public_runtime.py::test_langgraph_v3_inprocess_subgraphs_and_interrupts`
+- `libs/langgraph-runtime-pg/tests/test_production_contract.py::test_run_sse_v3_preserves_every_standard_stream_channel`
+- `tests/acceptance_app/run_acceptance.py` 的 `inprocess_streaming_all_modes`
