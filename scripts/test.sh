@@ -84,7 +84,8 @@ from redis.asyncio import from_url
 
 
 async def main() -> None:
-    connection = await asyncpg.connect(os.environ["DATABASE_URI"])
+    database_uri = os.environ["DATABASE_URI"].replace("postgresql+asyncpg://", "postgresql://", 1)
+    connection = await asyncpg.connect(database_uri)
     try:
         await connection.execute("SELECT 1")
     finally:

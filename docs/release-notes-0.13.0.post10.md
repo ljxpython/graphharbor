@@ -7,6 +7,8 @@
   typed remote event。
 - 增加锁定 `langgraph==1.2.11` 的 v3 in-process `RunStream` 验证，覆盖 raw event、
   values、messages、output、subgraphs、lifecycle、interrupt、extensions 与 interleave。
+- 修复多个 worker 同时领取同一 thread 的 pending run 时的 PostgreSQL 竞态；领取过程会
+  锁定 thread 并在锁内复查运行状态，避免违反单 thread 单 running run 约束。
 
 ## 兼容边界
 
@@ -15,5 +17,5 @@
 
 ## 验证
 
-- runtime production contract：连续两次 `37 passed`。
+- runtime production contract：连续两次 `37 passed`；队列并发领取回归覆盖 16 路竞争。
 - streaming 目标契约：`11 passed`，并完成 Ruff、Mypy、能力映射与 OpenSpec 严格校验。

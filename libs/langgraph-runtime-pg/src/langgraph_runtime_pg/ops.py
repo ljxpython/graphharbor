@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 import orjson
 import structlog
 from langgraph.types import StateSnapshot
-from sqlalchemy import delete, func, select as sa_select, text
+from sqlalchemy import delete, exists as sa_exists, func, select as sa_select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from starlette.exceptions import HTTPException
 
@@ -2341,23 +2341,19 @@ async def _claim_next_run(sf, blocked_threads, retry_counter_cls):
         result = await session.execute(
             text(
                 f"""
-                UPDATE runs SET status = 'running', updated_at = now()
-                WHERE run_id = (
-                    SELECT r.run_id FROM runs r
-                    WHERE r.status = 'pending'
-                      AND r.created_at <= now()
-                      AND NOT EXISTS (
-                          SELECT 1 FROM runs r2
-                          WHERE r2.thread_id IS NOT NULL
-                            AND r2.thread_id = r.thread_id
-                            AND r2.status = 'running'
-                      )
-                      {exclude_sql}
-                    ORDER BY r.created_at
-                    FOR UPDATE SKIP LOCKED
-                    LIMIT 1
-                )
-                RETURNING run_id
+                SELECT r.run_id FROM runs r
+                WHERE r.status = 'pending'
+                  AND r.created_at <= now()
+                  AND NOT EXISTS (
+                      SELECT 1 FROM runs r2
+                      WHERE r2.thread_id IS NOT NULL
+                        AND r2.thread_id = r.thread_id
+                        AND r2.status = 'running'
+                  )
+                  {exclude_sql}
+                ORDER BY r.created_at
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
                 """
             ),
             params,
@@ -2371,11 +2367,37 @@ async def _claim_next_run(sf, blocked_threads, retry_counter_cls):
             await session.commit()
             return ("empty", None, None, None, None)
         if run_row.thread_id is not None:
+            # Serialize claims for a thread. The candidate query only locks
+            # the run row, so a sibling worker may have selected another run
+            # for the same thread concurrently.
+            thread = await session.scalar(
+                sa_select(ThreadRow)
+                .where(ThreadRow.thread_id == run_row.thread_id)
+                .with_for_update()
+            )
+            active = await session.scalar(
+                sa_select(
+                    sa_exists(
+                        sa_select(1).where(
+                            RunRow.thread_id == run_row.thread_id,
+                            RunRow.status == "running",
+                            RunRow.run_id != run_row.run_id,
+                        )
+                    )
+                )
+            )
+            if active:
+                await session.commit()
+                return ("blocked", run_id, run_row.thread_id, None, None)
             blocked_by_hb = await _has_heartbeating_sibling(session, run_row.thread_id, run_id)
             if blocked_by_hb:
                 run_row.status = "pending"
                 await session.commit()
                 return ("blocked", run_id, run_row.thread_id, None, None)
+            if thread is not None:
+                thread.status = "busy"
+        run_row.status = "running"
+        run_row.updated_at = datetime.now(UTC)
         attempt = await retry_counter_cls(sf).increment(run_id, session=session)
         run_dict = run_to_dict(run_row)
         await set_run_heartbeat(run_id)

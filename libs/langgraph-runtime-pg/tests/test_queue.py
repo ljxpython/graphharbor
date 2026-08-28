@@ -99,9 +99,7 @@ async def test_one_running_per_thread_under_concurrent_claim(pg_runtime):
         ]
 
     winners = [
-        item
-        for batch in await asyncio.gather(claim_one(), claim_one(), claim_one(), claim_one())
-        for item in batch
+        item for batch in await asyncio.gather(*(claim_one() for _ in range(16))) for item in batch
     ]
     assert len(winners) == 1, f"expected one winner, got {winners}"
     assert winners[0][0] in rids
