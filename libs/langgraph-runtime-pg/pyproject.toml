@@ -1,7 +1,7 @@
 [project]
 name = "graphharbor-runtime"
 # GraphHarbor has its own release line; langgraph-api is compatibility-spike-only.
-version = "0.13.0.post13"
+version = "0.13.0.post14"
 description = "GraphHarbor PostgreSQL and Redis runtime for the LangGraph Agent Server"
 readme = "README.md"
 license = "MIT"
@@ -60,6 +60,7 @@ dependencies = [
     "PyJWT[crypto]>=2.8",
     "starlette>=0.37",
     "langgraph-checkpoint-postgres==3.1.2",
+    "langgraph==1.2.11",
 ]
 
 [project.optional-dependencies]
