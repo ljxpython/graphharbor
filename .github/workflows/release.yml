@@ -190,13 +190,18 @@ jobs:
             fi
             sleep 15
           done
-          uv pip install --system \
+          uv run --isolated --no-project --python 3.11 \
             --index-strategy unsafe-best-match \
             --default-index https://test.pypi.org/simple \
             --index https://pypi.org/simple \
-            "graphharbor==${VERSION}"
-          python -c "import importlib.metadata as m; assert m.version('graphharbor') == '${VERSION}'; assert m.version('graphharbor-runtime') == '${VERSION}'"
-          graphharbor --version
+            --with "graphharbor==${VERSION}" \
+            python -c "import importlib.metadata as m; assert m.version('graphharbor') == '${VERSION}'; assert m.version('graphharbor-runtime') == '${VERSION}'"
+          uv run --isolated --no-project --python 3.11 \
+            --index-strategy unsafe-best-match \
+            --default-index https://test.pypi.org/simple \
+            --index https://pypi.org/simple \
+            --with "graphharbor==${VERSION}" \
+            graphharbor --version
 
   github-release:
     name: GitHub Release
