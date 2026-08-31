@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "owner_approved": false,
+  "gates": {
+    "runtime_context_policy": {"status": "not_run", "evidence": []},
+    "worker_recovery": {"status": "not_run", "evidence": []},
+    "deepagent_isolation": {"status": "not_run", "evidence": []},
+    "mcp_scope_and_lifecycle": {"status": "not_run", "evidence": []},
+    "observability_redaction_and_fail_soft": {"status": "not_run", "evidence": []},
+    "cross_network_sse": {"status": "not_run", "evidence": []},
+    "external_runtime_dependencies": {"status": "not_run", "evidence": []},
+    "migration_and_backup_restore": {"status": "not_run", "evidence": []},
+    "performance_budget": {"status": "not_run", "evidence": []},
+    "platform_route_ownership": {"status": "not_run", "evidence": []},
+    "rollout_and_rollback": {"status": "not_run", "evidence": []}
+  }
+}

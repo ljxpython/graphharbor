@@ -7,6 +7,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -277,6 +278,9 @@ class RuntimeEventRow(Base):
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=_JSONB_EMPTY)
+    terminal: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=_NOW
     )

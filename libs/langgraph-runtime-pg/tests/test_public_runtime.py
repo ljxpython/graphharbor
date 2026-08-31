@@ -4,9 +4,10 @@ import asyncio
 import json
 from collections.abc import AsyncIterable
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 import pytest
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
 
@@ -46,6 +47,24 @@ def test_graph_registry_loads_standard_config(tmp_path: Path) -> None:
     assert registry.ids() == ("assistant",)
 
 
+def test_thread_config_preserves_run_fields() -> None:
+    from langgraph_runtime_pg.graph_executor import thread_config
+
+    config = thread_config(
+        "server-thread",
+        configurable={"thread_id": "client-thread", "model_id": "model-a"},
+        metadata={"request": "run-1"},
+        tags=("runtime", "test"),
+        context={"temperature": 0.2},
+    )
+
+    assert config["configurable"]["thread_id"] == "server-thread"
+    assert config["configurable"]["model_id"] == "model-a"
+    assert config["metadata"] == {"request": "run-1"}
+    assert config["tags"] == ["runtime", "test"]
+    assert cast(dict[str, Any], config)["context"] == {"temperature": 0.2}
+
+
 def test_graph_registry_resolves_project_root_relative_paths(tmp_path: Path) -> None:
     package = tmp_path / "runtime_service"
     package.mkdir()
@@ -69,6 +88,100 @@ def test_graph_registry_resolves_project_root_relative_paths(tmp_path: Path) -> 
     from langgraph_runtime_pg.graph_registry import GraphRegistry
 
     assert GraphRegistry.from_path(config).ids() == ("assistant",)
+
+
+def test_graph_registry_loads_src_layout_project(tmp_path: Path) -> None:
+    source_root = tmp_path / "src" / "runtime_service"
+    source_root.mkdir(parents=True)
+    (source_root / "__init__.py").write_text("VALUE = 2\n", encoding="utf-8")
+    (source_root / "graphs.py").write_text(
+        "from runtime_service import VALUE\n"
+        "from langgraph.graph import END, START, StateGraph\n"
+        "from typing import TypedDict\n"
+        "class State(TypedDict):\n"
+        "    value: int\n"
+        "def get_agent():\n"
+        "    b = StateGraph(State)\n"
+        "    b.add_node('increment', lambda s: {'value': s['value'] + VALUE})\n"
+        "    b.add_edge(START, 'increment')\n"
+        "    b.add_edge('increment', END)\n"
+        "    return b.compile()\n",
+        encoding="utf-8",
+    )
+    config = tmp_path / "langgraph.json"
+    config.write_text(
+        json.dumps({"graphs": {"assistant": "./src/runtime_service/graphs.py:get_agent"}}),
+        encoding="utf-8",
+    )
+
+    from langgraph_runtime_pg.graph_registry import GraphRegistry
+
+    registry = GraphRegistry.from_path(config)
+    assert registry.ids() == ("assistant",)
+
+
+def test_graph_registry_rejects_symlink_escape(tmp_path: Path) -> None:
+    external = tmp_path.parent / "escaped_graphs.py"
+    external.write_text(
+        "from langgraph.graph import END, START, StateGraph\n"
+        "def _graph():\n"
+        "    builder = StateGraph(dict)\n"
+        "    builder.add_node('done', lambda state: state)\n"
+        "    builder.add_edge(START, 'done')\n"
+        "    builder.add_edge('done', END)\n"
+        "    return builder.compile()\n",
+        encoding="utf-8",
+    )
+    package = tmp_path / "runtime_service"
+    package.mkdir()
+    (package / "graphs.py").symlink_to(external)
+    config = package / "langgraph.json"
+    config.write_text(json.dumps({"graphs": {"assistant": "./graphs.py:_graph"}}), encoding="utf-8")
+
+    from langgraph_runtime_pg.graph_registry import GraphRegistry
+
+    with pytest.raises(ValueError, match="escapes base directory"):
+        GraphRegistry.from_path(config)
+
+
+@pytest.mark.asyncio
+async def test_graph_registry_resolves_async_per_run_factory_and_closes_context(
+    tmp_path: Path,
+) -> None:
+    module = tmp_path / "graphs.py"
+    module.write_text(
+        "from contextlib import asynccontextmanager\n"
+        "from typing import TypedDict\n"
+        "from langgraph.graph import END, START, StateGraph\n"
+        "class State(TypedDict):\n"
+        "    marker: str\n"
+        "@asynccontextmanager\n"
+        "async def get_agent(config):\n"
+        "    marker = config['metadata']['marker']\n"
+        "    builder = StateGraph(State)\n"
+        "    builder.add_node('mark', lambda _state: {'marker': marker})\n"
+        "    builder.add_edge(START, 'mark')\n"
+        "    builder.add_edge('mark', END)\n"
+        "    try:\n"
+        "        yield builder.compile()\n"
+        "    finally:\n"
+        "        open(config['metadata']['closed'], 'w').close()\n",
+        encoding="utf-8",
+    )
+    config = tmp_path / "langgraph.json"
+    config.write_text(
+        json.dumps({"graphs": {"assistant": "graphs.py:get_agent"}}), encoding="utf-8"
+    )
+
+    from langgraph_runtime_pg.graph_registry import GraphRegistry
+
+    registry = GraphRegistry.from_path(config)
+    closed = tmp_path / "closed"
+    run_config = cast(RunnableConfig, {"metadata": {"marker": "run-a", "closed": str(closed)}})
+    async with registry.open("assistant", run_config) as graph:
+        result = await graph.ainvoke({"marker": "input"})
+    assert result == {"marker": "run-a"}
+    assert closed.is_file()
 
 
 @pytest.mark.asyncio

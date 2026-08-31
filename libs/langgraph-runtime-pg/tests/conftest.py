@@ -7,9 +7,11 @@ import os
 import sys
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from uuid import uuid4
 
 import httpx
 import pytest
+import redis.asyncio as redis
 
 # libs/langgraph-runtime-pg/tests → repo root
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -62,22 +64,46 @@ def _sdk_py_langserve_graphs() -> str:
     return json.dumps(absolute)
 
 
+async def _clear_test_redis_namespace() -> None:
+    """Remove only keys owned by this test namespace."""
+    from langgraph_runtime_pg.redis_stream import _namespace
+
+    client = redis.Redis.from_url(os.environ["REDIS_URI"], decode_responses=False)
+    try:
+        keys = [key async for key in client.scan_iter(match=f"{_namespace()}:*")]
+        if keys:
+            await client.delete(*keys)
+    finally:
+        await client.aclose()
+
+
 @pytest.fixture
 async def pg_runtime():
     """Fresh PG pool + empty tables for ops / stream tests."""
     os.environ["LANGGRAPH_RUNTIME_EDITION"] = "pg"
     os.environ["LG_RUNTIME_PG_TEST"] = "1"
+    base_prefix = os.environ.get("GRAPHHARBOR_REDIS_PREFIX", "graphharbor:test")
+    os.environ["GRAPHHARBOR_REDIS_PREFIX"] = f"{base_prefix}:case:{uuid4().hex}"
 
     from langgraph_runtime_pg.database import start_pool, stop_pool, truncate_all
     from langgraph_runtime_pg.store import reset_store
 
+    await stop_pool()
     await start_pool()
+    await _clear_test_redis_namespace()
     await truncate_all()
     reset_store()
     try:
         yield
     finally:
         reset_store()
+        from langgraph_runtime_pg.checkpoint import teardown_checkpointer
+        from langgraph_runtime_pg.redis_stream import stop_stream
+        from langgraph_runtime_pg.store import teardown_store
+
+        await stop_stream()
+        await teardown_store()
+        await teardown_checkpointer()
         await truncate_all()
         await stop_pool()
 

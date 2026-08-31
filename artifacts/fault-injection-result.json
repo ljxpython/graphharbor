@@ -1,0 +1,19 @@
+{
+  "prefix": "graphharbor:fault:script:20260831d",
+  "lease_seconds": 5,
+  "worker_killed": true,
+  "run_id": "3d42b710-b498-455b-950b-92b1bbf4025f",
+  "thread_id": "b79440ca-0825-4545-859c-ba0f76c9aa04",
+  "api_status": "success",
+  "state": {
+    "marker": "checkpointed",
+    "completed": true
+  },
+  "database": {
+    "status": "success",
+    "retry_count": 2,
+    "event_total": 29,
+    "terminal_event_total": 1
+  },
+  "status": "passed"
+}

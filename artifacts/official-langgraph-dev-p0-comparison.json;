@@ -1,0 +1,383 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "official_url": "http://127.0.0.1:31398",
+  "graphharbor_url": "http://127.0.0.1:31296",
+  "graphs": {
+    "p0_assistant": {
+      "status": "passed",
+      "official": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": null,
+          "booking": null,
+          "route": null,
+          "specialist": null,
+          "approved": null,
+          "findings": 2,
+          "summary_present": true,
+          "interrupts": false,
+          "messages": 0,
+          "tool_names": [],
+          "message_kinds": [],
+          "text": ""
+        },
+        "projection": {
+          "status": "success",
+          "findings": 2,
+          "summary_present": true
+        }
+      },
+      "graphharbor": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": null,
+          "booking": null,
+          "route": null,
+          "specialist": null,
+          "approved": null,
+          "findings": 2,
+          "summary_present": true,
+          "interrupts": false,
+          "messages": 0,
+          "tool_names": [],
+          "message_kinds": [],
+          "text": ""
+        },
+        "projection": {
+          "status": "success",
+          "findings": 2,
+          "summary_present": true
+        }
+      },
+      "differences": []
+    },
+    "customer_support_handoffs_demo": {
+      "status": "passed",
+      "official": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": "refund approved",
+          "booking": null,
+          "route": "billing",
+          "specialist": "billing",
+          "approved": true,
+          "findings": 0,
+          "summary_present": false,
+          "interrupts": false,
+          "messages": 0,
+          "tool_names": [],
+          "message_kinds": [],
+          "text": ""
+        },
+        "projection": {
+          "status": "success",
+          "route": "billing",
+          "specialist": "billing",
+          "approved": true,
+          "response": "refund approved"
+        }
+      },
+      "graphharbor": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": "refund approved",
+          "booking": null,
+          "route": "billing",
+          "specialist": "billing",
+          "approved": true,
+          "findings": 0,
+          "summary_present": false,
+          "interrupts": false,
+          "messages": 0,
+          "tool_names": [],
+          "message_kinds": [],
+          "text": ""
+        },
+        "projection": {
+          "status": "success",
+          "route": "billing",
+          "specialist": "billing",
+          "approved": true,
+          "response": "refund approved"
+        }
+      },
+      "differences": []
+    },
+    "test_case_agent_v2": {
+      "status": "passed",
+      "official": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": null,
+          "booking": null,
+          "route": null,
+          "specialist": null,
+          "approved": null,
+          "findings": 0,
+          "summary_present": false,
+          "interrupts": false,
+          "messages": 8,
+          "tool_names": [
+            "fetch_requirements",
+            "p0_test_case_agent",
+            "read_project_scope",
+            "run_validation"
+          ],
+          "message_kinds": [
+            "human",
+            "ai",
+            "tool",
+            "ai",
+            "tool",
+            "ai",
+            "tool",
+            "ai"
+          ],
+          "text": "Create checkout test cases for checkout with attachment checkout.png.  checkout: checkout scope; attachments: checkout.png.  checkout: login requires MFA; payment failures must be retried once.  checkout: PASS ## Test-Case Report: Checkout\n\n### Scope\n- **Project:** checkout\n- **Attachment:** checkout.png\n\n### Requirements\n1. Login requires MFA.\n2. Payment failures must be retried once.\n\n### Validation\n- **Case:** checkout → **PASS**\n\n### Proposed Checkout Test Cases\n1. **MFA Login** — Verify user must complete MFA before accessing checkout.\n2. **Successful Checkout** — Complete purchase with valid payment and MFA.\n3. **Payment Failure Retry** — Simulate a payment failure and verify it is retried once automatically.\n4. **Repeated Payment Failure** — Verify that after the single retry fails again, the checkout is not retried further and the user is notified.\n5. **MFA Failure** — Verify checkout is blocked when MFA is not satisfied.\n\nAll requirements are covered and the deterministic validation case passes."
+        },
+        "projection": {
+          "status": "success",
+          "required_tools": [
+            "fetch_requirements",
+            "read_project_scope",
+            "run_validation"
+          ],
+          "observed_required_tools": [
+            "fetch_requirements",
+            "read_project_scope",
+            "run_validation"
+          ]
+        }
+      },
+      "graphharbor": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": null,
+          "booking": null,
+          "route": null,
+          "specialist": null,
+          "approved": null,
+          "findings": 0,
+          "summary_present": false,
+          "interrupts": false,
+          "messages": 7,
+          "tool_names": [
+            "fetch_requirements",
+            "p0_test_case_agent",
+            "read_project_scope",
+            "run_validation"
+          ],
+          "message_kinds": [
+            "human",
+            "ai",
+            "tool",
+            "tool",
+            "ai",
+            "tool",
+            "ai"
+          ],
+          "text": "Create checkout test cases for checkout with attachment checkout.png.   checkout: checkout scope; attachments: checkout.png. checkout: login requires MFA; payment failures must be retried once.  checkout: PASS "
+        },
+        "projection": {
+          "status": "success",
+          "required_tools": [
+            "fetch_requirements",
+            "read_project_scope",
+            "run_validation"
+          ],
+          "observed_required_tools": [
+            "fetch_requirements",
+            "read_project_scope",
+            "run_validation"
+          ]
+        }
+      },
+      "differences": []
+    },
+    "personal_assistant_demo": {
+      "status": "passed",
+      "official": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": null,
+          "booking": "booking confirmed",
+          "route": null,
+          "specialist": null,
+          "approved": null,
+          "findings": 0,
+          "summary_present": false,
+          "interrupts": false,
+          "messages": 7,
+          "tool_names": [
+            "coordinate_delegate",
+            "draft_schedule",
+            "p0_personal_assistant",
+            "read_preference"
+          ],
+          "message_kinds": [
+            "human",
+            "ai",
+            "tool",
+            "tool",
+            "ai",
+            "tool",
+            "ai"
+          ],
+          "text": "Plan a meeting tomorrow for alice. I'll help plan a meeting for Alice tomorrow. Let me gather the necessary information.\n\n alice: prefers morning meetings and 30-minute slots. Plan a meeting tomorrow for alice: delegate confirms attendee availability.  Plan a 30-minute meeting tomorrow morning for alice, respecting her preference for morning meetings and 30-minute slots.: proposed 09:00-09:30 tomorrow. Here's my proposal for Alice's meeting tomorrow:\n\n**Meeting Proposal**\n- **Attendee:** Alice\n- **Date:** Tomorrow\n- **Time:** 9:00 AM – 9:30 AM\n- **Duration:** 30 minutes\n\n**Rationale:**\n- Alice prefers **morning meetings** and **30-minute slots**, which this proposal aligns with.\n- Delegate confirmed attendee availability for tomorrow.\n\nThis is just a **proposal** — no booking has been made yet. Please let me know if you'd like me to proceed with scheduling this meeting, or if you'd prefer a different time."
+        },
+        "projection": {
+          "status": "success",
+          "booking": "booking confirmed",
+          "required_tools": [
+            "coordinate_delegate",
+            "draft_schedule",
+            "read_preference"
+          ],
+          "observed_required_tools": [
+            "coordinate_delegate",
+            "draft_schedule",
+            "read_preference"
+          ]
+        }
+      },
+      "graphharbor": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": null,
+          "booking": "booking confirmed",
+          "route": null,
+          "specialist": null,
+          "approved": null,
+          "findings": 0,
+          "summary_present": false,
+          "interrupts": false,
+          "messages": 8,
+          "tool_names": [
+            "coordinate_delegate",
+            "draft_schedule",
+            "p0_personal_assistant",
+            "read_preference"
+          ],
+          "message_kinds": [
+            "human",
+            "ai",
+            "tool",
+            "ai",
+            "tool",
+            "ai",
+            "tool",
+            "ai"
+          ],
+          "text": "Plan a meeting tomorrow for alice.   alice: prefers morning meetings and 30-minute slots.  Check availability for a 30-minute meeting for alice tomorrow morning: delegate confirms attendee availability.  Draft a 30-minute morning meeting for alice tomorrow: proposed 09:00-09:30 tomorrow. "
+        },
+        "projection": {
+          "status": "success",
+          "booking": "booking confirmed",
+          "required_tools": [
+            "coordinate_delegate",
+            "draft_schedule",
+            "read_preference"
+          ],
+          "observed_required_tools": [
+            "coordinate_delegate",
+            "draft_schedule",
+            "read_preference"
+          ]
+        }
+      },
+      "differences": []
+    },
+    "deepagent_demo": {
+      "status": "passed",
+      "official": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": null,
+          "booking": null,
+          "route": null,
+          "specialist": null,
+          "approved": null,
+          "findings": 0,
+          "summary_present": false,
+          "interrupts": false,
+          "messages": 7,
+          "tool_names": [
+            "p0_deepagent_demo",
+            "research_fact",
+            "write_todos"
+          ],
+          "message_kinds": [
+            "human",
+            "ai",
+            "tool",
+            "tool",
+            "ai",
+            "tool",
+            "ai"
+          ],
+          "text": "Research GraphHarbor architecture. I'll research GraphHarbor's architecture. Let me plan this out and delegate the fact lookup.\n\n Updated todo list to [{'content': 'Delegate fact lookup on GraphHarbor architecture to fact_researcher', 'status': 'in_progress'}, {'content': 'Summarize findings on GraphHarbor architecture', 'status': 'pending'}] GraphHarbor architecture: GraphHarbor uses PostgreSQL checkpoints and Redis transport.  Updated todo list to [{'content': 'Delegate fact lookup on GraphHarbor architecture to fact_researcher', 'status': 'completed'}, {'content': 'Summarize findings on GraphHarbor architecture', 'status': 'completed'}] ## GraphHarbor Architecture\n\nBased on the research, GraphHarbor's architecture is built around two core components:\n\n- **PostgreSQL checkpoints** — used for durable state persistence, allowing the system to save and restore state at defined checkpoints.\n- **Redis transport** — used as the messaging/communication layer, enabling components to exchange data and coordinate.\n\nIn short, GraphHarbor pairs **PostgreSQL for state/checkpoint storage** with **Redis for transport**, giving it a durable, message-driven foundation."
+        },
+        "projection": {
+          "status": "success",
+          "required_tools": [
+            "research_fact"
+          ],
+          "observed_required_tools": [
+            "research_fact"
+          ]
+        }
+      },
+      "graphharbor": {
+        "status": "passed",
+        "summary": {
+          "status": "success",
+          "response": null,
+          "booking": null,
+          "route": null,
+          "specialist": null,
+          "approved": null,
+          "findings": 0,
+          "summary_present": false,
+          "interrupts": false,
+          "messages": 7,
+          "tool_names": [
+            "p0_deepagent_demo",
+            "research_fact",
+            "write_todos"
+          ],
+          "message_kinds": [
+            "human",
+            "ai",
+            "tool",
+            "tool",
+            "ai",
+            "tool",
+            "ai"
+          ],
+          "text": "Research GraphHarbor architecture.    Updated todo list to [{'content': 'Delegate fact lookup on GraphHarbor architecture to fact_researcher', 'status': 'in_progress'}, {'content': 'Summarize findings on GraphHarbor architecture', 'status': 'pending'}] GraphHarbor architecture: GraphHarbor uses PostgreSQL checkpoints and Redis transport.  Updated todo list to [{'content': 'Delegate fact lookup on GraphHarbor architecture to fact_researcher', 'status': 'completed'}, {'content': 'Summarize findings on GraphHarbor architecture', 'status': 'completed'}] "
+        },
+        "projection": {
+          "status": "success",
+          "required_tools": [
+            "research_fact"
+          ],
+          "observed_required_tools": [
+            "research_fact"
+          ]
+        }
+      },
+      "differences": []
+    }
+  },
+  "difference_count": 0
+}

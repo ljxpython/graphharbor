@@ -3,12 +3,18 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import jwt
 import pytest
 from httpx import ASGITransport, AsyncClient
+
+
+@asynccontextmanager
+async def _open_fake_graph(_graph_id: str, _config: object):
+    yield object()
 
 
 def test_run_state_maps_cancel_and_hitl_to_interrupted() -> None:
@@ -65,6 +71,38 @@ def test_run_state_rejects_cancelled_status_and_invalid_success_reason() -> None
         transition("interrupted", "interrupted", reason="cancel_requested").status.value
         == "interrupted"
     )
+
+
+def test_run_configurable_does_not_accept_client_identity_overrides() -> None:
+    from types import SimpleNamespace
+
+    from langgraph_runtime_pg.ops import _build_run_configurable
+
+    result = _build_run_configurable(
+        {
+            "configurable": {
+                "user_id": "client-user",
+                "tenant_id": "client-tenant",
+                "model_id": "model-a",
+            }
+        },
+        SimpleNamespace(config={"configurable": {"user_id": "thread-user"}}),
+        SimpleNamespace(
+            graph_id="assistant",
+            config={"configurable": {"user_id": "assistant-user"}},
+        ),
+        uuid4(),
+        uuid4(),
+        uuid4(),
+        "trusted-user",
+    )
+
+    assert result["user_id"] == "trusted-user"
+    assert "tenant_id" not in result
+    assert "project_id" not in result
+    assert "role" not in result
+    assert "permissions" not in result
+    assert result["model_id"] == "model-a"
 
 
 @pytest.mark.asyncio
@@ -134,7 +172,7 @@ async def test_worker_requeues_and_refreshes_checkpointer_after_postgres_restart
 
     refreshed = object()
     attached: list[object] = []
-    registry = SimpleNamespace(get=lambda _graph_id: object(), attach_checkpointer=attached.append)
+    registry = SimpleNamespace(open=_open_fake_graph, attach_checkpointer=attached.append)
     monkeypatch.setattr("langgraph_runtime_pg.production_worker.invoke_graph", failed_invoke)
     monkeypatch.setattr(
         "langgraph_runtime_pg.production_worker.reconnect_checkpointer",
@@ -267,6 +305,104 @@ def test_delegation_principal_and_hs256_validation() -> None:
     assert principal.can("threads:read")
 
 
+def test_production_delegation_requires_runtime_policy() -> None:
+    from langgraph_runtime_pg.auth import AuthenticationError, DelegationJWTValidator
+
+    now = datetime.now(UTC)
+    token = jwt.encode(
+        {
+            "iss": "https://platform.example",
+            "aud": "graphharbor",
+            "sub": "user-1",
+            "tenant_id": "tenant-1",
+            "project_id": "project-1",
+            "jti": "delegation-without-policy",
+            "iat": now,
+            "exp": now + timedelta(minutes=5),
+        },
+        "secret-secret-secret-secret-secret",
+        algorithm="HS256",
+    )
+    with pytest.raises(AuthenticationError, match="policy claims are required"):
+        DelegationJWTValidator(
+            issuer="https://platform.example",
+            audience="graphharbor",
+            shared_secret="secret-secret-secret-secret-secret",
+            algorithms=("HS256",),
+            require_policy=True,
+        ).validate(token)
+
+
+def test_delegation_policy_is_bound_to_principal_and_runtime_context(monkeypatch) -> None:
+    from langgraph_runtime_pg.auth import (
+        DelegationJWTValidator,
+        RuntimeContextError,
+        RuntimePolicy,
+        sign_runtime_context,
+        validate_policy_overrides,
+        verify_runtime_context_envelope,
+    )
+
+    now = datetime.now(UTC)
+    policy_claims = {
+        "policy_version": "policy-1",
+        "allowed_model_ids": ["model-a"],
+        "allowed_tool_names": ["search"],
+    }
+    token = jwt.encode(
+        {
+            "iss": "https://platform.example",
+            "aud": "graphharbor",
+            "sub": "user-1",
+            "tenant_id": "tenant-1",
+            "project_id": "project-1",
+            "jti": "delegation-with-policy",
+            **policy_claims,
+            "iat": now,
+            "exp": now + timedelta(minutes=5),
+        },
+        "secret-secret-secret-secret-secret",
+        algorithm="HS256",
+    )
+    principal = DelegationJWTValidator(
+        issuer="https://platform.example",
+        audience="graphharbor",
+        shared_secret="secret-secret-secret-secret-secret",
+        algorithms=("HS256",),
+        require_policy=True,
+    ).validate(token)
+    assert principal.policy == RuntimePolicy("policy-1", ("model-a",), ("search",))
+
+    monkeypatch.setenv("GRAPHHARBOR_RUNTIME_CONTEXT_SECRET", "runtime-secret")
+    context = {
+        "user_id": "user-1",
+        "tenant_id": "tenant-1",
+        "project_id": "project-1",
+        "role": "operator",
+        "permissions": ["runs:write"],
+    }
+    signed = sign_runtime_context(
+        context,
+        run_id="run-1",
+        thread_id="thread-1",
+        policy=principal.policy,
+    )
+    restored_context, restored_policy = verify_runtime_context_envelope(
+        signed,
+        run_id="run-1",
+        thread_id="thread-1",
+        tenant_id="tenant-1",
+        project_id="project-1",
+    )
+    assert restored_context == context
+    assert restored_policy == principal.policy
+
+    with pytest.raises(RuntimeContextError, match="rejects model_id"):
+        validate_policy_overrides(principal.policy, configurable={"model_id": "model-b"})
+    with pytest.raises(RuntimeContextError, match="rejects tool names"):
+        validate_policy_overrides(principal.policy, context={"tools": ["shell"]})
+
+
 def test_delegation_jwt_rejects_algorithm_and_refreshes_rotated_key(monkeypatch) -> None:
     from langgraph_runtime_pg.auth import AuthenticationError, DelegationJWTValidator, JWKSCache
 
@@ -299,6 +435,91 @@ def test_delegation_jwt_rejects_algorithm_and_refreshes_rotated_key(monkeypatch)
     assert cache.get("new") == {"kid": "new"}
 
 
+def test_runtime_context_is_signed_to_one_run_and_scope(monkeypatch) -> None:
+    from langgraph_runtime_pg.auth import (
+        RuntimeContextError,
+        sign_runtime_context,
+        verify_runtime_context,
+    )
+
+    monkeypatch.setenv("GRAPHHARBOR_RUNTIME_CONTEXT_SECRET", "runtime-secret")
+    context = {
+        "user_id": "user-1",
+        "tenant_id": "tenant-1",
+        "project_id": "project-1",
+        "role": "operator",
+        "permissions": ["runs:write"],
+    }
+    token = sign_runtime_context(context, run_id="run-1", thread_id="thread-1")
+    assert (
+        verify_runtime_context(
+            token,
+            run_id="run-1",
+            thread_id="thread-1",
+            tenant_id="tenant-1",
+            project_id="project-1",
+        )
+        == context
+    )
+
+    with pytest.raises(RuntimeContextError, match="does not match"):
+        verify_runtime_context(
+            token,
+            run_id="run-2",
+            thread_id="thread-1",
+            tenant_id="tenant-1",
+            project_id="project-1",
+        )
+    with pytest.raises(RuntimeContextError, match="signature"):
+        verify_runtime_context(
+            f"{token[:-1]}x",
+            run_id="run-1",
+            thread_id="thread-1",
+            tenant_id="tenant-1",
+            project_id="project-1",
+        )
+
+
+def test_runtime_context_requires_matching_issuer_and_audience(monkeypatch) -> None:
+    from langgraph_runtime_pg.auth import (
+        RuntimeContextError,
+        sign_runtime_context,
+        verify_runtime_context,
+    )
+
+    monkeypatch.setenv("GRAPHHARBOR_RUNTIME_CONTEXT_SECRET", "runtime-secret")
+    monkeypatch.setenv("GRAPHHARBOR_RUNTIME_CONTEXT_ISSUER", "https://platform.example")
+    monkeypatch.setenv("GRAPHHARBOR_RUNTIME_CONTEXT_AUDIENCE", "graphharbor-worker")
+    context = {
+        "user_id": "user-1",
+        "tenant_id": "tenant-1",
+        "project_id": "project-1",
+        "role": "operator",
+        "permissions": [],
+    }
+    token = sign_runtime_context(context, run_id="run-1", thread_id="thread-1")
+    assert (
+        verify_runtime_context(
+            token,
+            run_id="run-1",
+            thread_id="thread-1",
+            tenant_id="tenant-1",
+            project_id="project-1",
+        )
+        == context
+    )
+
+    monkeypatch.setenv("GRAPHHARBOR_RUNTIME_CONTEXT_AUDIENCE", "wrong-audience")
+    with pytest.raises(RuntimeContextError, match="issuer or audience"):
+        verify_runtime_context(
+            token,
+            run_id="run-1",
+            thread_id="thread-1",
+            tenant_id="tenant-1",
+            project_id="project-1",
+        )
+
+
 def test_schema_models_include_durable_ownership_and_events() -> None:
     from langgraph_runtime_pg.models import RunLeaseRow, RunRow, RuntimeEventRow, RuntimeSchemaRow
 
@@ -307,6 +528,7 @@ def test_schema_models_include_durable_ownership_and_events() -> None:
     }
     assert RunLeaseRow.__tablename__ == "run_leases"
     assert RuntimeEventRow.__tablename__ == "runtime_events"
+    assert "terminal" in {column.name for column in RuntimeEventRow.__table__.columns}
     assert RuntimeSchemaRow.__tablename__ == "runtime_schema"
 
 
@@ -317,11 +539,11 @@ async def test_migration_is_repeatable_and_schema_head_is_recorded(pg_runtime) -
     from langgraph_runtime_pg.database import connect, get_database_uri
     from langgraph_runtime_pg.migrate import upgrade_head
 
-    assert upgrade_head(get_database_uri()) == "005_run_retry_schedule"
-    assert upgrade_head(get_database_uri()) == "005_run_retry_schedule"
+    assert upgrade_head(get_database_uri()) == "006_terminal_events"
+    assert upgrade_head(get_database_uri()) == "006_terminal_events"
     async with connect() as conn:
         revision = await conn.session.scalar(text("SELECT version_num FROM alembic_version"))
-    assert revision == "005_run_retry_schedule"
+    assert revision == "006_terminal_events"
 
 
 @pytest.mark.asyncio
@@ -353,7 +575,8 @@ async def test_record_event_repairs_stale_sequence_counters(pg_runtime) -> None:
             event_seq=0,
         )
         conn.session.add(thread)
-        run = await RunRepository().create(
+        repo = RunRepository()
+        run = await repo.create(
             conn.session,
             assistant_id=assistant_id,
             thread_id=thread_id,
@@ -497,6 +720,9 @@ async def test_production_auth_rejects_missing_management_and_scope_override(
             "tenant_id": "tenant-1",
             "project_id": "project-1",
             "jti": "delegation-auth-boundary",
+            "policy_version": "policy-1",
+            "allowed_model_ids": ["acceptance:model"],
+            "allowed_tool_names": [],
             "iat": now,
             "exp": now + timedelta(minutes=5),
         },
@@ -537,6 +763,9 @@ async def test_production_auth_rejects_missing_management_and_scope_override(
                 "tenant_id": "tenant-2",
                 "project_id": "project-1",
                 "jti": "delegation-auth-other",
+                "policy_version": "policy-1",
+                "allowed_model_ids": ["acceptance:model"],
+                "allowed_tool_names": [],
                 "iat": now,
                 "exp": now + timedelta(minutes=5),
             },
@@ -631,7 +860,17 @@ async def test_run_repository_claim_renew_and_terminal_transition(pg_runtime) ->
             RunStatus.SUCCESS,
             reason=RunReason.COMPLETED,
         )
-        assert finished.status == RunStatus.SUCCESS.value
+        assert finished is not None and finished.status == RunStatus.SUCCESS.value
+        assert (
+            await repo.finish(
+                conn.session,
+                run_id,
+                "late-worker",
+                RunStatus.ERROR,
+                reason=RunReason.BUSINESS_ERROR,
+            )
+            is None
+        )
 
 
 @pytest.mark.asyncio
@@ -875,9 +1114,7 @@ async def test_production_worker_honors_database_cancel_without_redis_control(
 
     monkeypatch.setattr("langgraph_runtime_pg.production_worker.invoke_graph", fake_invoke)
     monkeypatch.setenv("LG_BG_JOB_HEARTBEAT", "2")
-    worker = ProductionWorker(
-        SimpleNamespace(get=lambda _graph_id: object()), owner="cancel-worker"
-    )
+    worker = ProductionWorker(SimpleNamespace(open=_open_fake_graph), owner="cancel-worker")
     task = asyncio.create_task(worker.run_once())
     await asyncio.wait_for(started.wait(), timeout=3)
 
@@ -900,7 +1137,7 @@ async def test_cancel_publishes_one_durable_terminal_event_and_late_cancel_is_no
     from sqlalchemy import func, select
 
     from langgraph_runtime_pg.database import connect
-    from langgraph_runtime_pg.models import AssistantRow, RuntimeEventRow, ThreadRow
+    from langgraph_runtime_pg.models import AssistantRow, RunLeaseRow, RuntimeEventRow, ThreadRow
     from langgraph_runtime_pg.protocol import RunStatus
     from langgraph_runtime_pg.run_store import RunRepository
     from langhost.core_api import _cancel_row
@@ -921,7 +1158,8 @@ async def test_cancel_publishes_one_durable_terminal_event_and_late_cancel_is_no
         conn.session.add(
             ThreadRow(thread_id=thread_id, status="idle", metadata_={}, config={}, interrupts={})
         )
-        run = await RunRepository().create(
+        repo = RunRepository()
+        run = await repo.create(
             conn.session,
             assistant_id=assistant_id,
             thread_id=thread_id,
@@ -931,6 +1169,7 @@ async def test_cancel_publishes_one_durable_terminal_event_and_late_cancel_is_no
             project_id=None,
         )
         run_id = run.run_id
+        assert await repo.claim_next(conn.session, "cancel-worker") is not None
         await _cancel_row(None, conn, run, "interrupt")
 
     async with connect() as conn:
@@ -950,6 +1189,9 @@ async def test_cancel_publishes_one_durable_terminal_event_and_late_cancel_is_no
         assert events[0].payload["reason"] == "cancel_requested"
         row = await conn.session.get(type(run), run_id)
         assert row is not None and row.status == RunStatus.INTERRUPTED.value
+        assert await conn.session.get(RunLeaseRow, run_id) is None
+        thread = await conn.session.get(ThreadRow, thread_id)
+        assert thread is not None and thread.status == "idle"
         await _cancel_row(None, conn, row, "interrupt")
         await conn.session.flush()
 
@@ -960,6 +1202,131 @@ async def test_cancel_publishes_one_durable_terminal_event_and_late_cancel_is_no
             .where(RuntimeEventRow.run_id == run_id)
         )
     assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_cancel_and_finalize_race_keeps_one_terminal_event(pg_runtime) -> None:
+    from sqlalchemy import func, select
+
+    from langgraph_runtime_pg.database import connect, get_session_factory
+    from langgraph_runtime_pg.models import (
+        AssistantRow,
+        RunLeaseRow,
+        RuntimeEventRow,
+        ThreadRow,
+    )
+    from langgraph_runtime_pg.protocol import RunReason, RunStatus
+    from langgraph_runtime_pg.run_store import RunRepository
+    from langhost.core_api import _cancel_row
+
+    assistant_id, thread_id = uuid4(), uuid4()
+    async with connect() as conn:
+        conn.session.add(
+            AssistantRow(
+                assistant_id=assistant_id,
+                graph_id="race",
+                name="race",
+                config={},
+                context={},
+                metadata_={},
+            )
+        )
+        conn.session.add(
+            ThreadRow(thread_id=thread_id, status="idle", metadata_={}, config={}, interrupts={})
+        )
+        run = await RunRepository().create(
+            conn.session,
+            assistant_id=assistant_id,
+            thread_id=thread_id,
+            kwargs={"input": {}},
+            metadata={},
+            tenant_id=None,
+            project_id=None,
+        )
+        assert await RunRepository().claim_next(conn.session, "race-worker") is not None
+        run_id = run.run_id
+
+    async def finalize() -> None:
+        async with get_session_factory()() as session, session.begin():
+            await RunRepository().finish(
+                session,
+                run_id,
+                "race-worker",
+                RunStatus.SUCCESS,
+                reason=RunReason.COMPLETED,
+            )
+
+    async def cancel() -> None:
+        async with connect() as conn:
+            row = await conn.session.get(type(run), run_id)
+            assert row is not None
+            await _cancel_row(None, conn, row, "interrupt")
+
+    await asyncio.gather(finalize(), cancel())
+
+    async with connect() as conn:
+        row = await conn.session.get(type(run), run_id)
+        terminal_count = await conn.session.scalar(
+            select(func.count())
+            .select_from(RuntimeEventRow)
+            .where(RuntimeEventRow.run_id == run_id, RuntimeEventRow.terminal.is_(True))
+        )
+        assert row is not None and row.status in {
+            RunStatus.SUCCESS.value,
+            RunStatus.INTERRUPTED.value,
+        }
+        assert terminal_count == 1
+        assert await conn.session.get(RunLeaseRow, run_id) is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_root_run_persists_terminal_event(pg_runtime) -> None:
+    from sqlalchemy import select
+
+    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.models import AssistantRow, RuntimeEventRow
+    from langgraph_runtime_pg.protocol import RunStatus
+    from langgraph_runtime_pg.run_store import RunRepository
+    from langhost.core_api import _cancel_row
+
+    assistant_id = uuid4()
+    async with connect() as conn:
+        conn.session.add(
+            AssistantRow(
+                assistant_id=assistant_id,
+                graph_id="root-cancel",
+                name="root-cancel",
+                config={},
+                context={},
+                metadata_={},
+            )
+        )
+        repo = RunRepository()
+        run = await repo.create(
+            conn.session,
+            assistant_id=assistant_id,
+            thread_id=None,
+            kwargs={"input": {}},
+            metadata={},
+            tenant_id=None,
+            project_id=None,
+        )
+        assert await repo.claim_next(conn.session, "root-cancel-worker") is not None
+        await _cancel_row(None, conn, run, "interrupt")
+        run_id = run.run_id
+
+    async with connect() as conn:
+        row = await conn.session.get(type(run), run_id)
+        event = await conn.session.scalar(
+            select(RuntimeEventRow).where(
+                RuntimeEventRow.run_id == run_id,
+                RuntimeEventRow.terminal.is_(True),
+            )
+        )
+        assert row is not None and row.status == RunStatus.INTERRUPTED.value
+        assert event is not None
+        assert event.thread_id is None
+        assert event.payload["status"] == RunStatus.INTERRUPTED.value
 
 
 @pytest.mark.asyncio
@@ -1006,9 +1373,7 @@ async def test_worker_kill_is_recovered_by_lease_reaper(pg_runtime, monkeypatch)
         await asyncio.sleep(30)
 
     monkeypatch.setattr("langgraph_runtime_pg.production_worker.invoke_graph", fake_invoke)
-    worker = ProductionWorker(
-        SimpleNamespace(get=lambda _graph_id: object()), owner="killed-worker"
-    )
+    worker = ProductionWorker(SimpleNamespace(open=_open_fake_graph), owner="killed-worker")
     task = asyncio.create_task(worker.run_once())
     await asyncio.wait_for(started.wait(), timeout=3)
     task.cancel()
@@ -1126,7 +1491,7 @@ async def test_production_worker_persists_hitl_interrupt_without_lock_deadlock(
         )
 
     monkeypatch.setattr("langgraph_runtime_pg.production_worker.invoke_graph", fake_invoke)
-    worker = ProductionWorker(SimpleNamespace(get=lambda _graph_id: object()), owner="hitl-worker")
+    worker = ProductionWorker(SimpleNamespace(open=_open_fake_graph), owner="hitl-worker")
     assert await asyncio.wait_for(worker.run_once(), timeout=3)
 
     async with connect() as conn:

@@ -60,3 +60,18 @@ uv run python tests/acceptance_app/run_acceptance.py \
 脚本会让客户端断开后使用 `Last-Event-ID` 重连，并断言无重复、无丢失且收到终态
 values 投影；同时读取 run status 确认最终为 `success`。loopback 只能证明协议路径，
 只有 `--cross-network-sse-url` 指向第二台受控主机或故障代理时才算跨网络门禁。
+
+真实 worker 崩溃和 checkpoint 接管验收：
+
+```bash
+uv run python tests/acceptance_app/run_fault_injection.py \
+  --database-uri "$DATABASE_URI" \
+  --redis-uri "$REDIS_URI"
+```
+
+脚本会启动隔离 API/worker，等待第一阶段 checkpoint 后杀死 worker，再启动 replacement，
+并从 PostgreSQL 校验同一个 `run_id`、`retry_count` 和唯一 terminal event。
+
+普通 acceptance runner 还会自动执行 `run_terminal_idempotency.py`，验证重复 Redis
+队列 hint、迟到 finalize、cancel 和 lease reaper 并发时，同一个 `run_id` 最终只有一个
+terminal event 且 lease 被清理。

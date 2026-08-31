@@ -2908,13 +2908,7 @@ def _build_run_configurable(
         (existing_thread.config or {}).get("configurable") or {} if existing_thread else {}
     )
     assistant_configurable = dict((assistant.config or {}).get("configurable") or {})
-    resolved_user_id = (
-        incoming_configurable.get("user_id")
-        or thread_configurable.get("user_id")
-        or assistant_configurable.get("user_id")
-        or user_id
-    )
-    return {
+    resolved = {
         **assistant_configurable,
         **thread_configurable,
         **incoming_configurable,
@@ -2922,8 +2916,12 @@ def _build_run_configurable(
         "thread_id": str(thread_id),
         "graph_id": assistant.graph_id,
         "assistant_id": str(assistant_id),
-        "user_id": resolved_user_id,
     }
+    for protected in ("user_id", "tenant_id", "project_id", "role", "permissions"):
+        resolved.pop(protected, None)
+    if user_id is not None:
+        resolved["user_id"] = str(user_id)
+    return resolved
 
 
 def _build_run_metadata(assistant, existing_thread, config, metadata, assistant_id):

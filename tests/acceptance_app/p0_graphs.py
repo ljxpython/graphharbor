@@ -8,16 +8,25 @@ measured separately from GraphHarbor protocol behavior.
 import asyncio
 import operator
 import os
+import shutil
+from pathlib import Path
 from typing import Annotated, Any
 
 from deepagents import create_deep_agent
+from deepagents.middleware.filesystem import FilesystemPermission
 from langchain.agents import create_agent
 from langchain.agents.middleware import TodoListMiddleware
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, Send, interrupt
 from typing_extensions import TypedDict
+
+from langgraph_runtime_pg.deepagent_workspace import (
+    build_deepagent_workspace,
+    resolve_skill_sources,
+)
 
 try:
     from graphs import _langchain_model
@@ -200,18 +209,66 @@ _research_subagent = {
     "tools": [research_fact],
 }
 
-deepagent_demo = create_deep_agent(
-    model=_langchain_model(),
-    tools=[],
-    system_prompt=(
-        "You are a bounded research coordinator. First call write_todos to plan. Then call task "
-        "exactly once with subagent_type fact_researcher to delegate the fact lookup. After task "
-        "returns, call write_todos to complete the plan, then summarize. Do not use filesystem or shell tools."
-    ),
-    subagents=[_research_subagent],
-    middleware=[TodoListMiddleware()],
-    name="p0_deepagent_demo",
-)
+def _deepagent_scope(config: RunnableConfig) -> tuple[str, str, str]:
+    configurable = config.get("configurable") or {}
+    context = configurable.get("__graphharbor_runtime_context") or {}
+    if not isinstance(context, dict):
+        raise ValueError("GraphHarbor runtime context is required for DeepAgent workspace")
+    values = (
+        str(context.get("tenant_id") or ""),
+        str(context.get("project_id") or ""),
+        str(configurable.get("thread_id") or ""),
+    )
+    if not all(values):
+        raise ValueError("tenant, project and thread scope are required")
+    return values
+
+
+async def deepagent_demo(config: RunnableConfig):
+    tenant_id, project_id, thread_id = _deepagent_scope(config)
+    workspace = build_deepagent_workspace(
+        Path(os.environ.get("GRAPHHARBOR_WORKSPACE_ROOT", ".graphharbor-workspaces")),
+        tenant_id=tenant_id,
+        project_id=project_id,
+        thread_id=thread_id,
+    )
+    source = Path(__file__).parent / "skills" / "project" / "guardrails"
+    target = workspace.root / "skills" / "project" / "guardrails"
+    target.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source / "SKILL.md", target / "SKILL.md")
+    skills = resolve_skill_sources(workspace.root, ["/skills/project/guardrails/"])
+    permissions = [FilesystemPermission(operations=["read", "write"], paths=["/**"])]
+    deny_filesystem = [
+        FilesystemPermission(operations=["read", "write"], paths=["/**"], mode="deny")
+    ]
+    subagent = {
+        **_research_subagent,
+        "skills": [],
+        "permissions": deny_filesystem,
+    }
+    general_purpose_policy = {
+        "name": "general-purpose",
+        "description": "Policy-denied fallback; never use this agent.",
+        "system_prompt": "Do not perform work. Return a policy denial.",
+        "tools": [],
+        "skills": [],
+        "permissions": deny_filesystem,
+    }
+    return create_deep_agent(
+        model=_langchain_model(),
+        tools=[],
+        system_prompt=(
+            "You are a bounded research coordinator. First call write_todos to plan. Then call task "
+            "exactly once with subagent_type fact_researcher to delegate the fact lookup. After task "
+            "returns, call write_todos to complete the plan, then summarize. Do not use filesystem or shell tools."
+        ),
+        subagents=[subagent, general_purpose_policy],
+        skills=skills,
+        permissions=permissions,
+        backend=workspace.backend,
+        middleware=[TodoListMiddleware()],
+        name="p0_deepagent_demo",
+    )
 
 
 class McpState(TypedDict, total=False):

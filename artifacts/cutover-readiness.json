@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "status": "not_ready",
+  "owner_approved": false,
+  "gates": {
+    "runtime_context_policy": {
+      "status": "not_run",
+      "evidence": [],
+      "failure": null
+    },
+    "worker_recovery": {
+      "status": "not_run",
+      "evidence": [],
+      "failure": null
+    },
+    "deepagent_isolation": {
+      "status": "not_run",
+      "evidence": [],
+      "failure": null
+    },
+    "mcp_scope_and_lifecycle": {
+      "status": "not_run",
+      "evidence": [],
+      "failure": null
+    },
+    "observability_redaction_and_fail_soft": {
+      "status": "not_run",
+      "evidence": [],
+      "failure": null
+    },
+    "cross_network_sse": {
+      "status": "not_run",
+      "evidence": [],
+      "failure": null
+    },
+    "external_runtime_dependencies": {
+      "status": "not_run",
+      "evidence": [],
+      "failure": null
+    },
+    "migration_and_backup_restore": {
+      "status": "not_run",
+      "evidence": [],
+      "failure": null
+    },
+    "performance_budget": {
+      "status": "not_run",
+      "evidence": [],
+      "failure": null
+    },
+    "platform_route_ownership": {
+      "status": "not_run",
+      "evidence": [],
+      "failure": null
+    },
+    "rollout_and_rollback": {
+      "status": "not_run",
+      "evidence": [],
+      "failure": null
+    }
+  },
+  "blockers": [
+    "runtime_context_policy:not_run",
+    "worker_recovery:not_run",
+    "deepagent_isolation:not_run",
+    "mcp_scope_and_lifecycle:not_run",
+    "observability_redaction_and_fail_soft:not_run",
+    "cross_network_sse:not_run",
+    "external_runtime_dependencies:not_run",
+    "migration_and_backup_restore:not_run",
+    "performance_budget:not_run",
+    "platform_route_ownership:not_run",
+    "rollout_and_rollback:not_run",
+    "owner_approved:false"
+  ]
+}

@@ -9,6 +9,18 @@ export DATABASE_URI='postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/graph
 export REDIS_URI='redis://127.0.0.1:6379/0'
 export GRAPHHARBOR_RETRY_BASE_SECONDS=1
 export GRAPHHARBOR_REAPER_INTERVAL_SECONDS=5
+export GRAPHHARBOR_LEASE_SECONDS=60
+export GRAPHHARBOR_RUNTIME_CONTEXT_SECRET='replace-with-a-managed-secret'
+export GRAPHHARBOR_RUNTIME_CONTEXT_ISSUER='https://platform.example'
+export GRAPHHARBOR_RUNTIME_CONTEXT_AUDIENCE='graphharbor-worker'
+
+# These are the platform-api delegation JWT claims, not the internal
+# RuntimeContext envelope claims above. Keep the audience aligned with
+# PLATFORM_API_RUNTIME_DELEGATION_AUDIENCE (default: runtime-service).
+export GRAPHHARBOR_JWT_ISSUER='platform-api'
+export GRAPHHARBOR_JWT_AUDIENCE='runtime-service'
+export GRAPHHARBOR_JWT_ALGORITHMS='HS256'
+export GRAPHHARBOR_JWT_SHARED_SECRET='use-the-managed-platform-delegation-secret'
 
 # 只执行一次或在发布 job 中重复执行，必须先于 API/worker。
 graphharbor migrate upgrade
@@ -22,6 +34,21 @@ graphharbor worker --n-jobs-per-worker 1
 # 当前仅可用于旧实现对比，不得用于生产
 graphharbor worker --compatibility-spike --n-jobs-per-worker 1
 ```
+
+生产 delegation JWT 还必须携带由 platform-api 签发的策略 claim，且其 `aud` 必须等于
+`GRAPHHARBOR_JWT_AUDIENCE`（platform-api 默认值为 `runtime-service`）：
+
+```json
+{
+  "policy_version": "policy-2026-08-31",
+  "allowed_model_ids": ["provider:model"],
+  "allowed_tool_names": ["read_only_tool"]
+}
+```
+
+GraphHarbor 会在 API 创建 Run 和 worker 恢复 Run 时分别校验策略；缺少策略、模型或工具越界
+都会拒绝执行。策略不应从客户端 `context` 或 `config.configurable` 生成，也不会通过 Run
+响应返回签名 runtime token。
 
 生产环境设置 `GRAPHHARBOR_ENV=production` 后，API 和 custom routes 只接受
 platform-api delegation JWT；issuer、audience、JWKS URL 必须同时配置。`tenant_id`

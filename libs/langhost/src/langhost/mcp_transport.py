@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import os
+from contextlib import asynccontextmanager
 from dataclasses import asdict, is_dataclass
 from typing import Any
 from uuid import uuid4
@@ -45,8 +46,8 @@ def _runtime_context(principal: Principal | None) -> dict[str, Any] | None:
     }
 
 
-def _input_signature(graph: Any, name: str) -> inspect.Signature:
-    del graph, name
+def _input_signature(name: str) -> inspect.Signature:
+    del name
     parameters = [
         inspect.Parameter(
             "ctx",
@@ -65,7 +66,20 @@ def _input_signature(graph: Any, name: str) -> inspect.Signature:
     return inspect.Signature(parameters)
 
 
-def _tool_for_graph(graph_id: str, graph: Any):
+@asynccontextmanager
+async def _open_graph(registry: Any, graph_id: str, config: dict[str, Any]):
+    opener = getattr(registry, "open", None)
+    if callable(opener):
+        async with opener(graph_id, config) as graph:
+            yield graph
+        return
+    getter = getattr(registry, "get", None)
+    if not callable(getter):
+        raise RuntimeError("graph registry must provide open() or get()")
+    yield getter(graph_id)
+
+
+def _tool_for_graph(graph_id: str, registry: Any):
     async def invoke(ctx: Context, **kwargs: Any) -> dict[str, Any]:
         try:
             request_context = ctx.request_context
@@ -74,20 +88,18 @@ def _tool_for_graph(graph_id: str, graph: Any):
         request = getattr(request_context, "request", None)
         principal = principal_from_scope(request.scope) if request is not None else None
         payload = kwargs["input"]
-        result = await graph.ainvoke(
-            payload,
-            config=thread_config(
-                f"mcp-{uuid4()}",
-                graph_id=graph_id,
-                runtime_context=_runtime_context(principal),
-            ),
-            version="v2",
+        config = thread_config(
+            f"mcp-{uuid4()}",
+            graph_id=graph_id,
+            runtime_context=_runtime_context(principal),
         )
+        async with _open_graph(registry, graph_id, config) as graph:
+            result = await graph.ainvoke(payload, config=config, version="v2")
         return _jsonable(result)
 
     invoke.__name__ = f"graph_{graph_id.replace('-', '_')}"
     invoke.__doc__ = f"Invoke the {graph_id} LangGraph agent."
-    invoke.__signature__ = _input_signature(graph, graph_id)  # type: ignore[attr-defined]
+    invoke.__signature__ = _input_signature(graph_id)  # type: ignore[attr-defined]
     return invoke
 
 
@@ -110,7 +122,7 @@ def create_mcp_transport(registry: Any) -> tuple[FastMCP, Any]:
         ),
     )
     for graph_id in registry.ids():
-        server.add_tool(_tool_for_graph(graph_id, registry.get(graph_id)), name=graph_id)
+        server.add_tool(_tool_for_graph(graph_id, registry), name=graph_id)
     return server, server.streamable_http_app()
 
 

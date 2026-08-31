@@ -35,8 +35,8 @@ async def test_empty_schema_migration_is_repeatable(pg_runtime) -> None:
 
     try:
         isolated_uri = _schema_uri(base_uri, schema)
-        assert upgrade_head(isolated_uri, version_table_schema=schema) == "005_run_retry_schedule"
-        assert upgrade_head(isolated_uri, version_table_schema=schema) == "005_run_retry_schedule"
+        assert upgrade_head(isolated_uri, version_table_schema=schema) == "006_terminal_events"
+        assert upgrade_head(isolated_uri, version_table_schema=schema) == "006_terminal_events"
         with psycopg.connect(isolated_uri) as connection:
             tables = {
                 row[0]

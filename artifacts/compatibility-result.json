@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-28T01:49:35.664973+00:00",
+  "generated_at": "2026-08-31T06:27:36.863570+00:00",
   "base_url": "http://127.0.0.1:31296",
   "with_chat": false,
   "with_agents": false,
@@ -18,8 +18,8 @@
       ],
       "status": "passed",
       "versions": {
-        "graphharbor": "0.13.0.post9",
-        "graphharbor-runtime": "0.13.0.post9",
+        "graphharbor": "0.13.0.post14",
+        "graphharbor-runtime": "0.13.0.post14",
         "langgraph": "1.2.11",
         "langgraph-sdk": "0.4.3",
         "langgraph-cli": "0.4.31",
@@ -38,6 +38,41 @@
       "failure": null
     },
     {
+      "capability_id": "terminal_transition_idempotency",
+      "tier": "deterministic_reliability",
+      "tests": [
+        "run_terminal_idempotency.py",
+        "test_production_contract.py"
+      ],
+      "status": "passed",
+      "versions": {
+        "graphharbor": "0.13.0.post14",
+        "graphharbor-runtime": "0.13.0.post14",
+        "langgraph": "1.2.11",
+        "langgraph-sdk": "0.4.3",
+        "langgraph-cli": "0.4.31",
+        "langchain": "1.3.17",
+        "langchain-openai": "1.6.0",
+        "deepagents": "0.7.9",
+        "mcp": "1.29.1",
+        "langchain-mcp-adapters": "0.2.2"
+      },
+      "evidence": {
+        "queue_hints": [
+          "35b9f708-afb4-47ee-a960-3934789cd9d6",
+          "35b9f708-afb4-47ee-a960-3934789cd9d6"
+        ],
+        "single_claim": true,
+        "reaper_count": 1,
+        "late_finalize": "lost_lease",
+        "cancel": "completed",
+        "final_status": "interrupted",
+        "terminal_event_count": 1,
+        "lease_present": false
+      },
+      "failure": null
+    },
+    {
       "capability_id": "basic_run_persistence",
       "tier": "deterministic_protocol",
       "tests": [
@@ -46,8 +81,8 @@
       ],
       "status": "passed",
       "versions": {
-        "graphharbor": "0.13.0.post9",
-        "graphharbor-runtime": "0.13.0.post9",
+        "graphharbor": "0.13.0.post14",
+        "graphharbor-runtime": "0.13.0.post14",
         "langgraph": "1.2.11",
         "langgraph-sdk": "0.4.3",
         "langgraph-cli": "0.4.31",
@@ -74,8 +109,8 @@
       ],
       "status": "passed",
       "versions": {
-        "graphharbor": "0.13.0.post9",
-        "graphharbor-runtime": "0.13.0.post9",
+        "graphharbor": "0.13.0.post14",
+        "graphharbor-runtime": "0.13.0.post14",
         "langgraph": "1.2.11",
         "langgraph-sdk": "0.4.3",
         "langgraph-cli": "0.4.31",
@@ -102,8 +137,8 @@
       ],
       "status": "passed",
       "versions": {
-        "graphharbor": "0.13.0.post9",
-        "graphharbor-runtime": "0.13.0.post9",
+        "graphharbor": "0.13.0.post14",
+        "graphharbor-runtime": "0.13.0.post14",
         "langgraph": "1.2.11",
         "langgraph-sdk": "0.4.3",
         "langgraph-cli": "0.4.31",
@@ -129,8 +164,8 @@
       ],
       "status": "passed",
       "versions": {
-        "graphharbor": "0.13.0.post9",
-        "graphharbor-runtime": "0.13.0.post9",
+        "graphharbor": "0.13.0.post14",
+        "graphharbor-runtime": "0.13.0.post14",
         "langgraph": "1.2.11",
         "langgraph-sdk": "0.4.3",
         "langgraph-cli": "0.4.31",
@@ -156,8 +191,8 @@
       ],
       "status": "passed",
       "versions": {
-        "graphharbor": "0.13.0.post9",
-        "graphharbor-runtime": "0.13.0.post9",
+        "graphharbor": "0.13.0.post14",
+        "graphharbor-runtime": "0.13.0.post14",
         "langgraph": "1.2.11",
         "langgraph-sdk": "0.4.3",
         "langgraph-cli": "0.4.31",
@@ -199,8 +234,8 @@
       ],
       "status": "passed",
       "versions": {
-        "graphharbor": "0.13.0.post9",
-        "graphharbor-runtime": "0.13.0.post9",
+        "graphharbor": "0.13.0.post14",
+        "graphharbor-runtime": "0.13.0.post14",
         "langgraph": "1.2.11",
         "langgraph-sdk": "0.4.3",
         "langgraph-cli": "0.4.31",
@@ -222,12 +257,13 @@
       "capability_id": "sse_replay_cursor",
       "tier": "deterministic_protocol",
       "tests": [
+        "python_sdk_resumable_stream",
         "rest_last_event_id"
       ],
-      "status": "failed",
+      "status": "passed",
       "versions": {
-        "graphharbor": "0.13.0.post9",
-        "graphharbor-runtime": "0.13.0.post9",
+        "graphharbor": "0.13.0.post14",
+        "graphharbor-runtime": "0.13.0.post14",
         "langgraph": "1.2.11",
         "langgraph-sdk": "0.4.3",
         "langgraph-cli": "0.4.31",
@@ -237,8 +273,12 @@
         "mcp": "1.29.1",
         "langchain-mcp-adapters": "0.2.2"
       },
-      "evidence": {},
-      "failure": "AssertionError: acceptance invariant failed"
+      "evidence": {
+        "initial_events": 3,
+        "cursor": "1",
+        "replayed_after_cursor": true
+      },
+      "failure": null
     }
   ]
 }

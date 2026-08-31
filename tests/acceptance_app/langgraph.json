@@ -8,6 +8,7 @@
     "deep_agent": "./graphs.py:deep_agent",
     "subgraph": "./graphs.py:subgraph",
     "hitl": "./graphs.py:hitl",
+    "slow_recovery": "./graphs.py:slow_recovery",
     "tool": "./graphs.py:tool",
     "streaming_all_modes": "./graphs.py:streaming_all_modes",
     "assistant_supervisor": "./p0_graphs.py:assistant_supervisor",

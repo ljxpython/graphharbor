@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 
@@ -122,6 +123,29 @@ _streaming_builder.add_edge("emit", END)
 streaming_all_modes = _streaming_builder.compile()
 
 
+class SlowRecoveryState(TypedDict, total=False):
+    marker: str
+    completed: bool
+
+
+async def _recovery_marker(_state: SlowRecoveryState) -> SlowRecoveryState:
+    return {"marker": "checkpointed"}
+
+
+async def _recovery_slow_step(state: SlowRecoveryState) -> SlowRecoveryState:
+    await asyncio.sleep(30)
+    return {"marker": str(state.get("marker", "missing")), "completed": True}
+
+
+_recovery_builder = StateGraph(SlowRecoveryState)
+_recovery_builder.add_node("marker", _recovery_marker)
+_recovery_builder.add_node("slow", _recovery_slow_step)
+_recovery_builder.add_edge(START, "marker")
+_recovery_builder.add_edge("marker", "slow")
+_recovery_builder.add_edge("slow", END)
+slow_recovery = _recovery_builder.compile()
+
+
 class ChatState(TypedDict, total=False):
     messages: list[dict[str, str]]
     response: str
@@ -226,4 +250,13 @@ _chat_builder.add_edge("chat", END)
 chat = _chat_builder.compile()
 
 
-__all__ = ["basic", "chat", "deep_agent", "hitl", "langchain_agent", "subgraph", "tool"]
+__all__ = [
+    "basic",
+    "chat",
+    "deep_agent",
+    "hitl",
+    "langchain_agent",
+    "slow_recovery",
+    "subgraph",
+    "tool",
+]

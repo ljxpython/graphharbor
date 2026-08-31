@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -14,8 +15,9 @@ from sqlalchemy.orm import aliased
 
 from langgraph_runtime_pg.metrics import inc as metric_inc
 from langgraph_runtime_pg.models import RunLeaseRow, RunRow, RuntimeEventRow, ThreadRow
+from langgraph_runtime_pg.observability import build_trace_metadata
 from langgraph_runtime_pg.protocol import RunReason, RunStatus
-from langgraph_runtime_pg.run_state import MAX_INFRASTRUCTURE_RETRIES, transition
+from langgraph_runtime_pg.run_state import MAX_INFRASTRUCTURE_RETRIES, is_terminal, transition
 
 
 class RunOwnershipError(RuntimeError):
@@ -37,6 +39,7 @@ class RunRepository:
         except ValueError:
             self.retry_base_seconds = 1.0
         self.last_requeued_events: list[RuntimeEventRow] = []
+        self.last_transition_events: list[RuntimeEventRow] = []
 
     def retry_delay(self, retry_count: int) -> float:
         """Bounded exponential delay before the next infrastructure attempt."""
@@ -53,6 +56,7 @@ class RunRepository:
         tenant_id: str | None,
         project_id: str | None,
         idempotency_key: str | None = None,
+        multitask_strategy: str | None = None,
     ) -> RunRow:
         """Create a pending run, returning the existing row for a repeated key."""
         if idempotency_key:
@@ -74,6 +78,7 @@ class RunRepository:
             metadata_=dict(metadata or {}),
             kwargs=dict(kwargs),
             idempotency_key=idempotency_key,
+            multitask_strategy=multitask_strategy,
             max_attempts=self.max_attempts,
         )
         try:
@@ -98,6 +103,7 @@ class RunRepository:
         return run
 
     async def claim_next(self, session: Any, owner: str) -> RunRow | None:
+        self.last_transition_events = []
         now = datetime.now(UTC)
         running = aliased(RunRow)
         result = await session.execute(
@@ -133,6 +139,19 @@ class RunRepository:
                 )
                 if thread is not None:
                     thread.status = "idle"
+            event = await self.record_event(
+                session,
+                run_id=run.run_id,
+                thread_id=run.thread_id,
+                topic="lifecycle",
+                payload={
+                    "event": "lifecycle",
+                    "status": RunStatus.ERROR.value,
+                    "reason": RunReason.INFRASTRUCTURE_ERROR.value,
+                },
+                terminal=True,
+            )
+            self.last_transition_events.append(event)
             await session.flush()
             return None
         if run.thread_id is not None:
@@ -217,7 +236,11 @@ class RunRepository:
         target: RunStatus | str,
         *,
         reason: RunReason | str,
-    ) -> RunRow:
+        terminal_payload: dict[str, Any] | None = None,
+        preceding_events: Sequence[tuple[str, dict[str, Any], list[str] | None]] = (),
+        trace_context: dict[str, Any] | None = None,
+    ) -> RunRow | None:
+        self.last_transition_events = []
         now = datetime.now(UTC)
         result = await session.execute(
             select(RunRow).where(RunRow.run_id == run_id).with_for_update()
@@ -225,8 +248,29 @@ class RunRepository:
         run = result.scalar_one_or_none()
         if run is None:
             raise RunOwnershipError(f"run {run_id} does not exist")
-        if run.lease_owner not in (None, owner):
+        if is_terminal(run.status):
+            return None
+        if run.lease_owner != owner:
             raise RunOwnershipError(f"run {run_id} is owned by another worker")
+        if terminal_payload is not None and not is_terminal(target):
+            raise ValueError("terminal_payload requires a terminal run status")
+        if terminal_payload is None and is_terminal(target):
+            terminal_payload = {
+                "event": "lifecycle",
+                "status": str(target),
+                "reason": str(reason),
+            }
+        for topic, payload, namespace in preceding_events:
+            event = await self.record_event(
+                session,
+                run_id=run_id,
+                thread_id=run.thread_id,
+                topic=topic,
+                payload=payload,
+                namespace=namespace,
+                trace_context=trace_context,
+            )
+            self.last_transition_events.append(event)
         change = transition(run.status, target, reason=reason, retry_count=run.retry_count)
         run.status = change.status.value
         run.reason = change.reason.value
@@ -236,6 +280,17 @@ class RunRepository:
         run.heartbeat_at = now
         run.updated_at = now
         await session.execute(delete(RunLeaseRow).where(RunLeaseRow.run_id == run_id))
+        if terminal_payload is not None:
+            event = await self.record_event(
+                session,
+                run_id=run_id,
+                thread_id=run.thread_id,
+                topic="lifecycle",
+                payload=terminal_payload,
+                terminal=True,
+                trace_context=trace_context,
+            )
+            self.last_transition_events.append(event)
         await session.flush()
         return run
 
@@ -247,8 +302,11 @@ class RunRepository:
         *,
         infrastructure: bool,
         reason: RunReason | str,
+        terminal_payload: dict[str, Any] | None = None,
+        trace_context: dict[str, Any] | None = None,
     ) -> RunRow:
         """Release a failed claim; only infrastructure failures are requeued."""
+        self.last_transition_events = []
         now = datetime.now(UTC)
         result = await session.execute(
             select(RunRow).where(RunRow.run_id == run_id).with_for_update()
@@ -256,7 +314,7 @@ class RunRepository:
         run = result.scalar_one_or_none()
         if run is None:
             raise RunOwnershipError(f"run {run_id} does not exist")
-        if run.lease_owner not in (None, owner):
+        if run.lease_owner != owner:
             raise RunOwnershipError(f"run {run_id} is owned by another worker")
         if infrastructure and run.retry_count < min(run.max_attempts, self.max_attempts):
             change = transition(
@@ -283,11 +341,27 @@ class RunRepository:
         run.heartbeat_at = now
         run.updated_at = now
         await session.execute(delete(RunLeaseRow).where(RunLeaseRow.run_id == run_id))
+        payload = terminal_payload or {
+            "event": "lifecycle",
+            "status": run.status,
+            "reason": run.reason,
+        }
+        event = await self.record_event(
+            session,
+            run_id=run_id,
+            thread_id=run.thread_id,
+            topic="lifecycle",
+            payload=payload,
+            terminal=is_terminal(run.status),
+            trace_context=trace_context,
+        )
+        self.last_transition_events.append(event)
         await session.flush()
         return run
 
     async def requeue_for_shutdown(self, session: Any, run_id: UUID, owner: str) -> RunRow:
         """Release a claimed run for graceful worker shutdown."""
+        self.last_transition_events = []
         now = datetime.now(UTC)
         result = await session.execute(
             select(RunRow).where(RunRow.run_id == run_id).with_for_update()
@@ -295,7 +369,7 @@ class RunRepository:
         run = result.scalar_one_or_none()
         if run is None:
             raise RunOwnershipError(f"run {run_id} does not exist")
-        if run.lease_owner not in (None, owner):
+        if run.lease_owner != owner:
             raise RunOwnershipError(f"run {run_id} is owned by another worker")
         if run.status != RunStatus.RUNNING.value:
             return run
@@ -319,6 +393,19 @@ class RunRepository:
             if thread is not None:
                 thread.status = "idle"
         await session.execute(delete(RunLeaseRow).where(RunLeaseRow.run_id == run_id))
+        self.last_transition_events.append(
+            await self.record_event(
+                session,
+                run_id=run_id,
+                thread_id=run.thread_id,
+                topic="lifecycle",
+                payload={
+                    "event": "lifecycle",
+                    "status": run.status,
+                    "reason": run.reason,
+                },
+            )
+        )
         await session.flush()
         metric_inc("graphharbor_shutdown_requeues_total")
         return run
@@ -332,6 +419,8 @@ class RunRepository:
         topic: str,
         payload: dict[str, Any],
         namespace: list[str] | None = None,
+        trace_context: dict[str, Any] | None = None,
+        terminal: bool = False,
     ) -> RuntimeEventRow:
         """Append a durable, monotonic event cursor in the same transaction as the run."""
         if run_id is not None:
@@ -340,6 +429,18 @@ class RunRepository:
             )
             if run is None:
                 raise RunOwnershipError(f"run {run_id} does not exist")
+            if thread_id is not None and thread_id != run.thread_id:
+                raise ValueError("event thread_id does not match the run thread")
+            thread_id = run.thread_id
+            if terminal:
+                existing = await session.scalar(
+                    select(RuntimeEventRow).where(
+                        RuntimeEventRow.run_id == run_id,
+                        RuntimeEventRow.terminal.is_(True),
+                    )
+                )
+                if existing is not None:
+                    return existing
             if run.thread_id is not None:
                 thread = await session.scalar(
                     select(ThreadRow).where(ThreadRow.thread_id == run.thread_id).with_for_update()
@@ -385,13 +486,23 @@ class RunRepository:
             )
             sequence = max(thread.event_seq, max_sequence) + 1
             thread.event_seq = sequence
+        event_payload = dict(payload)
+        event_payload["trace"] = build_trace_metadata(
+            event={"event": topic, "namespace": namespace or [], **payload},
+            context={
+                "run_id": str(run_id) if run_id is not None else None,
+                "thread_id": str(thread_id) if thread_id is not None else None,
+                **(trace_context or {}),
+            },
+        )
         event = RuntimeEventRow(
             run_id=run_id,
             thread_id=thread_id,
             sequence=sequence,
             topic=topic,
             namespace=list(namespace or []),
-            payload=dict(payload),
+            payload=event_payload,
+            terminal=terminal,
         )
         session.add(event)
         await session.flush()
@@ -400,6 +511,7 @@ class RunRepository:
     async def requeue_expired(self, session: Any, *, now: datetime | None = None) -> int:
         now = now or datetime.now(UTC)
         self.last_requeued_events = []
+        self.last_transition_events = []
         result = await session.execute(
             select(RunRow)
             .where(RunRow.status == RunStatus.RUNNING.value, RunRow.lease_expires_at < now)
@@ -451,6 +563,7 @@ class RunRepository:
                         "reason": run.reason,
                     },
                     namespace=[],
+                    terminal=run.status == RunStatus.ERROR.value,
                 )
             )
             count += 1

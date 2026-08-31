@@ -103,6 +103,32 @@ async def _health(base_url: str) -> dict[str, Any]:
         return values
 
 
+async def _terminal_idempotency_case() -> dict[str, Any]:
+    command = [
+        sys.executable,
+        str(ROOT / "tests" / "acceptance_app" / "run_terminal_idempotency.py"),
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    stdout, stderr = await proc.communicate()
+    output = (stdout or b"").decode("utf-8", errors="replace").strip().splitlines()
+    if proc.returncode:
+        detail = (stderr or stdout).decode("utf-8", errors="replace")[-4000:]
+        raise RuntimeError(f"terminal idempotency acceptance failed: {detail}")
+    if not output:
+        raise RuntimeError("terminal idempotency acceptance produced no result")
+    result = json.loads(output[-1])
+    assert result.get("status") == "passed", result
+    return _record(
+        "terminal_transition_idempotency",
+        "deterministic_reliability",
+        ["run_terminal_idempotency.py", "test_production_contract.py"],
+        "passed",
+        evidence=result.get("evidence", {}),
+    )
+
+
 async def _resource_case(
     client: Any, graph_id: str, input_value: dict[str, Any], *, version: str = "v2"
 ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -289,7 +315,13 @@ async def _replay_case(client: Any, base_url: str) -> dict[str, Any]:
                 headers={"last-event-id": "1"},
             )
         replay.raise_for_status()
-        assert "id: 1" not in replay.text and "id: 2" in replay.text, replay.text
+        replay_ids = [
+            int(line.removeprefix("id: ").strip())
+            for line in replay.text.splitlines()
+            if line.startswith("id: ")
+        ]
+        assert replay_ids and all(event_id > 1 for event_id in replay_ids), replay.text
+        assert '"value":2' in replay.text, replay.text
         return _record(
             "sse_replay_cursor",
             "deterministic_protocol",
@@ -857,6 +889,18 @@ async def _run(args: argparse.Namespace) -> list[dict[str, Any]]:
             )
         )
         return results
+    try:
+        results.append(await _terminal_idempotency_case())
+    except Exception as exc:
+        results.append(
+            _record(
+                "terminal_transition_idempotency",
+                "deterministic_reliability",
+                ["run_terminal_idempotency.py", "test_production_contract.py"],
+                "failed",
+                failure=_safe_failure(exc),
+            )
+        )
     client = get_client(url=args.base_url, timeout=args.timeout)
     cases: list[tuple[str, Callable[[Any], Awaitable[dict[str, Any]]]]] = [
         ("basic", _basic_case),

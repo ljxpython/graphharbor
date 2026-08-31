@@ -4,17 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from langchain_core.runnables import RunnableConfig
 from pydantic import PydanticUserError
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from langgraph_runtime_pg.auth import in_principal_scope, principal_from_scope, scope_override_error
+from langgraph_runtime_pg.auth import (
+    RuntimeContextError,
+    in_principal_scope,
+    principal_from_scope,
+    scope_override_error,
+    sign_runtime_context,
+    validate_policy_overrides,
+)
 from langgraph_runtime_pg.checkpoint import (
     copy_thread_checkpoints,
     delete_thread_checkpoints,
@@ -26,6 +34,7 @@ from langgraph_runtime_pg.models import (
     AssistantRow,
     AssistantVersionRow,
     CronRow,
+    RunLeaseRow,
     RunRow,
     RuntimeEventRow,
     ThreadRow,
@@ -94,18 +103,18 @@ def _scope(query: Any, model: Any, principal: Any) -> Any:
 
 def _runtime_context(payload: dict[str, Any], principal: Any) -> dict[str, Any] | None:
     """Persist trusted Agent Server identity for the async worker."""
-    if principal is not None:
-        roles = sorted(principal.roles)
-        scopes = sorted(principal.scopes)
-        return {
-            "user_id": principal.subject,
-            "tenant_id": principal.tenant_id,
-            "project_id": principal.project_id,
-            "role": roles[0] if roles else "user",
-            "permissions": scopes,
-        }
-    context = payload.get("context")
-    return dict(context) if isinstance(context, dict) else None
+    del payload
+    if principal is None:
+        return None
+    roles = sorted(principal.roles)
+    scopes = sorted(principal.scopes)
+    return {
+        "user_id": principal.subject,
+        "tenant_id": principal.tenant_id,
+        "project_id": principal.project_id,
+        "role": roles[0] if roles else "user",
+        "permissions": scopes,
+    }
 
 
 def _metadata_filter(query: Any, model: Any, metadata: Any) -> Any:
@@ -158,6 +167,9 @@ def _thread(row: ThreadRow) -> dict[str, Any]:
 
 
 def _run(row: RunRow) -> dict[str, Any]:
+    kwargs = dict(row.kwargs)
+    kwargs.pop("runtime_context", None)
+    kwargs.pop("runtime_context_token", None)
     return _plain(
         {
             "run_id": row.run_id,
@@ -167,7 +179,7 @@ def _run(row: RunRow) -> dict[str, Any]:
             "updated_at": row.updated_at,
             "status": row.status,
             "metadata": row.metadata_,
-            "kwargs": row.kwargs,
+            "kwargs": kwargs,
             "multitask_strategy": row.multitask_strategy or "enqueue",
         }
     )
@@ -306,10 +318,12 @@ async def assistants_graph(request: Request) -> JSONResponse:
     if row is None or not in_principal_scope(row, principal) or registry is None:
         return _error("assistant not found", 404)
     try:
-        graph = registry.get(row.graph_id)
         xray_value = request.query_params.get("xray", "false")
         xray: int | bool = int(xray_value) if xray_value.isdigit() else xray_value.lower() == "true"
-        return JSONResponse(_plain(graph.get_graph(xray=xray).to_json()))
+        async with registry.open(
+            row.graph_id, {"configurable": {"graph_id": row.graph_id}}
+        ) as graph:
+            return JSONResponse(_plain(graph.get_graph(xray=xray).to_json()))
     except (KeyError, ValueError) as exc:
         return _error(str(exc), 404)
 
@@ -343,17 +357,19 @@ async def assistants_schemas(request: Request) -> JSONResponse:
     if row is None or not in_principal_scope(row, principal) or registry is None:
         return _error("assistant not found", 404)
     try:
-        graph = registry.get(row.graph_id)
-        return JSONResponse(
-            {
-                "graph_id": row.graph_id,
-                "input_schema": _graph_schema(graph, "get_input_schema"),
-                "output_schema": _graph_schema(graph, "get_output_schema"),
-                "state_schema": _graph_schema(graph, "get_input_schema"),
-                "config_schema": None,
-                "context_schema": graph.get_context_jsonschema(),
-            }
-        )
+        async with registry.open(
+            row.graph_id, {"configurable": {"graph_id": row.graph_id}}
+        ) as graph:
+            return JSONResponse(
+                {
+                    "graph_id": row.graph_id,
+                    "input_schema": _graph_schema(graph, "get_input_schema"),
+                    "output_schema": _graph_schema(graph, "get_output_schema"),
+                    "state_schema": _graph_schema(graph, "get_input_schema"),
+                    "config_schema": None,
+                    "context_schema": graph.get_context_jsonschema(),
+                }
+            )
     except KeyError:
         return _error("assistant not found", 404)
 
@@ -370,17 +386,19 @@ async def assistants_subgraphs(request: Request) -> JSONResponse:
     if row is None or not in_principal_scope(row, principal) or registry is None:
         return _error("assistant not found", 404)
     try:
-        graph = registry.get(row.graph_id)
         namespace = request.path_params.get("namespace")
-        return JSONResponse(
-            {
-                name: _plain(subgraph.get_graph().to_json())
-                for name, subgraph in graph.get_subgraphs(
-                    namespace=namespace,
-                    recurse=request.query_params.get("recurse", "false").lower() == "true",
-                )
-            }
-        )
+        async with registry.open(
+            row.graph_id, {"configurable": {"graph_id": row.graph_id}}
+        ) as graph:
+            return JSONResponse(
+                {
+                    name: _plain(subgraph.get_graph().to_json())
+                    for name, subgraph in graph.get_subgraphs(
+                        namespace=namespace,
+                        recurse=request.query_params.get("recurse", "false").lower() == "true",
+                    )
+                }
+            )
     except KeyError:
         return _error("assistant not found", 404)
 
@@ -765,16 +783,18 @@ async def threads_update_state(request: Request) -> JSONResponse | Response:
     if not graph_id or registry is None:
         return _error("thread has no registered graph", 422)
     try:
-        graph = registry.get(str(graph_id))
+        graph_id = str(graph_id)
+        registry.get(graph_id)
     except KeyError:
         return _error("graph not found", 404)
     config = _checkpoint_config(thread_id, payload.get("checkpoint_id"))
     try:
-        next_config = await graph.aupdate_state(
-            config,
-            payload.get("values"),
-            as_node=payload.get("as_node"),
-        )
+        async with registry.open(graph_id, config) as graph:
+            next_config = await graph.aupdate_state(
+                config,
+                payload.get("values"),
+                as_node=payload.get("as_node"),
+            )
     except Exception as exc:
         return _error(f"state update failed: {exc}", 422)
     async with connect() as conn:
@@ -954,9 +974,34 @@ async def runs_create(
         if assistant is None:
             return _error("assistant not found", 404)
         run_payload = dict(payload)
+        run_payload.pop("runtime_context", None)
+        run_payload.pop("runtime_context_token", None)
+        run_context = payload.get("context")
+        assistant_context = assistant.context if isinstance(assistant.context, dict) else {}
+        if isinstance(run_context, dict):
+            run_payload["context"] = {**assistant_context, **run_context}
+        elif "context" not in payload and assistant_context:
+            run_payload["context"] = dict(assistant_context)
         trusted_context = _runtime_context(run_payload, principal)
         if trusted_context is not None:
-            run_payload["context"] = trusted_context
+            run_payload["runtime_context"] = trusted_context
+        policy = getattr(principal, "policy", None)
+        if os.environ.get("GRAPHHARBOR_ENV", "development") == "production" and policy is None:
+            return _error("delegation runtime policy is required", 401)
+        requested_config = run_payload.get("config")
+        requested_configurable = (
+            requested_config.get("configurable") if isinstance(requested_config, dict) else None
+        )
+        try:
+            validate_policy_overrides(
+                policy,
+                configurable=requested_configurable,
+                context=run_payload.get("context")
+                if isinstance(run_payload.get("context"), dict)
+                else None,
+            )
+        except RuntimeContextError as exc:
+            return _error(str(exc), 403)
         idempotency_key = request.headers.get("idempotency-key") or payload.get("idempotency_key")
         run = await RunRepository().create(
             conn.session,
@@ -967,8 +1012,20 @@ async def runs_create(
             tenant_id=principal.tenant_id if principal else getattr(thread, "tenant_id", None),
             project_id=principal.project_id if principal else getattr(thread, "project_id", None),
             idempotency_key=idempotency_key,
+            multitask_strategy=str(payload.get("multitask_strategy") or "enqueue"),
         )
-        run.multitask_strategy = payload.get("multitask_strategy") or "enqueue"
+        if trusted_context and not run.kwargs.get("runtime_context_token"):
+            run.kwargs = {
+                **run.kwargs,
+                "runtime_context_token": sign_runtime_context(
+                    trusted_context,
+                    run_id=str(run.run_id),
+                    thread_id=str(thread.thread_id) if thread else None,
+                    policy=policy,
+                ),
+            }
+            run.kwargs.pop("runtime_context", None)
+            await conn.session.flush()
         await conn.session.refresh(run)
         conn.schedule_after_commit(lambda run_id=run.run_id: enqueue_run(run_id))
         response = _run(run)
@@ -1036,6 +1093,12 @@ async def runs_delete(request: Request) -> JSONResponse | Response:
 
 
 async def _cancel_row(request: Request, conn: Any, row: RunRow, action: str) -> None:
+    locked = await conn.session.scalar(
+        select(RunRow).where(RunRow.run_id == row.run_id).with_for_update()
+    )
+    if locked is None:
+        return
+    row = locked
     if action == "rollback":
         thread_id = row.thread_id
         await conn.session.delete(row)
@@ -1053,22 +1116,33 @@ async def _cancel_row(request: Request, conn: Any, row: RunRow, action: str) -> 
     )
     row.status = change.status.value
     row.reason = change.reason.value
+    row.lease_owner = None
+    row.lease_expires_at = None
+    row.heartbeat_at = datetime.now(UTC)
     row.updated_at = datetime.now(UTC)
-    await conn.session.flush()
+    await conn.session.execute(delete(RunLeaseRow).where(RunLeaseRow.run_id == row.run_id))
     if row.thread_id is not None:
-        durable = await RunRepository().record_event(
-            conn.session,
-            run_id=row.run_id,
-            thread_id=row.thread_id,
-            topic="lifecycle",
-            payload={
-                "event": "lifecycle",
-                "status": RunStatus.INTERRUPTED.value,
-                "reason": RunReason.CANCEL_REQUESTED.value,
-            },
-            namespace=[],
-        )
-        conn.schedule_after_commit(lambda: _fanout_durable_event(durable))
+        thread = await conn.session.get(ThreadRow, row.thread_id)
+        if thread is not None:
+            thread.status = "idle"
+    await conn.session.flush()
+    durable = await RunRepository().record_event(
+        conn.session,
+        run_id=row.run_id,
+        thread_id=row.thread_id,
+        topic="lifecycle",
+        payload={
+            "event": "lifecycle",
+            "status": RunStatus.INTERRUPTED.value,
+            "reason": RunReason.CANCEL_REQUESTED.value,
+        },
+        namespace=[],
+        trace_context={
+            "assistant_id": str(row.assistant_id),
+        },
+        terminal=True,
+    )
+    conn.schedule_after_commit(lambda: _fanout_durable_event(durable))
     if row.thread_id:
 
         async def publish() -> None:

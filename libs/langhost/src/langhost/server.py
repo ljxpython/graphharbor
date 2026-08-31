@@ -31,7 +31,7 @@ from langgraph_runtime_pg.auth import (
 )
 from langgraph_runtime_pg.checkpoint import delete_thread_checkpoints, get_checkpointer
 from langgraph_runtime_pg.database import connect, pool_stats
-from langgraph_runtime_pg.graph_registry import GraphRegistry
+from langgraph_runtime_pg.graph_registry import GraphRegistry, resolve_within_base_dir
 from langgraph_runtime_pg.metrics import prometheus_text, set_gauge
 from langgraph_runtime_pg.models import (
     AssistantRow,
@@ -125,7 +125,7 @@ def _load_symbol(spec: str, base_dir: pathlib.Path) -> Any:
     path_text, separator, symbol = spec.partition(":")
     if not separator or not symbol:
         raise ValueError(f"invalid application path {spec!r}; expected path.py:symbol")
-    path = (base_dir / path_text).resolve()
+    path = resolve_within_base_dir(base_dir, path_text)
     module_name = f"graphharbor_custom_{path.stem}_{abs(hash(path))}"
     module_spec = importlib.util.spec_from_file_location(module_name, path)
     if module_spec is None or module_spec.loader is None:

@@ -35,12 +35,24 @@ def thread_config(
     *,
     assistant_id: str | None = None,
     graph_id: str | None = None,
+    configurable: Mapping[str, Any] | None = None,
+    metadata: Mapping[str, Any] | None = None,
+    tags: list[str] | tuple[str, ...] | None = None,
+    context: Any = None,
     runtime_context: Mapping[str, Any] | None = None,
+    runtime_policy: Mapping[str, Any] | None = None,
 ) -> RunnableConfig:
-    config: RunnableConfig = {"configurable": {}}
+    config: RunnableConfig = {"configurable": dict(configurable or {})}
     if thread_id:
         config["configurable"]["thread_id"] = thread_id
+    if metadata is not None:
+        config["metadata"] = dict(metadata)
+    if tags is not None:
+        config["tags"] = list(tags)
+    if context is not None:
+        cast(dict[str, Any], config)["context"] = context
     if runtime_context:
+        config["configurable"]["__graphharbor_runtime_context"] = dict(runtime_context)
         user = {
             "identity": str(runtime_context.get("user_id") or "").strip(),
             "tenant_id": str(runtime_context.get("tenant_id") or "").strip(),
@@ -61,6 +73,8 @@ def thread_config(
                     user=cast(Any, user),
                 )
             )
+    if runtime_policy:
+        config["configurable"]["__graphharbor_runtime_policy"] = dict(runtime_policy)
     return config
 
 
