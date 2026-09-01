@@ -20,6 +20,23 @@ def test_banner_uses_resolved_port() -> None:
     assert "31296" not in rendered
 
 
+def test_resolve_port_reuses_recently_closed_port() -> None:
+    import socket
+
+    from langhost.cli import _resolve_port
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", 0))
+        port = int(listener.getsockname()[1])
+        listener.listen()
+        with socket.create_connection(("127.0.0.1", port)):
+            accepted, _ = listener.accept()
+            accepted.close()
+
+    assert _resolve_port("127.0.0.1", port) == port
+
+
 def test_serve_passes_resolved_port_to_banner_and_server(
     monkeypatch: Any,
     tmp_path: Path,

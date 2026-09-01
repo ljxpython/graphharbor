@@ -1,7 +1,7 @@
 [project]
 name = "graphharbor"
 # Lockstep with graphharbor-runtime; independent of langgraph-api releases.
-version = "0.13.0.post17"
+version = "0.13.0.post18"
 description = "GraphHarbor CLI for a self-hosted LangGraph Agent Server on PostgreSQL and Redis"
 readme = "README.md"
 license = "MIT"
@@ -50,7 +50,7 @@ dependencies = [
     "mcp>=1.23,<2",
     "uvicorn[standard]>=0.51.0",
     # Exact same version as graphharbor-runtime (lockstep releases).
-    "graphharbor-runtime==0.13.0.post17",
+    "graphharbor-runtime==0.13.0.post18",
 ]
 
 [project.urls]

@@ -36,6 +36,9 @@ def _resolve_port(host: str, port: int | None) -> int:
     with socket.socket(
         socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM
     ) as sock:
+        # Allow an explicit server restart to reuse a port whose old connections
+        # are still in TIME_WAIT; uvicorn applies the same socket option.
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((host, requested))
         except OSError:
