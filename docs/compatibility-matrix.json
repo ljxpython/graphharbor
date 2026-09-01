@@ -1,6 +1,6 @@
 {
-"graphharbor": "0.13.0.post16",
-"graphharbor-runtime": "0.13.0.post16",
+  "graphharbor": "0.13.0.post17",
+  "graphharbor-runtime": "0.13.0.post17",
   "langgraph": "1.2.11",
   "langgraph-sdk": "0.4.3",
   "langgraph-cli": "0.4.31",

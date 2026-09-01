@@ -628,7 +628,7 @@ wheels = [
 
 [[package]]
 name = "graphharbor"
-version = "0.13.0.post16"
+version = "0.13.0.post17"
 source = { editable = "libs/langhost" }
 dependencies = [
     { name = "click" },
@@ -653,7 +653,7 @@ requires-dist = [
 
 [[package]]
 name = "graphharbor-runtime"
-version = "0.13.0.post16"
+version = "0.13.0.post17"
 source = { editable = "libs/langgraph-runtime-pg" }
 dependencies = [
     { name = "alembic" },

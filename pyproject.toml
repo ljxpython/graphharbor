@@ -156,6 +156,7 @@ module = [
     "langgraph_api.*",
     "langgraph_sdk.*",
     "langgraph_cli.*",
+    "deepagents.*",
     "croniter",
     "orjson",
     "psycopg_pool",

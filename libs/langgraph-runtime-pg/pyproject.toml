@@ -1,7 +1,7 @@
 [project]
 name = "graphharbor-runtime"
 # GraphHarbor has its own release line; langgraph-api is compatibility-spike-only.
-version = "0.13.0.post16"
+version = "0.13.0.post17"
 description = "GraphHarbor PostgreSQL and Redis runtime for the LangGraph Agent Server"
 readme = "README.md"
 license = "MIT"

@@ -16,7 +16,7 @@ Principal, Policy, graph and tool semantics remain outside this repository.
 |---|---|---|
 | Formal change validation | passed | `openspec validate graphharbor-runtime-service-cutover --type change --strict` |
 | Locked revisions | passed | GraphHarbor `9ba6bf5839e713a943921bd24f625e1f4a350341`; runtime-service `f95967942cde346b7313d4a6eecee66396b5655f`; both repositories have reviewed local changes |
-| Locked packages | passed | `graphharbor==0.13.0.post16`, `graphharbor-runtime==0.13.0.post16`, `langgraph==1.2.11`, `langgraph-sdk==0.4.3`; `uv.lock` and both built wheel/sdist sets |
+| Locked packages | passed | `graphharbor==0.13.0.post17`, `graphharbor-runtime==0.13.0.post17`, `langgraph==1.2.11`, `langgraph-sdk==0.4.3`; `uv.lock` and both built wheel/sdist sets |
 | Supported runtime-service exports | passed | Production `reference_agent`; acceptance config additionally loads `workflow_demo`, `deep_agent_demo`, `mcp_demo` and `backend_demo` |
 | GraphHarbor protocol/runtime suite | passed | `132 passed, 14 skipped`; database tests used the isolated non-superuser application role, PostgreSQL 16.9 and Redis 7.4.2 |
 | Static and version gates | passed | Ruff, mypy, `uv lock --check` and `scripts/check_versions.py` |
