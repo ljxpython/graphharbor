@@ -128,6 +128,50 @@ async def test_worker_loop_survives_transient_infrastructure_failure(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_cancelled_database_scope_returns_connection_to_pool(pg_runtime) -> None:
+    from sqlalchemy import text
+
+    import langgraph_runtime_pg.database as database
+
+    async def blocked_query() -> None:
+        async with database.connect() as conn:
+            await conn.session.execute(text("SELECT pg_sleep(30)"))
+
+    task = asyncio.create_task(blocked_query())
+    await asyncio.sleep(0.1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert database._ENGINE is not None
+    assert database._ENGINE.pool.checkedout() == 0
+    await asyncio.wait_for(database.healthcheck(), timeout=3)
+
+
+@pytest.mark.asyncio
+async def test_anyio_cancelled_database_scope_returns_connection_to_pool(pg_runtime) -> None:
+    import anyio
+    from sqlalchemy import text
+
+    import langgraph_runtime_pg.database as database
+
+    async def blocked_query() -> None:
+        async with database.connect() as conn:
+            await conn.session.execute(text("SELECT pg_sleep(30)"))
+
+    with anyio.CancelScope() as scope:
+        task = asyncio.create_task(blocked_query())
+        await asyncio.sleep(0.1)
+        scope.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert database._ENGINE is not None
+    assert database._ENGINE.pool.checkedout() == 0
+    await asyncio.wait_for(database.healthcheck(), timeout=3)
+
+
+@pytest.mark.asyncio
 async def test_worker_requeues_and_refreshes_checkpointer_after_postgres_restart(
     pg_runtime, monkeypatch
 ) -> None:
@@ -401,6 +445,46 @@ def test_delegation_policy_is_bound_to_principal_and_runtime_context(monkeypatch
         validate_policy_overrides(principal.policy, configurable={"model_id": "model-b"})
     with pytest.raises(RuntimeContextError, match="rejects tool names"):
         validate_policy_overrides(principal.policy, context={"tools": ["shell"]})
+
+
+def test_custom_auth_user_is_preserved_in_signed_worker_context(monkeypatch) -> None:
+    from langgraph_runtime_pg.auth import (
+        Principal,
+        sign_runtime_context,
+        verify_runtime_context_envelope,
+    )
+    from langgraph_runtime_pg.graph_executor import thread_config
+
+    user = {
+        "identity": "user-1",
+        "tenant_id": "tenant-1",
+        "project_id": "project-1",
+        "role": "operator",
+        "permissions": "runs:write threads:read",
+        "runtime_extension": {"context_hash": "sha256:test"},
+    }
+    principal = Principal.from_auth_user(user)
+    context = {
+        "user_id": principal.subject,
+        "tenant_id": principal.tenant_id,
+        "project_id": principal.project_id,
+        "role": "operator",
+        "permissions": ["runs:write", "threads:read"],
+        "auth_user": principal.auth_user,
+    }
+    monkeypatch.setenv("GRAPHHARBOR_RUNTIME_CONTEXT_SECRET", "runtime-secret")
+    token = sign_runtime_context(context, run_id="run-1", thread_id="thread-1")
+    restored, _ = verify_runtime_context_envelope(
+        token,
+        run_id="run-1",
+        thread_id="thread-1",
+        tenant_id="tenant-1",
+        project_id="project-1",
+    )
+    config = thread_config("thread-1", runtime_context=restored)
+
+    assert config["configurable"]["langgraph_auth_user"] == user
+    assert "auth_user" not in config["configurable"]["__graphharbor_runtime_context"]
 
 
 def test_delegation_jwt_rejects_algorithm_and_refreshes_rotated_key(monkeypatch) -> None:
@@ -784,6 +868,22 @@ async def test_production_auth_rejects_missing_management_and_scope_override(
     assert hidden.status_code == 404
 
 
+def test_production_custom_auth_does_not_require_builtin_jwt_config(monkeypatch) -> None:
+    import langhost.server as server
+
+    class CustomAuth:
+        async def _authenticate_handler(self, authorization: str | None = None) -> dict:
+            del authorization
+            return {"identity": "custom-user"}
+
+    monkeypatch.setenv("GRAPHHARBOR_ENV", "production")
+    monkeypatch.delenv("GRAPHHARBOR_JWT_ISSUER", raising=False)
+    monkeypatch.delenv("GRAPHHARBOR_JWT_AUDIENCE", raising=False)
+    monkeypatch.setattr(server, "_load_symbol", lambda *_args: CustomAuth())
+
+    assert server.create_app({"graphs": {}, "auth": {"path": "auth.py:auth"}}) is not None
+
+
 @pytest.mark.asyncio
 async def test_langgraph_json_cors_configuration_reaches_asgi_boundary(pg_runtime) -> None:
     from langhost.server import create_app
@@ -1128,6 +1228,84 @@ async def test_production_worker_honors_database_cancel_without_redis_control(
     async with connect() as conn:
         row = await conn.session.get(RunRow, run_id)
         assert row is not None and row.status == RunStatus.INTERRUPTED.value
+
+
+@pytest.mark.asyncio
+async def test_production_worker_persists_one_timeout_terminal_event(
+    pg_runtime, monkeypatch
+) -> None:
+    from types import SimpleNamespace
+
+    from sqlalchemy import func, select
+
+    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.models import (
+        AssistantRow,
+        RunLeaseRow,
+        RunRow,
+        RuntimeEventRow,
+        ThreadRow,
+    )
+    from langgraph_runtime_pg.production_worker import ProductionWorker
+    from langgraph_runtime_pg.protocol import RunReason, RunStatus
+    from langgraph_runtime_pg.run_store import RunRepository
+
+    assistant_id = uuid4()
+    thread_id = uuid4()
+    async with connect() as conn:
+        conn.session.add(
+            AssistantRow(
+                assistant_id=assistant_id,
+                graph_id="assistant",
+                name="timeout",
+                config={},
+                context={},
+                metadata_={},
+            )
+        )
+        conn.session.add(
+            ThreadRow(thread_id=thread_id, status="idle", metadata_={}, config={}, interrupts={})
+        )
+        run = await RunRepository().create(
+            conn.session,
+            assistant_id=assistant_id,
+            thread_id=thread_id,
+            kwargs={"input": {}},
+            metadata={},
+            tenant_id=None,
+            project_id=None,
+        )
+        run_id = run.run_id
+
+    async def fake_invoke(*_args, **_kwargs):
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr("langgraph_runtime_pg.production_worker.invoke_graph", fake_invoke)
+    monkeypatch.setenv("GRAPHHARBOR_RUN_TIMEOUT_SECONDS", "0.01")
+    worker = ProductionWorker(SimpleNamespace(open=_open_fake_graph), owner="timeout-worker")
+    assert await asyncio.wait_for(worker.run_once(), timeout=3)
+
+    async with connect() as conn:
+        row = await conn.session.get(RunRow, run_id)
+        thread = await conn.session.get(ThreadRow, thread_id)
+        lease = await conn.session.get(RunLeaseRow, run_id)
+        terminal_count = await conn.session.scalar(
+            select(func.count())
+            .select_from(RuntimeEventRow)
+            .where(RuntimeEventRow.run_id == run_id, RuntimeEventRow.terminal.is_(True))
+        )
+        terminal = await conn.session.scalar(
+            select(RuntimeEventRow).where(
+                RuntimeEventRow.run_id == run_id, RuntimeEventRow.terminal.is_(True)
+            )
+        )
+
+    assert row is not None and row.status == RunStatus.TIMEOUT.value
+    assert row.reason == RunReason.TIMEOUT.value
+    assert thread is not None and thread.status == "idle"
+    assert lease is None
+    assert terminal_count == 1
+    assert terminal is not None and terminal.payload["status"] == RunStatus.TIMEOUT.value
 
 
 @pytest.mark.asyncio
@@ -1516,6 +1694,15 @@ async def test_production_worker_persists_hitl_interrupt_without_lock_deadlock(
         "input.requested",
         "lifecycle",
     ]
+    from langhost.server import create_app
+
+    app = create_app({"graphs": {}})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        state = await client.get(f"/threads/{thread_id}/state")
+    assert state.status_code == 200
+    assert state.json()["interrupts"] == [
+        {"id": "interrupt-1", "value": {"question": "approve"}, "ns": ["child"]}
+    ]
 
 
 @pytest.mark.asyncio
@@ -1641,12 +1828,12 @@ async def test_owned_server_run_sse_replays_durable_events(pg_runtime, monkeypat
         )
         run.status = RunStatus.SUCCESS.value
         run.reason = RunReason.COMPLETED.value
-        run.event_seq = 1
+        run.event_seq = 5
         conn.session.add(
             RuntimeEventRow(
                 run_id=run.run_id,
                 thread_id=thread_id,
-                sequence=1,
+                sequence=5,
                 topic="values",
                 namespace=[],
                 payload={"event": "values", "data": {"value": 2}, "namespace": []},
@@ -1667,13 +1854,25 @@ async def test_owned_server_run_sse_replays_durable_events(pg_runtime, monkeypat
     app = create_app({"graphs": {}})
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get(f"/threads/{thread_id}/runs/{run_id}/stream")
+        replay = await client.get(
+            f"/threads/{thread_id}/runs/{run_id}/stream",
+            headers={"last-event-id": "4"},
+        )
+        expired = await client.get(
+            f"/threads/{thread_id}/runs/{run_id}/stream",
+            headers={"last-event-id": "1"},
+        )
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     assert "event: metadata" in response.text
     assert "event: values" in response.text
-    assert "id: 1" in response.text
+    assert "id: 5" in response.text
     assert "event: end" not in response.text
+    assert "id: 5" in replay.text
+    assert "cursor_expired" in expired.text
+    assert "run_snapshot" in expired.text
+    assert "id: 5" not in expired.text
 
 
 @pytest.mark.asyncio
@@ -1834,6 +2033,40 @@ async def test_run_sse_rejects_unsupported_version(pg_runtime) -> None:
         response = await client.post("/runs/stream", json={"version": "v4"})
     assert response.status_code == 422
     assert "version='v2' or 'v3'" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_run_rejects_missing_checkpoint_and_invalid_interrupts(pg_runtime) -> None:
+    from langhost.server import create_app
+
+    app = create_app({"graphs": {}})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        assistant = await client.post(
+            "/assistants",
+            json={"graph_id": "assistant", "name": "checkpoint-validation"},
+        )
+        thread = await client.post("/threads", json={})
+        path = f"/threads/{thread.json()['thread_id']}/runs"
+        missing = await client.post(
+            path,
+            json={
+                "assistant_id": assistant.json()["assistant_id"],
+                "input": {},
+                "checkpoint_id": "missing-checkpoint",
+            },
+        )
+        invalid_interrupt = await client.post(
+            path,
+            json={
+                "assistant_id": assistant.json()["assistant_id"],
+                "input": {},
+                "interrupt_before": "model",
+            },
+        )
+
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "checkpoint not found"
+    assert invalid_interrupt.status_code == 422
 
 
 @pytest.mark.asyncio

@@ -9,9 +9,28 @@ from typing import Any, cast
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime, ServerInfo
-from langgraph.types import Command, GraphOutput
+from langgraph.types import Command, Durability, GraphOutput
 
 EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
+_DURABILITY_MODES = frozenset({"sync", "async", "exit"})
+
+
+def normalize_durability(value: object) -> Durability | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or value not in _DURABILITY_MODES:
+        raise ValueError("durability must be one of: sync, async, exit")
+    return cast(Durability, value)
+
+
+def normalize_interrupt_nodes(value: object, field: str) -> str | tuple[str, ...] | None:
+    if value is None or value == "*":
+        return value
+    if not isinstance(value, (list, tuple)) or any(
+        not isinstance(item, str) or not item.strip() for item in value
+    ):
+        raise ValueError(f"{field} must be '*' or a list of node names")
+    return tuple(value)
 
 
 def _jsonable(value: Any) -> Any:
@@ -52,20 +71,28 @@ def thread_config(
     if context is not None:
         cast(dict[str, Any], config)["context"] = context
     if runtime_context:
-        config["configurable"]["__graphharbor_runtime_context"] = dict(runtime_context)
-        user = {
-            "identity": str(runtime_context.get("user_id") or "").strip(),
-            "tenant_id": str(runtime_context.get("tenant_id") or "").strip(),
-            "project_id": str(runtime_context.get("project_id") or "").strip(),
-            "role": str(runtime_context.get("role") or "").strip(),
-            "permissions": [
-                str(item).strip()
-                for item in (runtime_context.get("permissions") or [])
-                if str(item).strip()
-            ],
-            "is_authenticated": True,
+        config["configurable"]["__graphharbor_runtime_context"] = {
+            key: value for key, value in runtime_context.items() if key != "auth_user"
         }
-        if all(user[key] for key in ("identity", "tenant_id", "project_id", "role")):
+        raw_auth_user = runtime_context.get("auth_user")
+        user = (
+            dict(raw_auth_user)
+            if isinstance(raw_auth_user, Mapping)
+            else {
+                "identity": str(runtime_context.get("user_id") or "").strip(),
+                "tenant_id": str(runtime_context.get("tenant_id") or "").strip(),
+                "project_id": str(runtime_context.get("project_id") or "").strip(),
+                "role": str(runtime_context.get("role") or "").strip(),
+                "permissions": [
+                    str(item).strip()
+                    for item in (runtime_context.get("permissions") or [])
+                    if str(item).strip()
+                ],
+                "is_authenticated": True,
+            }
+        )
+        if user.get("identity"):
+            config["configurable"]["langgraph_auth_user"] = user
             config["configurable"]["__pregel_runtime"] = Runtime(
                 server_info=ServerInfo(
                     assistant_id=str(assistant_id or ""),
@@ -84,17 +111,30 @@ async def invoke_graph(
     *,
     config: RunnableConfig,
     on_event: EventCallback | None = None,
+    durability: Durability | None = None,
+    interrupt_before: str | tuple[str, ...] | None = None,
+    interrupt_after: str | tuple[str, ...] | None = None,
 ) -> Any:
     """Run once while retaining every documented v2 stream part."""
     if on_event is None:
         # LangGraph v2 returns GraphOutput(value, interrupts); preserve both fields.
-        return await graph.ainvoke(input_value, config=config, version="v2")
+        return await graph.ainvoke(
+            input_value,
+            config=config,
+            durability=durability,
+            interrupt_before=interrupt_before,
+            interrupt_after=interrupt_after,
+            version="v2",
+        )
 
     stream = graph.astream(
         input_value,
         config=config,
         stream_mode=("values", "updates", "messages", "custom", "checkpoints", "tasks", "debug"),
         subgraphs=True,
+        durability=durability,
+        interrupt_before=interrupt_before,
+        interrupt_after=interrupt_after,
         version="v2",
     )
     if inspect.isawaitable(stream):
@@ -136,4 +176,11 @@ def resume_command(value: Any) -> Command | None:
     return Command(**fields) if fields else None
 
 
-__all__ = ["EventCallback", "invoke_graph", "resume_command", "thread_config"]
+__all__ = [
+    "EventCallback",
+    "invoke_graph",
+    "normalize_durability",
+    "normalize_interrupt_nodes",
+    "resume_command",
+    "thread_config",
+]

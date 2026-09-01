@@ -7,6 +7,10 @@ The system SHALL persist run status as `pending`, `running`, `success`, `error`,
 - **WHEN** an active run is cancelled and cancellation completes
 - **THEN** its public status is `interrupted` and its internal reason is `cancel_requested`
 
+#### Scenario: Configured run deadline expires
+- **WHEN** a Worker executes a Run longer than the configured positive Run deadline
+- **THEN** it cancels graph execution and persists exactly one `timeout` terminal event without an infrastructure retry
+
 ### Requirement: HITL resume
 The system SHALL persist interrupt payloads and resume the same thread/checkpoint through `Command(resume=...)`.
 
@@ -27,3 +31,10 @@ The system SHALL support single and bulk cancellation with `wait`, `action=inter
 #### Scenario: Rollback cancellation
 - **WHEN** a client cancels a run with `action=rollback`
 - **THEN** execution stops and the run plus associated checkpoint data are removed according to the documented contract
+
+### Requirement: Public durability modes
+The system SHALL validate and persist the public LangGraph durability modes `sync`, `async` and `exit`, and SHALL pass the selected mode to `ainvoke` or `astream` for every execution attempt.
+
+#### Scenario: Sync durability reaches the graph
+- **WHEN** a client creates a Run with `durability="sync"`
+- **THEN** the Worker invokes the graph with `durability="sync"` and does not fall back to the default async mode

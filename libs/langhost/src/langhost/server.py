@@ -840,7 +840,7 @@ def create_app(
     if custom_app is not None:
         routes.append(Mount("/", app=custom_app))
     validator = None
-    if os.environ.get("GRAPHHARBOR_ENV", "development") == "production":
+    if os.environ.get("GRAPHHARBOR_ENV", "development") == "production" and auth_handler is None:
         validator = DelegationJWTValidator.from_env()
     cors_config = http_config.get("cors", {}) if isinstance(http_config, dict) else {}
     if not isinstance(cors_config, dict):

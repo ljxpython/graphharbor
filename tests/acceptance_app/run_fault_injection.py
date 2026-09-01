@@ -82,13 +82,22 @@ def _database_evidence(database_uri: str, run_id: str) -> dict[str, Any]:
             """,
             (run_id,),
         ).fetchone()
-    if run is None or events is None:
+        shutdown_requeues = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM runtime_events
+            WHERE run_id = %s AND payload->>'reason' = 'shutdown_requeue'
+            """,
+            (run_id,),
+        ).fetchone()
+    if run is None or events is None or shutdown_requeues is None:
         raise AssertionError(f"run {run_id} disappeared during fault injection")
     return {
         "status": run[0],
         "retry_count": run[1],
         "event_total": events[0],
         "terminal_event_total": events[1],
+        "shutdown_requeue_total": shutdown_requeues[0],
     }
 
 
@@ -111,7 +120,9 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     result: dict[str, Any] = {
         "prefix": prefix,
         "lease_seconds": args.lease_seconds,
+        "worker_signal": args.worker_signal,
         "worker_killed": False,
+        "worker_stopped": False,
     }
     try:
         api = await _start(
@@ -134,7 +145,9 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         async with httpx.AsyncClient(base_url=base_url, timeout=10, trust_env=False) as client:
             await _wait_for(client, "/ready", lambda value: value.get("ready") is True, 60)
             assistant = (
-                await client.post("/assistants", json={"graph_id": "slow_recovery", "name": "fault"})
+                await client.post(
+                    "/assistants", json={"graph_id": "slow_recovery", "name": "fault"}
+                )
             ).json()
             thread = (await client.post("/threads", json={"graph_id": "slow_recovery"})).json()
             run = (
@@ -173,9 +186,11 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 30,
             )
 
-        await _stop(worker, signal.SIGKILL)
+        worker_signal = getattr(signal, args.worker_signal)
+        await _stop(worker, worker_signal)
         worker = None
-        result["worker_killed"] = True
+        result["worker_killed"] = worker_signal == signal.SIGKILL
+        result["worker_stopped"] = True
         replacement = await _start(
             [
                 sys.executable,
@@ -207,6 +222,8 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             raise AssertionError(f"unexpected recovered state: {result['state']!r}")
         if result["database"]["terminal_event_total"] != 1:
             raise AssertionError(f"expected one terminal event: {result['database']}")
+        if worker_signal == signal.SIGTERM and result["database"]["shutdown_requeue_total"] < 1:
+            raise AssertionError(f"missing graceful shutdown requeue: {result['database']}")
         return result
     finally:
         await _stop(replacement, signal.SIGTERM)
@@ -223,6 +240,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=31298)
     parser.add_argument("--lease-seconds", type=int, default=5)
     parser.add_argument("--timeout", type=float, default=120)
+    parser.add_argument("--worker-signal", choices=("SIGKILL", "SIGTERM"), default="SIGKILL")
     parser.add_argument("--result-out", type=Path, default=DEFAULT_RESULT)
     args = parser.parse_args()
     if not args.database_uri or not args.redis_uri:

@@ -84,6 +84,7 @@ class AssistantVersionRow(Base):
 class ThreadRow(Base):
     __tablename__ = "threads"
     __table_args__ = (
+        Index("ix_threads_graph_id", "graph_id"),
         Index("ix_threads_status_updated_at", "status", "updated_at"),
         Index("ix_threads_updated_at", "updated_at"),
         Index(
@@ -129,6 +130,16 @@ class RunRow(Base):
         Index("ix_runs_thread_id_status", "thread_id", "status"),
         Index("ix_runs_thread_id_created_at", "thread_id", "created_at"),
         Index("ix_runs_assistant_id_status", "assistant_id", "status"),
+        Index("ix_runs_next_attempt_at", "status", "next_attempt_at"),
+        Index("ix_runs_scope_status", "tenant_id", "project_id", "status"),
+        Index(
+            "uq_runs_scope_idempotency",
+            "tenant_id",
+            "project_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
         Index(
             "uq_runs_one_running_per_thread",
             "thread_id",
@@ -181,6 +192,7 @@ class CronRow(Base):
         Index("ix_crons_enabled_next_run", "enabled", "next_run_date"),
         Index("ix_crons_assistant_id", "assistant_id"),
         Index("ix_crons_thread_id", "thread_id"),
+        Index("ix_crons_scope_enabled", "tenant_id", "project_id", "enabled"),
         Index(
             "ix_crons_metadata_gin",
             "metadata",
@@ -241,6 +253,7 @@ class RunLeaseRow(Base):
     """Durable worker lease; Redis heartbeats are only a transport hint."""
 
     __tablename__ = "run_leases"
+    __table_args__ = (Index("ix_run_leases_expires_at", "expires_at"),)
 
     run_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("runs.run_id", ondelete="CASCADE"), primary_key=True
@@ -260,6 +273,12 @@ class RuntimeEventRow(Base):
     __table_args__ = (
         Index("ix_runtime_events_thread_seq", "thread_id", "sequence"),
         Index("ix_runtime_events_created_at", "created_at"),
+        Index(
+            "uq_runtime_events_run_terminal",
+            "run_id",
+            unique=True,
+            postgresql_where=text("terminal = true AND run_id IS NOT NULL"),
+        ),
         UniqueConstraint("run_id", "sequence", name="uq_runtime_events_run_sequence"),
     )
 

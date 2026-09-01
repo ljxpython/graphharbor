@@ -1,21 +1,23 @@
 ## 1. Cross-repository contract
 
-- [ ] 1.1 Record the runtime-service source revision, GraphHarbor revision, Python/dependency lockfiles and supported graph exports.
-- [ ] 1.2 Verify the existing runtime-service `langgraph.json` loads through `GraphRegistry.open()` and each supported async factory receives a per-Run `RunnableConfig`.
+- [x] 1.1 Record the runtime-service source revision, GraphHarbor revision, Python/dependency lockfiles and supported graph exports.
+- [x] 1.2 Verify the existing runtime-service `langgraph.json` loads through `GraphRegistry.open()` and each supported async factory receives a per-Run `RunnableConfig`.
 - [ ] 1.3 Define the platform gateway route flag, GraphHarbor base URL, Run route ownership and immediate rollback behavior without changing default traffic.
 
 ## 2. Production trust boundary
 
-- [ ] 2.1 Generate a platform delegation JWT fixture with issuer, audience, expiry, jti, principal scope and model/tool policy claims without storing secrets in artifacts.
+- [x] 2.1 Generate a platform delegation JWT fixture with issuer, audience, expiry, jti, principal scope and model/tool policy claims without storing secrets in artifacts.
 - [ ] 2.2 Verify API creation and Worker recovery reject missing, altered, expired, cross-scope and policy-incomplete RuntimeContext envelopes before model/tool execution.
 - [ ] 2.3 Run two tenants and two projects through the real API and confirm resource reads, state, events, custom routes and MCP calls cannot cross scopes.
+- [x] 2.4 Preserve generic custom-auth user facts through the signed API/Worker envelope and verify a per-Run factory receives `configurable.langgraph_auth_user` without application-specific parsing.
 
 ## 3. Durable execution and events
 
-- [ ] 3.1 Run migration in an exclusive acceptance database and verify an idempotent second upgrade plus recorded schema head.
+- [x] 3.0 Validate and pass `sync`/`async`/`exit` durability through the public Run and graph execution paths.
+- [x] 3.1 Run migration in an exclusive acceptance database and verify an idempotent second upgrade plus recorded schema head.
 - [ ] 3.2 Start API and two Workers against the exclusive database and namespaced Redis; execute runtime-service deterministic and model-backed graphs.
 - [ ] 3.3 Inject SIGTERM and SIGKILL at claim, checkpoint and finalize boundaries; verify lease reclaim, checkpoint continuation, retry limits and resource cleanup.
-- [ ] 3.4 Inject a late Worker completion and duplicate queue message; verify one conditional terminal transition and one terminal event.
+- [x] 3.4 Inject a late Worker completion and duplicate queue message; verify one conditional terminal transition and one terminal event.
 - [ ] 3.5 Verify v2/v3 SSE, thread events, `since`, `Last-Event-ID`, stale cursor behavior and HITL interrupt/resume across Worker replacement.
 
 ## 4. DeepAgent, MCP and capability isolation
@@ -35,7 +37,8 @@
 
 ## 6. Release, migration and rollback
 
-- [ ] 6.1 Build/install GraphHarbor and runtime-service in isolated Python 3.11/3.12/3.13 environments with locked dependencies and startup health checks.
+- [x] 6.0 Make Alembic drift checks ownership-aware, serialize upgrades, verify all persistence migration heads in readiness and repair the release version gate.
+- [x] 6.1 Build/install GraphHarbor and runtime-service in isolated Python 3.11/3.12/3.13 environments with locked dependencies and startup health checks.
 - [ ] 6.2 Rehearse forward migration, backup/restore, code rollback on the forward-compatible schema and any approved downgrade in a disposable database.
 - [ ] 6.3 Execute route rollout `0% -> 1% -> 10% -> 50% -> 100%` by tenant/project or percentage and capture latency, queue lag, PostgreSQL/Redis watermarks and error rates.
 - [ ] 6.4 Disable GraphHarbor routing during an active Run and verify new Runs return to the prior path without losing Run, Event or Checkpoint facts.

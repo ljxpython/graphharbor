@@ -36,6 +36,12 @@ PostgreSQL stores Run, Thread, Checkpoint, Lease, retry and terminal event facts
 
 Production API requests require the platform delegation JWT. The API creates a signed RuntimeContext envelope containing `run_id`, `thread_id`, tenant/project, principal identity and a policy snapshot. The Worker verifies the envelope again and injects only verified values into `configurable`; client input cannot override them.
 
+When an application supplies a standard LangGraph custom-auth handler, GraphHarbor preserves that
+handler's JSON user mapping inside the signed envelope and restores it as
+`configurable.langgraph_auth_user` before calling a per-Run graph factory. GraphHarbor only requires
+the generic top-level identity/scope/policy fields needed for server authorization; it does not parse
+or manufacture application-specific nested Principal or Policy structures.
+
 ### 4. Agent capabilities are explicit intersections
 
 Each runtime-service Agent declares its maximum model/tool/Backend/Skill/Subagent set. The effective set is the intersection of that declaration, the signed RuntimePolicy and the Subagent-specific restrictions. DeepAgent workspace resources are Thread-scoped and either use persisted StateBackend state or an isolated Sandbox; direct host filesystem access is an acceptance-only fixture.
@@ -54,6 +60,17 @@ platform durable Run record, and uses that value for every later state, stream, 
 join, cancel and delete request. A percentage increase must not move an existing Run to a
 different upstream. Disabling the GraphHarbor flag changes only new assignments; it must
 not delete or rewrite existing Run, Event or Checkpoint facts.
+
+### 7. Public durability and schema ownership remain explicit
+
+GraphHarbor accepts the public LangGraph durability modes (`sync`, `async`, `exit`), persists the
+selected value with the Run and passes it to the graph execution method. It does not encode
+durability in private config keys or silently replace an explicit mode with the LangGraph default.
+
+Alembic owns only GraphHarbor application tables. LangGraph Checkpointer and Store tables remain
+owned by their upstream setup routines. Migration comparison excludes those external tables,
+production upgrade is serialized with a PostgreSQL advisory lock, and readiness checks the
+application, Checkpointer and Store migration heads rather than a static marker alone.
 
 ## Risks / Trade-offs
 

@@ -27,3 +27,10 @@ The Worker SHALL verify the signed RuntimeContext envelope against the persisted
 #### Scenario: Altered context is rejected
 - **WHEN** a Worker receives a Run whose signed context does not match its run/thread/tenant/project or policy snapshot
 - **THEN** the Run reaches a stable authorization error and no model or tool side effect occurs
+
+### Requirement: Custom-auth user propagation
+The system SHALL preserve a JSON-compatible user mapping returned by a standard LangGraph custom-auth handler inside the signed RuntimeContext envelope and SHALL restore that mapping as `configurable.langgraph_auth_user` before a per-Run graph factory is called. GraphHarbor SHALL NOT depend on application-specific nested Principal or Policy field names.
+
+#### Scenario: Per-Run factory receives authenticated user
+- **WHEN** custom auth returns a valid generic user mapping and a Worker opens a dynamic graph factory
+- **THEN** the factory receives the same signed user facts through `configurable.langgraph_auth_user` without receiving the bearer token

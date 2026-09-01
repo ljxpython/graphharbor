@@ -67,10 +67,16 @@ values 投影；同时读取 run status 确认最终为 `success`。loopback 只
 uv run python tests/acceptance_app/run_fault_injection.py \
   --database-uri "$DATABASE_URI" \
   --redis-uri "$REDIS_URI"
+
+uv run python tests/acceptance_app/run_fault_injection.py \
+  --database-uri "$DATABASE_URI" \
+  --redis-uri "$REDIS_URI" \
+  --worker-signal SIGTERM
 ```
 
-脚本会启动隔离 API/worker，等待第一阶段 checkpoint 后杀死 worker，再启动 replacement，
-并从 PostgreSQL 校验同一个 `run_id`、`retry_count` 和唯一 terminal event。
+脚本会启动隔离 API/worker，等待第一阶段 checkpoint 后终止 worker，再启动 replacement，
+并从 PostgreSQL 校验同一个 `run_id`、`retry_count` 和唯一 terminal event。`SIGTERM` 模式
+还要求持久化 `shutdown_requeue` 生命周期事件；默认 `SIGKILL` 模式验证 lease 到期接管。
 
 普通 acceptance runner 还会自动执行 `run_terminal_idempotency.py`，验证重复 Redis
 队列 hint、迟到 finalize、cancel 和 lease reaper 并发时，同一个 `run_id` 最终只有一个

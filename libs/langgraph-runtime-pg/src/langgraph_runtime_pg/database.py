@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 import os
 import ssl as ssl_module
@@ -463,17 +464,15 @@ async def connect(
     del __test__  # accepted for API parity; unused
     if _SESSION_FACTORY is None:
         raise RuntimeError("Call start_pool() before connect()")
-    async with _SESSION_FACTORY() as session:
-        proto = PgConnectionProto(
-            session=session,
-            retry_counter=PgRetryCounter(_SESSION_FACTORY),
-            session_factory=_SESSION_FACTORY,
-        )
+    session = _SESSION_FACTORY()
+    proto = PgConnectionProto(
+        session=session,
+        retry_counter=PgRetryCounter(_SESSION_FACTORY),
+        session_factory=_SESSION_FACTORY,
+    )
+
+    async def rollback_and_close() -> None:
         try:
-            yield proto
-            async with proto._lock:
-                await session.commit()
-        except Exception:
             async with proto._lock:
                 await session.rollback()
             for cb in proto._after_rollback:
@@ -481,6 +480,34 @@ async def connect(
                     await cb()
                 except Exception:
                     logger.debug("after_rollback callback failed", exc_info=True)
+        finally:
+            await session.close()
+
+    async def finish_cleanup(cleanup) -> None:
+        """Complete session cleanup even when the request task is cancelled."""
+        task = asyncio.create_task(cleanup(), context=contextvars.Context())
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None:
+                current.uncancel()
+            try:
+                await task
+            finally:
+                if current is not None:
+                    current.cancel()
+            raise
+
+    closed = False
+    try:
+        try:
+            yield proto
+            async with proto._lock:
+                await session.commit()
+        except BaseException:
+            await finish_cleanup(rollback_and_close)
+            closed = True
             raise
         else:
             for cb in proto._after_commit:
@@ -488,6 +515,9 @@ async def connect(
                     await cb()
                 except Exception:
                     logger.debug("after_commit callback failed", exc_info=True)
+    finally:
+        if not closed:
+            await finish_cleanup(session.close)
 
 
 async def healthcheck(*, check_db: bool = True) -> None:
@@ -497,15 +527,33 @@ async def healthcheck(*, check_db: bool = True) -> None:
 
 
 async def schema_ready() -> bool:
-    """Return whether the explicit production schema contract is installed."""
+    """Return whether every owned production schema is at its expected head."""
     if _ENGINE is None:
         return False
     try:
+        from langgraph.checkpoint.postgres.base import MIGRATIONS as CHECKPOINT_MIGRATIONS
+        from langgraph.store.postgres.base import MIGRATIONS as STORE_MIGRATIONS
+
+        from langgraph_runtime_pg.migrate import head_revision
+
         async with _ENGINE.connect() as conn:
-            value = await conn.scalar(
-                text("SELECT value FROM runtime_schema WHERE key = 'contract'")
-            )
-        return value == "production-v1"
+            values = (
+                await conn.execute(
+                    text(
+                        "SELECT "
+                        "(SELECT value FROM runtime_schema WHERE key = 'contract'), "
+                        "(SELECT version_num FROM alembic_version), "
+                        "(SELECT max(v) FROM checkpoint_migrations), "
+                        "(SELECT max(v) FROM store_migrations)"
+                    )
+                )
+            ).one()
+        return values == (
+            "production-v1",
+            head_revision(),
+            len(CHECKPOINT_MIGRATIONS) - 1,
+            len(STORE_MIGRATIONS) - 1,
+        )
     except Exception:
         return False
 

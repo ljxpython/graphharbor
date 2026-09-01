@@ -29,6 +29,7 @@ from langgraph_runtime_pg.checkpoint import (
     get_checkpointer,
 )
 from langgraph_runtime_pg.database import connect
+from langgraph_runtime_pg.graph_executor import normalize_durability, normalize_interrupt_nodes
 from langgraph_runtime_pg.metrics import inc as metric_inc
 from langgraph_runtime_pg.models import (
     AssistantRow,
@@ -108,13 +109,16 @@ def _runtime_context(payload: dict[str, Any], principal: Any) -> dict[str, Any] 
         return None
     roles = sorted(principal.roles)
     scopes = sorted(principal.scopes)
-    return {
+    context = {
         "user_id": principal.subject,
         "tenant_id": principal.tenant_id,
         "project_id": principal.project_id,
         "role": roles[0] if roles else "user",
         "permissions": scopes,
     }
+    if principal.auth_user is not None:
+        context["auth_user"] = dict(principal.auth_user)
+    return context
 
 
 def _metadata_filter(query: Any, model: Any, metadata: Any) -> Any:
@@ -697,6 +701,10 @@ def _has_projected_values(values: Any) -> bool:
     return isinstance(values, dict) and any(key != "__pregel_tasks" for key in values)
 
 
+def _stored_interrupts(row: ThreadRow) -> list[Any]:
+    return list(row.interrupts.values()) if isinstance(row.interrupts, dict) else []
+
+
 async def threads_state(request: Request) -> JSONResponse:
     row, _, thread_id = await _get_thread(request)
     if row is None or thread_id is None:
@@ -719,11 +727,13 @@ async def threads_state(request: Request) -> JSONResponse:
                     "created_at": None,
                     "parent_checkpoint": None,
                     "tasks": [],
-                    "interrupts": [],
+                    "interrupts": _stored_interrupts(row),
                 }
             )
         )
     state = _state_from_tuple(item)
+    if not state.get("interrupts"):
+        state["interrupts"] = _stored_interrupts(row)
     # Some LangChain/Deep Agents checkpoints keep only scheduler bookkeeping in
     # channel_values while the durable thread row has the final projected state.
     # Expose that state instead of returning the misleading bare __pregel_tasks.
@@ -982,6 +992,33 @@ async def runs_create(
             run_payload["context"] = {**assistant_context, **run_context}
         elif "context" not in payload and assistant_context:
             run_payload["context"] = dict(assistant_context)
+        try:
+            durability = normalize_durability(run_payload.get("durability"))
+        except ValueError as exc:
+            return _error(str(exc), 422)
+        if "durability" in run_payload:
+            run_payload["durability"] = durability
+        for field in ("interrupt_before", "interrupt_after"):
+            if field not in run_payload:
+                continue
+            try:
+                run_payload[field] = normalize_interrupt_nodes(run_payload[field], field)
+            except ValueError as exc:
+                return _error(str(exc), 422)
+        checkpoint_id = run_payload.get("checkpoint_id")
+        if checkpoint_id is not None:
+            if thread is None:
+                return _error("checkpoint_id requires a thread", 422)
+            if not isinstance(checkpoint_id, str) or not checkpoint_id.strip():
+                return _error("checkpoint_id must be a non-empty string", 422)
+            try:
+                checkpoint = await get_checkpointer().aget_tuple(
+                    cast(RunnableConfig, _checkpoint_config(thread.thread_id, checkpoint_id))
+                )
+            except Exception as exc:
+                return _error(f"checkpoint read failed: {exc}", 503)
+            if checkpoint is None:
+                return _error("checkpoint not found", 404)
         trusted_context = _runtime_context(run_payload, principal)
         if trusted_context is not None:
             run_payload["runtime_context"] = trusted_context

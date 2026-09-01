@@ -35,7 +35,7 @@ def alembic_config(
     return cfg
 
 
-def _head_revision() -> str:
+def head_revision() -> str:
     heads = ScriptDirectory(str(MIGRATIONS_DIR)).get_heads()
     return heads[0] if len(heads) == 1 else "head"
 
@@ -46,7 +46,7 @@ def upgrade_head(
     """Apply all pending migrations; return the head revision id."""
     cfg = alembic_config(database_uri, version_table_schema=version_table_schema)
     command.upgrade(cfg, "head")
-    return _head_revision()
+    return head_revision()
 
 
 def stamp_head(database_uri: str | None = None) -> None:

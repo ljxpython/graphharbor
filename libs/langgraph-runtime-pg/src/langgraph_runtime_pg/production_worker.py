@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import math
 import os
 import signal
 import socket
@@ -23,7 +24,13 @@ from langgraph_runtime_pg.auth import (
 )
 from langgraph_runtime_pg.checkpoint import get_checkpointer, reconnect_checkpointer
 from langgraph_runtime_pg.database import connect, start_pool, stop_pool
-from langgraph_runtime_pg.graph_executor import invoke_graph, resume_command, thread_config
+from langgraph_runtime_pg.graph_executor import (
+    invoke_graph,
+    normalize_durability,
+    normalize_interrupt_nodes,
+    resume_command,
+    thread_config,
+)
 from langgraph_runtime_pg.graph_registry import GraphRegistry
 from langgraph_runtime_pg.metrics import inc as metric_inc
 from langgraph_runtime_pg.models import AssistantRow, RunRow, ThreadRow
@@ -46,12 +53,30 @@ from langgraph_runtime_pg.redis_stream import (
 )
 from langgraph_runtime_pg.run_state import is_terminal
 from langgraph_runtime_pg.run_store import RunOwnershipError, RunRepository
+from langgraph_runtime_pg.thread_config import attach_thread_metadata
 
 logger = structlog.stdlib.get_logger(__name__)
 
 
 class RunCancelled(Exception):
     pass
+
+
+class RunTimedOut(Exception):
+    pass
+
+
+def _run_timeout_seconds() -> float | None:
+    raw = os.environ.get("GRAPHHARBOR_RUN_TIMEOUT_SECONDS")
+    if raw is None or not raw.strip():
+        return None
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError("GRAPHHARBOR_RUN_TIMEOUT_SECONDS must be a positive number") from exc
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("GRAPHHARBOR_RUN_TIMEOUT_SECONDS must be a positive number")
+    return value
 
 
 def _is_infrastructure_error(exc: BaseException) -> bool:
@@ -98,6 +123,7 @@ class ProductionWorker:
         except ValueError:
             lease_seconds = 60
         self.repository = RunRepository(lease_seconds=lease_seconds)
+        self.run_timeout_seconds = _run_timeout_seconds()
         self.stop_event = asyncio.Event()
 
     async def _publish_event(
@@ -250,6 +276,13 @@ class ProductionWorker:
                 else:
                     graph_id = assistant.graph_id
                     command = resume_command(run.kwargs.get("command"))
+                    durability = normalize_durability(run.kwargs.get("durability"))
+                    interrupt_before = normalize_interrupt_nodes(
+                        run.kwargs.get("interrupt_before"), "interrupt_before"
+                    )
+                    interrupt_after = normalize_interrupt_nodes(
+                        run.kwargs.get("interrupt_after"), "interrupt_after"
+                    )
                     input_value = command or run.kwargs.get("input", run.kwargs)
                     run_config = run.kwargs.get("config")
                     if not isinstance(run_config, dict):
@@ -292,6 +325,9 @@ class ProductionWorker:
                             "__graphharbor_runtime_context",
                         }
                     }
+                    checkpoint_id = run.kwargs.get("checkpoint_id")
+                    if isinstance(checkpoint_id, str) and checkpoint_id:
+                        configurable["checkpoint_id"] = checkpoint_id
                     merged_context: dict[str, Any] = {}
                     for context_source in (
                         assistant.context,
@@ -361,6 +397,8 @@ class ProductionWorker:
                             "assistant_version": assistant.version,
                         }
                     )
+                    if thread is not None and isinstance(thread.metadata_, dict):
+                        attach_thread_metadata(metadata, thread.metadata_)
                     metadata = {key: value for key, value in metadata.items() if value is not None}
                     tags = list(dict.fromkeys(tag_values)) or None
                     trace_context = {
@@ -462,6 +500,9 @@ class ProductionWorker:
                         input_value,
                         config=config,
                         on_event=on_event,
+                        durability=durability,
+                        interrupt_before=interrupt_before,
+                        interrupt_after=interrupt_after,
                     )
 
             execution = asyncio.create_task(
@@ -470,8 +511,18 @@ class ProductionWorker:
             )
             cancellation = asyncio.create_task(cancel_event.wait(), name=f"cancel-{run_id}")
             done, _ = await asyncio.wait(
-                {execution, cancellation}, return_when=asyncio.FIRST_COMPLETED
+                {execution, cancellation},
+                timeout=self.run_timeout_seconds,
+                return_when=asyncio.FIRST_COMPLETED,
             )
+            if not done:
+                execution.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await execution
+                cancellation.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await cancellation
+                raise RunTimedOut("graphharbor.run_timeout")
             if cancellation in done:
                 execution.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -610,10 +661,19 @@ class ProductionWorker:
         except RunOwnershipError:
             logger.info("run finalization lost lease ownership", run_id=str(run_id))
         except Exception as exc:
-            infrastructure = _is_infrastructure_error(exc)
+            timed_out = isinstance(exc, RunTimedOut)
+            infrastructure = not timed_out and _is_infrastructure_error(exc)
             metric_inc(
                 "graphharbor_runs_failed_total",
-                labels={"kind": "infrastructure" if infrastructure else "business"},
+                labels={
+                    "kind": (
+                        "timeout"
+                        if timed_out
+                        else "infrastructure"
+                        if infrastructure
+                        else "business"
+                    )
+                },
             )
             failure_events: list[Any] = []
             async with connect() as conn:
@@ -627,31 +687,46 @@ class ProductionWorker:
                     retrying = infrastructure and run_row.retry_count < min(
                         run_row.max_attempts, self.repository.max_attempts
                     )
-                    failed = await self.repository.fail(
-                        conn.session,
-                        run_id,
-                        self.owner,
-                        infrastructure=infrastructure,
-                        reason=(
-                            RunReason.INFRASTRUCTURE_ERROR
-                            if infrastructure
-                            else RunReason.BUSINESS_ERROR
-                        ),
-                        terminal_payload=None
-                        if retrying
-                        else {
-                            "event": "lifecycle",
-                            "status": RunStatus.ERROR.value,
-                            "reason": (
-                                RunReason.INFRASTRUCTURE_ERROR.value
+                    if timed_out:
+                        await self.repository.finish(
+                            conn.session,
+                            run_id,
+                            self.owner,
+                            RunStatus.TIMEOUT,
+                            reason=RunReason.TIMEOUT,
+                            terminal_payload={
+                                "event": "lifecycle",
+                                "status": RunStatus.TIMEOUT.value,
+                                "reason": RunReason.TIMEOUT.value,
+                                "error": {"type": type(exc).__name__, "message": str(exc)},
+                            },
+                            trace_context=trace_context,
+                        )
+                    else:
+                        await self.repository.fail(
+                            conn.session,
+                            run_id,
+                            self.owner,
+                            infrastructure=infrastructure,
+                            reason=(
+                                RunReason.INFRASTRUCTURE_ERROR
                                 if infrastructure
-                                else RunReason.BUSINESS_ERROR.value
+                                else RunReason.BUSINESS_ERROR
                             ),
-                            "error": {"type": type(exc).__name__, "message": str(exc)},
-                        },
-                        trace_context=trace_context,
-                    )
-                    del failed
+                            terminal_payload=None
+                            if retrying
+                            else {
+                                "event": "lifecycle",
+                                "status": RunStatus.ERROR.value,
+                                "reason": (
+                                    RunReason.INFRASTRUCTURE_ERROR.value
+                                    if infrastructure
+                                    else RunReason.BUSINESS_ERROR.value
+                                ),
+                                "error": {"type": type(exc).__name__, "message": str(exc)},
+                            },
+                            trace_context=trace_context,
+                        )
                     failure_events = list(self.repository.last_transition_events)
             if infrastructure:
                 try:

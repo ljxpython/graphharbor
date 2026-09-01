@@ -1,7 +1,7 @@
 [project]
 name = "graphharbor-runtime"
 # GraphHarbor has its own release line; langgraph-api is compatibility-spike-only.
-version = "0.13.0.post15"
+version = "0.13.0.post16"
 description = "GraphHarbor PostgreSQL and Redis runtime for the LangGraph Agent Server"
 readme = "README.md"
 license = "MIT"
@@ -49,6 +49,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "anyio>=4.0",
     "sqlalchemy[asyncio]>=2.0.51",
     "asyncpg>=0.29",
     "redis>=5.0",

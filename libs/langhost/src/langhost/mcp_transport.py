@@ -9,6 +9,7 @@ from dataclasses import asdict, is_dataclass
 from typing import Any
 from uuid import uuid4
 
+from langchain_core.runnables import RunnableConfig
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -67,7 +68,7 @@ def _input_signature(name: str) -> inspect.Signature:
 
 
 @asynccontextmanager
-async def _open_graph(registry: Any, graph_id: str, config: dict[str, Any]):
+async def _open_graph(registry: Any, graph_id: str, config: RunnableConfig):
     opener = getattr(registry, "open", None)
     if callable(opener):
         async with opener(graph_id, config) as graph:

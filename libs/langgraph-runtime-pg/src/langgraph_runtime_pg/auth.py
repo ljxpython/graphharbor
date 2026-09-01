@@ -143,6 +143,29 @@ def _decode_b64_json(value: str) -> dict[str, Any]:
     return decoded
 
 
+def _auth_user_mapping(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or any(not isinstance(key, str) for key in value):
+        raise RuntimeContextError("custom auth user must be a JSON object")
+    result = dict(value)
+    try:
+        encoded = json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeContextError("custom auth user must be JSON-compatible") from exc
+    if len(encoded.encode("utf-8")) > 65_536:
+        raise RuntimeContextError("custom auth user exceeds 65536 bytes")
+    return result
+
+
+def _permission_names(value: object) -> frozenset[str]:
+    if isinstance(value, str):
+        return frozenset(value.split())
+    if not isinstance(value, (list, tuple, set, frozenset)) or any(
+        not isinstance(item, str) for item in value
+    ):
+        raise RuntimeContextError("runtime context permissions are invalid")
+    return frozenset(item.strip() for item in value if item.strip())
+
+
 def sign_runtime_context(
     context: Mapping[str, Any],
     *,
@@ -160,8 +183,10 @@ def sign_runtime_context(
         "tenant_id": str(context.get("tenant_id") or ""),
         "project_id": str(context.get("project_id") or ""),
         "role": str(context.get("role") or ""),
-        "permissions": sorted({str(item) for item in (context.get("permissions") or [])}),
+        "permissions": sorted(_permission_names(context.get("permissions") or [])),
     }
+    if context.get("auth_user") is not None:
+        context_values["auth_user"] = _auth_user_mapping(context["auth_user"])
     claims: dict[str, Any] = {
         "v": 1,
         "iat": now,
@@ -246,13 +271,16 @@ def verify_runtime_context_envelope(
     ):
         raise RuntimeContextError("runtime context resource does not match the run")
     context = claims.get("context")
-    if not isinstance(context, dict) or set(context) != {
+    expected_context_fields = {
         "user_id",
         "tenant_id",
         "project_id",
         "role",
         "permissions",
-    }:
+    }
+    if isinstance(context, dict) and "auth_user" in context:
+        expected_context_fields.add("auth_user")
+    if not isinstance(context, dict) or set(context) != expected_context_fields:
         raise RuntimeContextError("runtime context fields are invalid")
     if context["tenant_id"] != tenant_id or context["project_id"] != project_id:
         raise RuntimeContextError("runtime context scope does not match the run")
@@ -260,12 +288,39 @@ def verify_runtime_context_envelope(
         isinstance(item, str) for item in context["permissions"]
     ):
         raise RuntimeContextError("runtime context permissions are invalid")
+    auth_user = None
+    if "auth_user" in context:
+        auth_user = _auth_user_mapping(context["auth_user"])
+        if auth_user.get("identity") != context["user_id"]:
+            raise RuntimeContextError("custom auth user identity does not match runtime context")
+        for key in ("tenant_id", "project_id", "role"):
+            if key in auth_user and auth_user[key] != context[key]:
+                raise RuntimeContextError(f"custom auth user {key} does not match runtime context")
+        if "permissions" in auth_user and _permission_names(
+            auth_user["permissions"]
+        ) != _permission_names(context["permissions"]):
+            raise RuntimeContextError("custom auth user permissions do not match runtime context")
     policy = None
     if has_policy:
         raw_policy = claims.get("policy")
         if not isinstance(raw_policy, dict):
             raise RuntimeContextError("runtime context policy is invalid")
         policy = parse_runtime_policy(raw_policy)
+    if auth_user is not None:
+        policy_fields = {"policy_version", "allowed_model_ids", "allowed_tool_names"}
+        supplied_policy_fields = set(auth_user) & policy_fields
+        if supplied_policy_fields:
+            if supplied_policy_fields != policy_fields or policy is None:
+                raise RuntimeContextError("custom auth user policy does not match runtime context")
+            auth_policy = parse_runtime_policy(
+                {
+                    "version": auth_user["policy_version"],
+                    "allowed_model_ids": auth_user["allowed_model_ids"],
+                    "allowed_tool_names": auth_user["allowed_tool_names"],
+                }
+            )
+            if auth_policy != policy:
+                raise RuntimeContextError("custom auth user policy does not match runtime context")
     return dict(context), policy
 
 
@@ -280,6 +335,7 @@ class Principal:
     jti: str
     claims: dict[str, Any]
     policy: RuntimePolicy | None = None
+    auth_user: dict[str, Any] | None = None
 
     @property
     def sub(self) -> str:
@@ -394,6 +450,12 @@ class Principal:
                 )
             except RuntimeContextError as exc:
                 raise AuthenticationError("custom auth policy claims are invalid") from exc
+        try:
+            auth_user = _auth_user_mapping(
+                user if isinstance(user, Mapping) else {"identity": subject}
+            )
+        except RuntimeContextError as exc:
+            raise AuthenticationError(str(exc)) from exc
         return cls(
             subject=subject,
             tenant_id=tenant_id,
@@ -402,8 +464,9 @@ class Principal:
             scopes=normalize(raw_scopes),
             credential_type=str(value("credential_type", "custom_auth")),
             jti=jti,
-            claims=dict(user) if isinstance(user, Mapping) else {"identity": subject},
+            claims=dict(auth_user),
             policy=policy,
+            auth_user=auth_user,
         )
 
 

@@ -25,8 +25,10 @@ def _schema_uri(database_uri: str, schema: str) -> str:
 
 @pytest.mark.asyncio
 async def test_empty_schema_migration_is_repeatable(pg_runtime) -> None:
+    from alembic import command
+
     from langgraph_runtime_pg.database import get_database_uri, to_psycopg_uri
-    from langgraph_runtime_pg.migrate import upgrade_head
+    from langgraph_runtime_pg.migrate import alembic_config, upgrade_head
 
     schema = f"gh_migration_{uuid4().hex[:12]}"
     base_uri = to_psycopg_uri(get_database_uri())
@@ -37,6 +39,7 @@ async def test_empty_schema_migration_is_repeatable(pg_runtime) -> None:
         isolated_uri = _schema_uri(base_uri, schema)
         assert upgrade_head(isolated_uri, version_table_schema=schema) == "006_terminal_events"
         assert upgrade_head(isolated_uri, version_table_schema=schema) == "006_terminal_events"
+        command.check(alembic_config(isolated_uri, version_table_schema=schema))
         with psycopg.connect(isolated_uri) as connection:
             tables = {
                 row[0]

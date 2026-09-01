@@ -291,6 +291,14 @@ async def _load_events(run_id: UUID, *, after: int = 0) -> list[dict[str, Any]]:
     return [_event_envelope(row) for row in rows]
 
 
+async def _minimum_run_event_sequence(run_id: UUID) -> int | None:
+    async with connect() as conn:
+        value = await conn.session.scalar(
+            select(func.min(RuntimeEventRow.sequence)).where(RuntimeEventRow.run_id == run_id)
+        )
+    return None if value is None else int(value)
+
+
 async def _run_snapshot(run_id: UUID, principal: Any) -> RunRow | None:
     async with connect() as conn:
         row = await conn.session.get(RunRow, run_id)
@@ -330,6 +338,14 @@ async def _run_sse(
             snapshot = await _run_snapshot(run_id, principal)
             if snapshot is None:
                 yield _sse("error", {"detail": "run not found"})
+                return
+            minimum_sequence = await _minimum_run_event_sequence(run_id)
+            if cursor and minimum_sequence is not None and cursor < minimum_sequence - 1:
+                metric_inc("graphharbor_sse_cursor_expired_total", labels={"version": version})
+                yield _sse(
+                    "error",
+                    {"detail": "cursor_expired", "recovery": "run_snapshot"},
+                )
                 return
             yield _sse(
                 "metadata",

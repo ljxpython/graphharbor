@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, TypedDict, cast
 
 import pytest
-from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
 
@@ -63,6 +62,14 @@ def test_thread_config_preserves_run_fields() -> None:
     assert config["metadata"] == {"request": "run-1"}
     assert config["tags"] == ["runtime", "test"]
     assert cast(dict[str, Any], config)["context"] == {"temperature": 0.2}
+
+
+def test_thread_metadata_is_exposed_under_a_server_owned_key() -> None:
+    from langgraph_runtime_pg.thread_config import attach_thread_metadata
+
+    metadata = {"__graphharbor_thread_metadata": {"forged": True}}
+    attach_thread_metadata(metadata, {"resource_id": "sandbox-1"})
+    assert metadata["__graphharbor_thread_metadata"] == {"resource_id": "sandbox-1"}
 
 
 def test_graph_registry_resolves_project_root_relative_paths(tmp_path: Path) -> None:
@@ -157,7 +164,7 @@ async def test_graph_registry_resolves_async_per_run_factory_and_closes_context(
         "    marker: str\n"
         "@asynccontextmanager\n"
         "async def get_agent(config):\n"
-        "    marker = config['metadata']['marker']\n"
+        "    marker = config['metadata']['marker'] + ':' + config['configurable']['langgraph_auth_user']['marker']\n"
         "    builder = StateGraph(State)\n"
         "    builder.add_node('mark', lambda _state: {'marker': marker})\n"
         "    builder.add_edge(START, 'mark')\n"
@@ -177,10 +184,23 @@ async def test_graph_registry_resolves_async_per_run_factory_and_closes_context(
 
     registry = GraphRegistry.from_path(config)
     closed = tmp_path / "closed"
-    run_config = cast(RunnableConfig, {"metadata": {"marker": "run-a", "closed": str(closed)}})
+    from langgraph_runtime_pg.graph_executor import thread_config
+
+    run_config = thread_config(
+        "thread-a",
+        metadata={"marker": "run-a", "closed": str(closed)},
+        runtime_context={
+            "user_id": "user-a",
+            "tenant_id": "tenant-a",
+            "project_id": "project-a",
+            "role": "developer",
+            "permissions": ["runs:write"],
+            "auth_user": {"identity": "user-a", "marker": "signed-user"},
+        },
+    )
     async with registry.open("assistant", run_config) as graph:
         result = await graph.ainvoke({"marker": "input"})
-    assert result == {"marker": "run-a"}
+    assert result == {"marker": "run-a:signed-user"}
     assert closed.is_file()
 
 
@@ -191,6 +211,53 @@ async def test_executor_uses_public_v2_invoke() -> None:
     result = await invoke_graph(_graph(), {"value": 1}, config=thread_config("thread-1"))
     assert result.value == {"value": 2}
     assert result.interrupts == ()
+
+
+@pytest.mark.asyncio
+async def test_executor_passes_public_durability_to_invoke_and_stream() -> None:
+    from langgraph.types import GraphOutput
+
+    from langgraph_runtime_pg.graph_executor import invoke_graph, thread_config
+
+    class RecordingGraph:
+        calls: list[tuple[str | None, object, object]] = []
+
+        async def ainvoke(
+            self, _input, *, config, durability, interrupt_before, interrupt_after, version
+        ):
+            del config, version
+            self.calls.append((durability, interrupt_before, interrupt_after))
+            return GraphOutput(value={"value": 1}, interrupts=())
+
+        async def astream(
+            self, _input, *, config, durability, interrupt_before, interrupt_after, **_kwargs
+        ):
+            del config
+            self.calls.append((durability, interrupt_before, interrupt_after))
+            yield {"type": "values", "ns": (), "data": {"value": 1}, "interrupts": ()}
+
+    graph = RecordingGraph()
+    config = thread_config("durability-thread")
+
+    async def discard(_event: dict) -> None:
+        return None
+
+    await invoke_graph(
+        graph,
+        {},
+        config=config,
+        durability="sync",
+        interrupt_before=("model",),
+    )
+    await invoke_graph(
+        graph,
+        {},
+        config=config,
+        durability="exit",
+        interrupt_after="*",
+        on_event=discard,
+    )
+    assert graph.calls == [("sync", ("model",), None), ("exit", None, "*")]
 
 
 @pytest.mark.asyncio

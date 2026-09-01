@@ -15,7 +15,10 @@ def test_build_deepagent_workspace_scopes_thread_root(tmp_path: Path) -> None:
         thread_id="thread-a",
     )
 
-    assert workspace.root == (tmp_path / "workspaces" / "tenant-a" / "project-a" / "thread-a").resolve()
+    assert (
+        workspace.root
+        == (tmp_path / "workspaces" / "tenant-a" / "project-a" / "thread-a").resolve()
+    )
     assert workspace.backend.cwd == workspace.root
     assert workspace.backend.virtual_mode is True
 
@@ -88,7 +91,9 @@ def test_build_workspace_rejects_symlinked_scope_component(tmp_path: Path) -> No
     (base / "tenant").symlink_to(target, target_is_directory=True)
 
     with pytest.raises(ValueError, match="must not contain symlinks"):
-        build_deepagent_workspace(base, tenant_id="tenant", project_id="project", thread_id="thread")
+        build_deepagent_workspace(
+            base, tenant_id="tenant", project_id="project", thread_id="thread"
+        )
 
 
 @pytest.mark.parametrize("value", ["/skills/../secret", "/skills/~", "/skills\\secret"])

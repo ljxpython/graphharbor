@@ -5,7 +5,7 @@ from __future__ import annotations
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, text
 
 from langgraph_runtime_pg.models import Base
 
@@ -14,6 +14,16 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+_MIGRATION_ADVISORY_KEY = 0x4752415048484152
+
+
+def include_object(
+    object_, name: str | None, type_: str, reflected: bool, compare_to: object
+) -> bool:
+    del object_
+    return not (
+        type_ == "table" and reflected and compare_to is None and name not in target_metadata.tables
+    )
 
 
 def run_migrations_offline() -> None:
@@ -24,6 +34,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=include_object,
         version_table_schema=config.attributes.get("version_table_schema"),
     )
     with context.begin_transaction():
@@ -41,9 +52,14 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            include_object=include_object,
             version_table_schema=config.attributes.get("version_table_schema"),
         )
         with context.begin_transaction():
+            connection.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"),
+                {"key": _MIGRATION_ADVISORY_KEY},
+            )
             context.run_migrations()
 
 

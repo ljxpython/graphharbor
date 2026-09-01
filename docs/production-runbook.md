@@ -10,6 +10,8 @@ export REDIS_URI='redis://127.0.0.1:6379/0'
 export GRAPHHARBOR_RETRY_BASE_SECONDS=1
 export GRAPHHARBOR_REAPER_INTERVAL_SECONDS=5
 export GRAPHHARBOR_LEASE_SECONDS=60
+# Optional; unset means no server-enforced Run deadline.
+export GRAPHHARBOR_RUN_TIMEOUT_SECONDS=300
 export GRAPHHARBOR_RUNTIME_CONTEXT_SECRET='replace-with-a-managed-secret'
 export GRAPHHARBOR_RUNTIME_CONTEXT_ISSUER='https://platform.example'
 export GRAPHHARBOR_RUNTIME_CONTEXT_AUDIENCE='graphharbor-worker'
@@ -57,6 +59,10 @@ platform-api delegation JWT；issuer、audience、JWKS URL 必须同时配置。
 生产 worker 使用公共 LangGraph executor、PostgreSQL lease/reaper 和最多三次基础设施重试；
 v2 SSE、Protocol v2 和 worker 对 LangGraph `Runtime(ServerInfo)` 的身份注入已可用；v3 typed
 projections、完整 graceful drain 和多实例故障验收仍必须通过后才能作为最终生产发布。
+
+`GRAPHHARBOR_RUN_TIMEOUT_SECONDS` 必须是有限正数。启用后，Worker 会取消超过 deadline 的
+graph 执行，并在 PostgreSQL 中以 `status=timeout`、`reason=timeout` 写入唯一终态事件；该
+超时不进入基础设施重试。
 
 ## 健康检查
 
