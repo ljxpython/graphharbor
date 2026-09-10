@@ -121,6 +121,7 @@ async def invoke_graph(
         return await graph.ainvoke(
             input_value,
             config=config,
+            context=config.get("context"),
             durability=durability,
             interrupt_before=interrupt_before,
             interrupt_after=interrupt_after,
@@ -130,6 +131,7 @@ async def invoke_graph(
     stream = graph.astream(
         input_value,
         config=config,
+        context=config.get("context"),
         stream_mode=("values", "updates", "messages", "custom", "checkpoints", "tasks", "debug"),
         subgraphs=True,
         durability=durability,

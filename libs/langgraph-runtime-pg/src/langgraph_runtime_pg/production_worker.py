@@ -19,7 +19,6 @@ from sqlalchemy.exc import DBAPIError
 
 from langgraph_runtime_pg.auth import (
     RuntimeContextError,
-    validate_policy_overrides,
     verify_runtime_context_envelope,
 )
 from langgraph_runtime_pg.checkpoint import get_checkpointer, reconnect_checkpointer
@@ -340,11 +339,10 @@ class ProductionWorker:
                             merged_context.update(context_source)
                     run_context: dict[str, Any] | None = merged_context or None
                     runtime_context = None
-                    runtime_policy = None
                     runtime_context_token = run.kwargs.get("runtime_context_token")
                     if isinstance(runtime_context_token, str):
                         try:
-                            runtime_context, runtime_policy = verify_runtime_context_envelope(
+                            runtime_context = verify_runtime_context_envelope(
                                 runtime_context_token,
                                 run_id=str(run.run_id),
                                 thread_id=str(thread_id) if thread_id else None,
@@ -370,15 +368,6 @@ class ProductionWorker:
                             "role": "anonymous",
                             "permissions": [],
                         }
-                    if runtime_context_error is None:
-                        try:
-                            validate_policy_overrides(
-                                runtime_policy,
-                                configurable=configurable,
-                                context=run_context,
-                            )
-                        except RuntimeContextError as exc:
-                            runtime_context_error = exc
                     metadata: dict[str, Any] = {}
                     if isinstance(assistant.metadata_, dict):
                         metadata.update(assistant.metadata_)
@@ -395,6 +384,14 @@ class ProductionWorker:
                             "thread_id": str(thread_id) if thread_id else None,
                             "assistant_id": str(run.assistant_id),
                             "assistant_version": assistant.version,
+                            "request_id": (
+                                runtime_context.get("request_id") if runtime_context else None
+                            ),
+                            "platform_trace_id": (
+                                runtime_context.get("platform_trace_id")
+                                if runtime_context
+                                else None
+                            ),
                         }
                     )
                     if thread is not None and isinstance(thread.metadata_, dict):
@@ -415,10 +412,21 @@ class ProductionWorker:
                         "user_id": str(runtime_context.get("user_id") or "")
                         if runtime_context
                         else None,
-                        "policy_version": runtime_policy.version if runtime_policy else None,
+                        "request_id": (
+                            str(runtime_context.get("request_id") or "")
+                            if runtime_context
+                            else None
+                        ),
+                        "platform_trace_id": (
+                            str(runtime_context.get("platform_trace_id") or "")
+                            if runtime_context
+                            else None
+                        ),
                     }
                     trace_context = {key: value for key, value in trace_context.items() if value}
                     if thread is not None:
+                        if runtime_context_error is None:
+                            thread.graph_id = graph_id
                         thread.status = "busy"
                         await conn.session.flush()
 
@@ -471,7 +479,12 @@ class ProductionWorker:
                     raise RunCancelled
                 if await self._cancel_requested(run_id, thread_id):
                     raise RunCancelled
-                await self._publish_event(run_id, thread_id, event)
+                await self._publish_event(
+                    run_id,
+                    thread_id,
+                    event,
+                    trace_context=trace_context,
+                )
 
             config = thread_config(
                 str(thread_id) if thread_id else None,
@@ -482,15 +495,6 @@ class ProductionWorker:
                 tags=tags,
                 context=run_context,
                 runtime_context=runtime_context,
-                runtime_policy=(
-                    {
-                        "version": runtime_policy.version,
-                        "allowed_model_ids": list(runtime_policy.allowed_model_ids),
-                        "allowed_tool_names": list(runtime_policy.allowed_tool_names),
-                    }
-                    if runtime_policy
-                    else None
-                ),
             )
 
             async def execute() -> Any:

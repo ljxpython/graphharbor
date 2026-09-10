@@ -9,10 +9,12 @@ import inspect
 import json
 import os
 import time
+import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+import jwt
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 
@@ -26,6 +28,13 @@ class AuthorizationError(ValueError):
 
 class RuntimeContextError(ValueError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimePolicy:
+    version: str
+    allowed_model_ids: tuple[str, ...]
+    allowed_tool_names: tuple[str, ...]
 
 
 _CORRELATION_FIELDS = ("request_id", "platform_trace_id")
@@ -48,6 +57,71 @@ def _correlation_value(value: object, field: str) -> str | None:
     if not isinstance(value, str) or not value.strip() or len(value) > 256:
         raise RuntimeContextError(f"runtime context field is invalid: {field}")
     return value.strip()
+
+
+def _policy_name(value: object, field: str) -> str:
+    if not isinstance(value, str) or not value or value != value.strip() or len(value) > 128:
+        raise RuntimeContextError(f"runtime policy field is invalid: {field}")
+    if not value.isascii() or any(char.isspace() or not char.isprintable() for char in value):
+        raise RuntimeContextError(f"runtime policy field is invalid: {field}")
+    return value
+
+
+def _policy_names(value: object, field: str) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise RuntimeContextError(f"runtime policy field is invalid: {field}")
+    values = tuple(_policy_name(item, field) for item in value)
+    if len(values) != len(set(values)):
+        raise RuntimeContextError(f"runtime policy field is invalid: {field}")
+    return tuple(sorted(values))
+
+
+def parse_runtime_policy(value: Mapping[str, Any]) -> RuntimePolicy:
+    if set(value) != {"version", "allowed_model_ids", "allowed_tool_names"}:
+        raise RuntimeContextError("runtime policy claims are invalid")
+    version = value["version"]
+    if not isinstance(version, str) or not version.strip() or len(version) > 100_000:
+        raise RuntimeContextError("runtime policy field is invalid: policy_version")
+    models = _policy_names(value["allowed_model_ids"], "allowed_model_ids")
+    if not models:
+        raise RuntimeContextError("runtime policy requires allowed_model_ids")
+    return RuntimePolicy(
+        version=version,
+        allowed_model_ids=models,
+        allowed_tool_names=_policy_names(value["allowed_tool_names"], "allowed_tool_names"),
+    )
+
+
+def validate_policy_overrides(
+    policy: RuntimePolicy | None,
+    *,
+    configurable: Mapping[str, Any] | None = None,
+    context: Mapping[str, Any] | None = None,
+) -> None:
+    """Reject model/tool overrides outside the signed policy allowlists."""
+    if policy is None:
+        return
+    policy = parse_runtime_policy(_policy_claims(policy))
+    sources = tuple(item for item in (configurable, context) if isinstance(item, Mapping))
+    for source in sources:
+        model_id = source.get("model_id")
+        if model_id is not None and model_id not in policy.allowed_model_ids:
+            raise RuntimeContextError("runtime policy rejects model_id")
+        tools = source.get("tools")
+        if tools is None:
+            continue
+        if not isinstance(tools, (list, tuple)) or any(
+            not isinstance(name, str) or name not in policy.allowed_tool_names for name in tools
+        ):
+            raise RuntimeContextError("runtime policy rejects tool names")
+
+
+def _policy_claims(policy: RuntimePolicy) -> dict[str, Any]:
+    return {
+        "version": policy.version,
+        "allowed_model_ids": list(policy.allowed_model_ids),
+        "allowed_tool_names": list(policy.allowed_tool_names),
+    }
 
 
 def _runtime_context_secret() -> bytes:
@@ -120,6 +194,7 @@ def sign_runtime_context(
     *,
     run_id: str,
     thread_id: str | None,
+    policy: RuntimePolicy | None = None,
     ttl_seconds: int = 300,
 ) -> str:
     """Sign the worker context so it cannot be rebuilt from run input."""
@@ -152,6 +227,8 @@ def sign_runtime_context(
         "thread_id": str(thread_id) if thread_id is not None else None,
         "context": context_values,
     }
+    if policy is not None:
+        claims["policy"] = _policy_claims(parse_runtime_policy(_policy_claims(policy)))
     issuer, audience = _runtime_context_issuer_audience()
     if bool(issuer) != bool(audience):
         raise RuntimeContextError("runtime context issuer and audience must be configured together")
@@ -174,13 +251,14 @@ def verify_runtime_context(
     tenant_id: str | None,
     project_id: str | None,
 ) -> dict[str, Any]:
-    return verify_runtime_context_envelope(
+    context, _ = verify_runtime_context_envelope(
         token,
         run_id=run_id,
         thread_id=thread_id,
         tenant_id=tenant_id,
         project_id=project_id,
     )
+    return context
 
 
 def verify_runtime_context_envelope(
@@ -190,7 +268,7 @@ def verify_runtime_context_envelope(
     thread_id: str | None,
     tenant_id: str | None,
     project_id: str | None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], RuntimePolicy | None]:
     try:
         encoded, signature = str(token).split(".", 1)
     except ValueError as exc:
@@ -204,6 +282,11 @@ def verify_runtime_context_envelope(
         bool(issuer or audience) or os.environ.get("GRAPHHARBOR_ENV", "development") == "production"
     )
     expected_claims = {"v", "iat", "exp", "run_id", "thread_id", "context"}
+    has_policy = "policy" in claims
+    if has_policy:
+        expected_claims.add("policy")
+    if os.environ.get("GRAPHHARBOR_ENV", "development") == "production" and not has_policy:
+        raise RuntimeContextError("signed runtime context policy is required in production")
     if requires_standard_claims:
         if not issuer or not audience:
             raise RuntimeContextError("runtime context issuer and audience are required")
@@ -264,7 +347,28 @@ def verify_runtime_context_envelope(
                 raise RuntimeContextError(
                     f"custom auth user {field} does not match runtime context"
                 )
-    return dict(context)
+    policy = None
+    if has_policy:
+        raw_policy = claims.get("policy")
+        if not isinstance(raw_policy, dict):
+            raise RuntimeContextError("runtime context policy is invalid")
+        policy = parse_runtime_policy(raw_policy)
+    if auth_user is not None:
+        policy_fields = {"policy_version", "allowed_model_ids", "allowed_tool_names"}
+        supplied_policy_fields = set(auth_user) & policy_fields
+        if supplied_policy_fields:
+            if supplied_policy_fields != policy_fields or policy is None:
+                raise RuntimeContextError("custom auth user policy does not match runtime context")
+            auth_policy = parse_runtime_policy(
+                {
+                    "version": auth_user["policy_version"],
+                    "allowed_model_ids": auth_user["allowed_model_ids"],
+                    "allowed_tool_names": auth_user["allowed_tool_names"],
+                }
+            )
+            if auth_policy != policy:
+                raise RuntimeContextError("custom auth user policy does not match runtime context")
+    return dict(context), policy
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,6 +381,7 @@ class Principal:
     credential_type: str
     jti: str
     claims: dict[str, Any]
+    policy: RuntimePolicy | None = None
     auth_user: dict[str, Any] | None = None
     request_id: str | None = None
     platform_trace_id: str | None = None
@@ -316,6 +421,27 @@ class Principal:
                     return frozenset(str(item) for item in value)
             return frozenset()
 
+        policy_fields = {"policy_version", "allowed_model_ids", "allowed_tool_names"}
+        supplied_policy_fields = set(claims) & policy_fields
+        policy = None
+        if supplied_policy_fields:
+            if supplied_policy_fields != policy_fields:
+                raise AuthenticationError("delegation JWT policy claims are incomplete")
+            try:
+                policy = parse_runtime_policy(
+                    {
+                        "version": claims["policy_version"],
+                        "allowed_model_ids": claims["allowed_model_ids"],
+                        "allowed_tool_names": claims["allowed_tool_names"],
+                    }
+                )
+            except RuntimeContextError as exc:
+                raise AuthenticationError("delegation JWT policy claims are invalid") from exc
+            if (
+                claims.get("policy_tenant_id", tenant_id) != tenant_id
+                or claims.get("policy_project_id", project_id) != project_id
+            ):
+                raise AuthenticationError("delegation JWT policy scope is invalid")
         request_id = _correlation_value(claims.get("request_id"), "request_id")
         platform_trace_id = _correlation_value(claims.get("platform_trace_id"), "platform_trace_id")
         return cls(
@@ -327,6 +453,7 @@ class Principal:
             credential_type="delegation",
             jti=jti,
             claims=dict(claims),
+            policy=policy,
             request_id=request_id,
             platform_trace_id=platform_trace_id,
         )
@@ -359,6 +486,23 @@ class Principal:
             return frozenset()
 
         jti = str(value("jti", value("delegation_id", subject)) or subject).strip()
+        policy = None
+        policy_values = [
+            value(name) for name in ("policy_version", "allowed_model_ids", "allowed_tool_names")
+        ]
+        if any(item is not None for item in policy_values):
+            if any(item is None for item in policy_values):
+                raise AuthenticationError("custom auth policy claims are incomplete")
+            try:
+                policy = parse_runtime_policy(
+                    {
+                        "version": policy_values[0],
+                        "allowed_model_ids": policy_values[1],
+                        "allowed_tool_names": policy_values[2],
+                    }
+                )
+            except RuntimeContextError as exc:
+                raise AuthenticationError("custom auth policy claims are invalid") from exc
         try:
             auth_user = _auth_user_mapping(
                 user if isinstance(user, Mapping) else {"identity": subject}
@@ -374,11 +518,131 @@ class Principal:
             credential_type=str(value("credential_type", "custom_auth")),
             jti=jti,
             claims=dict(auth_user),
+            policy=policy,
             auth_user=auth_user,
             request_id=_correlation_value(auth_user.get("request_id"), "request_id"),
             platform_trace_id=_correlation_value(
                 auth_user.get("platform_trace_id"), "platform_trace_id"
             ),
+        )
+
+
+class JWKSCache:
+    """Tiny TTL cache; unknown ``kid`` forces one refresh for key rotation."""
+
+    def __init__(self, url: str, *, ttl_seconds: int = 300, timeout_seconds: float = 3.0) -> None:
+        self.url = url
+        self.ttl_seconds = max(ttl_seconds, 1)
+        self.timeout_seconds = timeout_seconds
+        self._expires_at = 0.0
+        self._keys: dict[str, dict[str, Any]] = {}
+
+    def _fetch(self) -> dict[str, dict[str, Any]]:
+        with urllib.request.urlopen(self.url, timeout=self.timeout_seconds) as response:
+            payload = json.load(response)
+        keys = payload.get("keys")
+        if not isinstance(keys, list):
+            raise AuthenticationError("JWKS response does not contain a keys array")
+        self._keys = {str(item["kid"]): item for item in keys if item.get("kid")}
+        self._expires_at = time.monotonic() + self.ttl_seconds
+        return self._keys
+
+    def get(self, kid: str) -> dict[str, Any]:
+        if time.monotonic() >= self._expires_at:
+            self._fetch()
+        key = self._keys.get(kid)
+        if key is None:
+            key = self._fetch().get(kid)
+        if key is None:
+            raise AuthenticationError(f"unknown delegation JWT kid: {kid}")
+        return key
+
+
+class DelegationJWTValidator:
+    def __init__(
+        self,
+        *,
+        issuer: str,
+        audience: str,
+        jwks_url: str | None = None,
+        shared_secret: str | None = None,
+        algorithms: tuple[str, ...] = ("RS256",),
+        leeway_seconds: int = 30,
+        jwks_ttl_seconds: int = 300,
+        require_policy: bool = False,
+    ) -> None:
+        if not jwks_url and not shared_secret:
+            raise ValueError("either jwks_url or shared_secret is required")
+        self.issuer = issuer
+        self.audience = audience
+        self.jwks = JWKSCache(jwks_url, ttl_seconds=jwks_ttl_seconds) if jwks_url else None
+        self.shared_secret = shared_secret
+        self.algorithms = algorithms
+        self.leeway_seconds = leeway_seconds
+        self.require_policy = require_policy
+
+    def validate(self, token: str) -> Principal:
+        try:
+            header = jwt.get_unverified_header(token)
+            algorithm = str(header.get("alg", ""))
+            if algorithm not in self.algorithms:
+                raise AuthenticationError("delegation JWT algorithm is not allowed")
+            if self.shared_secret:
+                key: Any = self.shared_secret
+            else:
+                if self.jwks is None:
+                    raise AuthenticationError("JWKS validator is not configured")
+                try:
+                    jwk = self.jwks.get(str(header["kid"]))
+                except (KeyError, TypeError, OSError, ValueError) as exc:
+                    raise AuthenticationError(
+                        "unable to resolve delegation JWT signing key"
+                    ) from exc
+                key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
+            claims = jwt.decode(
+                token,
+                key=key,
+                algorithms=list(self.algorithms),
+                issuer=self.issuer,
+                audience=self.audience,
+                leeway=self.leeway_seconds,
+                options={"require": ["exp", "iat", "iss", "aud", "sub", "jti"]},
+            )
+            if self.require_policy and not {
+                "policy_version",
+                "allowed_model_ids",
+                "allowed_tool_names",
+            } <= set(claims):
+                raise AuthenticationError("delegation JWT policy claims are required")
+            return Principal.from_claims(claims)
+        except AuthenticationError:
+            raise
+        except jwt.PyJWTError as exc:
+            raise AuthenticationError("invalid delegation JWT") from exc
+        except (KeyError, TypeError, OSError, ValueError) as exc:
+            raise AuthenticationError("invalid delegation JWT") from exc
+
+    @classmethod
+    def from_env(cls) -> DelegationJWTValidator:
+        issuer = os.environ.get("GRAPHHARBOR_JWT_ISSUER")
+        audience = os.environ.get("GRAPHHARBOR_JWT_AUDIENCE")
+        if not issuer or not audience:
+            raise ValueError("GRAPHHARBOR_JWT_ISSUER and GRAPHHARBOR_JWT_AUDIENCE are required")
+        algorithms = tuple(
+            item.strip()
+            for item in os.environ.get("GRAPHHARBOR_JWT_ALGORITHMS", "RS256").split(",")
+            if item.strip()
+        )
+        if not algorithms:
+            raise ValueError("GRAPHHARBOR_JWT_ALGORITHMS must contain at least one algorithm")
+        return cls(
+            issuer=issuer,
+            audience=audience,
+            jwks_url=os.environ.get("GRAPHHARBOR_JWT_JWKS_URL"),
+            shared_secret=os.environ.get("GRAPHHARBOR_JWT_SHARED_SECRET"),
+            algorithms=algorithms,
+            leeway_seconds=int(os.environ.get("GRAPHHARBOR_JWT_LEEWAY_SECONDS", "30")),
+            require_policy=True,
         )
 
 
@@ -412,12 +676,13 @@ class PrincipalMiddleware:
     def __init__(
         self,
         app: ASGIApp,
-        validator: Any = None,  # Deprecated: use auth_handler instead
+        validator: DelegationJWTValidator | None,
         *,
         auth_handler: Any | None = None,
         allow_anonymous: bool,
     ) -> None:
         self.app = app
+        self.validator = validator
         self.auth_handler = auth_handler
         self.allow_anonymous = allow_anonymous
 
@@ -446,7 +711,7 @@ class PrincipalMiddleware:
             if self.allow_anonymous:
                 await self.app(scope, receive, send)
                 return
-            await _json_error(send, 401, "missing authorization header")
+            await _json_error(send, 401, "missing delegation token")
             return
         try:
             if self.auth_handler is not None:
@@ -457,13 +722,11 @@ class PrincipalMiddleware:
                     authorization=auth_header or None,
                 )
                 scope["principal"] = Principal.from_auth_user(user)
-            elif self.allow_anonymous:
-                # No auth_handler and allow_anonymous: proceed without principal
-                pass
             else:
-                # No auth_handler and not allow_anonymous: must fail
-                await _json_error(send, 401, "authentication not configured")
-                return
+                if not auth_header.startswith("Bearer ") or self.validator is None:
+                    await _json_error(send, 401, "invalid authorization header")
+                    return
+                scope["principal"] = self.validator.validate(auth_header[7:].strip())
         except AuthorizationError as exc:
             await _json_error(send, 403, str(exc))
             return

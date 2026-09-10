@@ -38,13 +38,18 @@ def _jsonable(value: Any) -> Any:
 def _runtime_context(principal: Principal | None) -> dict[str, Any] | None:
     if principal is None:
         return None
-    return {
+    context: dict[str, Any] = {
         "user_id": principal.subject,
         "tenant_id": principal.tenant_id,
         "project_id": principal.project_id,
         "role": next(iter(principal.roles), "user"),
         "permissions": sorted(principal.scopes),
     }
+    for field in ("request_id", "platform_trace_id"):
+        value = getattr(principal, field, None)
+        if value is not None:
+            context[field] = value
+    return context
 
 
 def _input_signature(name: str) -> inspect.Signature:

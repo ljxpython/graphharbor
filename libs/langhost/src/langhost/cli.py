@@ -41,9 +41,10 @@ def _resolve_port(host: str, port: int | None) -> int:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((host, requested))
-        except OSError:
-            sock.bind((host, 0))
-            return int(sock.getsockname()[1])
+        except OSError as exc:
+            raise click.UsageError(
+                f"Port {requested} is unavailable; refusing to select a different port."
+            ) from exc
     return requested
 
 

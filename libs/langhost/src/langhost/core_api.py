@@ -4,24 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
+from copy import copy
 from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from langchain_core.runnables import RunnableConfig
-from pydantic import PydanticUserError
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy.dialects.postgresql import insert
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from langgraph_runtime_pg.auth import (
-    RuntimeContextError,
     in_principal_scope,
     principal_from_scope,
     scope_override_error,
     sign_runtime_context,
-    validate_policy_overrides,
 )
 from langgraph_runtime_pg.checkpoint import (
     copy_thread_checkpoints,
@@ -95,10 +93,13 @@ def _no_content() -> Response:
 
 def _scope(query: Any, model: Any, principal: Any) -> Any:
     if principal is not None:
-        query = query.where(
-            model.tenant_id == principal.tenant_id,
-            model.project_id == principal.project_id,
-        )
+        condition = and_(model.tenant_id == principal.tenant_id, model.project_id == principal.project_id)
+        if model is AssistantRow:
+            condition = or_(condition, and_(
+                model.tenant_id.is_(None), model.project_id.is_(None),
+                model.metadata_["created_by"].as_string() == "system",
+            ))
+        query = query.where(condition)
     return query
 
 
@@ -118,6 +119,10 @@ def _runtime_context(payload: dict[str, Any], principal: Any) -> dict[str, Any] 
     }
     if principal.auth_user is not None:
         context["auth_user"] = dict(principal.auth_user)
+    for field in ("request_id", "platform_trace_id"):
+        value = getattr(principal, field, None)
+        if value is not None:
+            context[field] = value
     return context
 
 
@@ -221,6 +226,12 @@ async def assistants_search(request: Request) -> JSONResponse:
         select(AssistantRow).order_by(AssistantRow.created_at.desc()), AssistantRow, principal
     )
     query = _metadata_filter(query, AssistantRow, payload.get("metadata"))
+    registry = getattr(request.app.state, "graph_registry", None)
+    if registry is not None:
+        query = query.where(or_(
+            AssistantRow.metadata_["created_by"].as_string().is_distinct_from("system"),
+            AssistantRow.graph_id.in_(registry.ids()),
+        ))
     if payload.get("graph_id"):
         query = query.where(AssistantRow.graph_id == str(payload["graph_id"]))
     if payload.get("name"):
@@ -238,6 +249,12 @@ async def assistants_count(request: Request) -> JSONResponse:
     payload = await request.json()
     query = _scope(select(func.count()).select_from(AssistantRow), AssistantRow, principal)
     query = _metadata_filter(query, AssistantRow, payload.get("metadata"))
+    registry = getattr(request.app.state, "graph_registry", None)
+    if registry is not None:
+        query = query.where(or_(
+            AssistantRow.metadata_["created_by"].as_string().is_distinct_from("system"),
+            AssistantRow.graph_id.in_(registry.ids()),
+        ))
     if payload.get("graph_id"):
         query = query.where(AssistantRow.graph_id == str(payload["graph_id"]))
     if payload.get("name"):
@@ -300,12 +317,14 @@ async def assistants_create(request: Request) -> JSONResponse:
 async def assistants_get(request: Request) -> JSONResponse:
     principal = _principal(request)
     try:
-        assistant_id = UUID(request.path_params["assistant_id"])
+        value = request.path_params["assistant_id"]
+        registry = getattr(request.app.state, "graph_registry", None)
+        assistant_id = uuid5(NAMESPACE_URL, value) if registry and value in registry.ids() else UUID(value)
     except ValueError:
         return _error("assistant not found", 404)
     async with connect() as conn:
         row = await conn.session.get(AssistantRow, assistant_id)
-        if row is None or not in_principal_scope(row, principal):
+        if row is None or not _assistant_readable(row, principal):
             return _error("assistant not found", 404)
     return JSONResponse(_assistant(row))
 
@@ -319,7 +338,7 @@ async def assistants_graph(request: Request) -> JSONResponse:
     async with connect() as conn:
         row = await conn.session.get(AssistantRow, assistant_id)
     registry = getattr(request.app.state, "graph_registry", None)
-    if row is None or not in_principal_scope(row, principal) or registry is None:
+    if row is None or not _assistant_readable(row, principal) or registry is None:
         return _error("assistant not found", 404)
     try:
         xray_value = request.query_params.get("xray", "false")
@@ -332,44 +351,65 @@ async def assistants_graph(request: Request) -> JSONResponse:
         return _error(str(exc), 404)
 
 
-def _schema_json(schema_type: Any) -> dict[str, Any] | None:
-    try:
-        return schema_type.model_json_schema()
-    except AttributeError:
-        try:
-            return schema_type.schema()
-        except AttributeError:
-            return None
+async def register_default_assistants(registry: Any) -> None:
+    """Register deployment-owned defaults, using the official graph UUID namespace."""
+    async with connect() as conn:
+        for graph_id in registry.ids():
+            assistant_id = uuid5(NAMESPACE_URL, graph_id)
+            values = {
+                "assistant_id": assistant_id, "graph_id": graph_id, "name": graph_id,
+                "config": {}, "context": {}, "metadata_": {"created_by": "system"}, "version": 1,
+            }
+            await conn.session.execute(
+                insert(AssistantRow).values(**values).on_conflict_do_nothing(
+                    index_elements=[AssistantRow.assistant_id],
+                )
+            )
+            await conn.session.execute(
+                insert(AssistantVersionRow).values(**values).on_conflict_do_nothing(
+                    index_elements=[AssistantVersionRow.assistant_id, AssistantVersionRow.version],
+                )
+            )
 
 
-def _graph_schema(graph: Any, method: str) -> dict[str, Any] | None:
-    try:
-        return _schema_json(getattr(graph, method)())
-    except PydanticUserError:  # typing.TypedDict schemas need typing_extensions on Python 3.11.
-        return {}
+def _assistant_readable(row: Any, principal: Any) -> bool:
+    return in_principal_scope(row, principal) or (
+        row.tenant_id is None and row.project_id is None
+        and row.metadata_.get("created_by") == "system"
+        and row.assistant_id == uuid5(NAMESPACE_URL, row.graph_id)
+    )
 
 
 async def assistants_schemas(request: Request) -> JSONResponse:
     principal = _principal(request)
-    try:
-        assistant_id = UUID(request.path_params["assistant_id"])
-    except ValueError:
-        return _error("assistant not found", 404)
-    async with connect() as conn:
-        row = await conn.session.get(AssistantRow, assistant_id)
     registry = getattr(request.app.state, "graph_registry", None)
-    if row is None or not in_principal_scope(row, principal) or registry is None:
+    if registry is None:
         return _error("assistant not found", 404)
+    graph_id = request.path_params["assistant_id"]
+    if graph_id not in registry.ids():
+        try:
+            assistant_id = UUID(graph_id)
+        except ValueError:
+            return _error("assistant not found", 404)
+        async with connect() as conn:
+            row = await conn.session.get(AssistantRow, assistant_id)
+        if row is None or not _assistant_readable(row, principal):
+            return _error("assistant not found", 404)
+        graph_id = row.graph_id
     try:
         async with registry.open(
-            row.graph_id, {"configurable": {"graph_id": row.graph_id}}
+            graph_id, {"configurable": {"graph_id": graph_id}}
         ) as graph:
+            # State covers public stream channels, including fields absent from input/output.
+            # Copy the graph so discovery never changes the running graph's output contract.
+            state_graph = copy(graph)
+            state_graph.output_channels = graph.stream_channels
             return JSONResponse(
                 {
-                    "graph_id": row.graph_id,
-                    "input_schema": _graph_schema(graph, "get_input_schema"),
-                    "output_schema": _graph_schema(graph, "get_output_schema"),
-                    "state_schema": _graph_schema(graph, "get_input_schema"),
+                    "graph_id": graph_id,
+                    "input_schema": graph.get_input_jsonschema(),
+                    "output_schema": graph.get_output_jsonschema(),
+                    "state_schema": state_graph.get_output_schema().model_json_schema(),
                     "config_schema": None,
                     "context_schema": graph.get_context_jsonschema(),
                 }
@@ -387,7 +427,7 @@ async def assistants_subgraphs(request: Request) -> JSONResponse:
     async with connect() as conn:
         row = await conn.session.get(AssistantRow, assistant_id)
     registry = getattr(request.app.state, "graph_registry", None)
-    if row is None or not in_principal_scope(row, principal) or registry is None:
+    if row is None or not _assistant_readable(row, principal) or registry is None:
         return _error("assistant not found", 404)
     try:
         namespace = request.path_params.get("namespace")
@@ -554,7 +594,7 @@ async def threads_create(request: Request) -> JSONResponse:
         )
         conn.session.add(row)
         await conn.session.flush()
-    return JSONResponse(_thread(row))
+    return JSONResponse(_thread(row), status_code=200)
 
 
 async def threads_search(request: Request) -> JSONResponse:
@@ -696,6 +736,24 @@ def _state_from_tuple(item: Any) -> dict[str, Any]:
     )
 
 
+def _state_from_snapshot(snapshot: Any) -> dict[str, Any]:
+    """Project LangGraph state after it reconstructs delta channels and tasks."""
+    return _plain(
+        {
+            "values": snapshot.values,
+            "next": snapshot.next,
+            "checkpoint": _checkpoint_key(snapshot.config),
+            "metadata": snapshot.metadata or {},
+            "created_at": snapshot.created_at,
+            "parent_checkpoint": _checkpoint_key(snapshot.parent_config)
+            if snapshot.parent_config
+            else None,
+            "tasks": [task._asdict() for task in snapshot.tasks],
+            "interrupts": snapshot.interrupts,
+        }
+    )
+
+
 def _has_projected_values(values: Any) -> bool:
     """Return whether a checkpoint contains user-visible channel values."""
     return isinstance(values, dict) and any(key != "__pregel_tasks" for key in values)
@@ -710,6 +768,15 @@ async def threads_state(request: Request) -> JSONResponse:
     if row is None or thread_id is None:
         return _error("thread not found", 404)
     checkpoint_id = request.path_params.get("checkpoint_id")
+    registry = getattr(request.app.state, "graph_registry", None)
+    graph_id = row.graph_id or row.metadata_.get("graph_id")
+    if registry is not None and graph_id and str(graph_id) in registry.ids():
+        config = cast(RunnableConfig, _checkpoint_config(thread_id, checkpoint_id))
+        try:
+            async with registry.open(str(graph_id), config) as graph:
+                return JSONResponse(_state_from_snapshot(await graph.aget_state(config)))
+        except Exception as exc:
+            return _error(f"checkpoint read failed: {exc}", 503)
     try:
         item = await get_checkpointer().aget_tuple(
             cast(RunnableConfig, _checkpoint_config(thread_id, checkpoint_id))
@@ -765,6 +832,21 @@ async def threads_history(request: Request) -> JSONResponse:
     if isinstance(before, dict):
         before = {"configurable": before}
     before_config = cast(RunnableConfig | None, before)
+    registry = getattr(request.app.state, "graph_registry", None)
+    graph_id = row.graph_id or row.metadata_.get("graph_id")
+    if registry is not None and graph_id and str(graph_id) in registry.ids():
+        try:
+            async with registry.open(str(graph_id), config) as graph:
+                return JSONResponse(
+                    [
+                        _state_from_snapshot(snapshot)
+                        async for snapshot in graph.aget_state_history(
+                            config, before=before_config, limit=limit
+                        )
+                    ]
+                )
+        except Exception as exc:
+            return _error(f"checkpoint history read failed: {exc}", 503)
     items = []
     async for item in get_checkpointer().alist(config, before=before_config, limit=limit):
         items.append(_state_from_tuple(item))
@@ -883,6 +965,9 @@ async def _resolve_assistant(
         assistant_id = UUID(assistant_value)
     except ValueError:
         assistant_id = None
+    registry = getattr(request.app.state, "graph_registry", None)
+    if registry is not None and assistant_value in registry.ids():
+        assistant_id = uuid5(NAMESPACE_URL, assistant_value)
     query = select(AssistantRow)
     if assistant_id is not None:
         query = query.where(AssistantRow.assistant_id == assistant_id)
@@ -890,43 +975,6 @@ async def _resolve_assistant(
         query = query.where(AssistantRow.graph_id == assistant_value)
     query = _scope(query, AssistantRow, principal)
     row = (await session.execute(query.limit(1))).scalar_one_or_none()
-    if row is not None or assistant_id is not None:
-        return row
-    registry = getattr(request.app.state, "graph_registry", None)
-    if registry is None:
-        return None
-    try:
-        registry.get(assistant_value)
-    except KeyError:
-        return None
-    deterministic_id = uuid5(
-        NAMESPACE_URL,
-        f"graphharbor:{getattr(principal, 'tenant_id', '')}:{getattr(principal, 'project_id', '')}:{assistant_value}",
-    )
-    row = AssistantRow(
-        assistant_id=deterministic_id,
-        tenant_id=principal.tenant_id if principal else None,
-        project_id=principal.project_id if principal else None,
-        graph_id=assistant_value,
-        name=assistant_value,
-        config={},
-        context={},
-        metadata_={},
-        version=1,
-    )
-    session.add(row)
-    session.add(
-        AssistantVersionRow(
-            assistant_id=deterministic_id,
-            version=1,
-            graph_id=assistant_value,
-            config={},
-            context={},
-            metadata_={},
-            name=assistant_value,
-        )
-    )
-    await session.flush()
     return row
 
 
@@ -1022,23 +1070,6 @@ async def runs_create(
         trusted_context = _runtime_context(run_payload, principal)
         if trusted_context is not None:
             run_payload["runtime_context"] = trusted_context
-        policy = getattr(principal, "policy", None)
-        if os.environ.get("GRAPHHARBOR_ENV", "development") == "production" and policy is None:
-            return _error("delegation runtime policy is required", 401)
-        requested_config = run_payload.get("config")
-        requested_configurable = (
-            requested_config.get("configurable") if isinstance(requested_config, dict) else None
-        )
-        try:
-            validate_policy_overrides(
-                policy,
-                configurable=requested_configurable,
-                context=run_payload.get("context")
-                if isinstance(run_payload.get("context"), dict)
-                else None,
-            )
-        except RuntimeContextError as exc:
-            return _error(str(exc), 403)
         idempotency_key = request.headers.get("idempotency-key") or payload.get("idempotency_key")
         run = await RunRepository().create(
             conn.session,
@@ -1058,7 +1089,6 @@ async def runs_create(
                     trusted_context,
                     run_id=str(run.run_id),
                     thread_id=str(thread.thread_id) if thread else None,
-                    policy=policy,
                 ),
             }
             run.kwargs.pop("runtime_context", None)

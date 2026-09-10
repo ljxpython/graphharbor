@@ -223,9 +223,9 @@ async def test_executor_passes_public_durability_to_invoke_and_stream() -> None:
         calls: list[tuple[str | None, object, object]] = []
 
         async def ainvoke(
-            self, _input, *, config, durability, interrupt_before, interrupt_after, version
+            self, _input, *, config, context, durability, interrupt_before, interrupt_after, version
         ):
-            del config, version
+            del config, context, version
             self.calls.append((durability, interrupt_before, interrupt_after))
             return GraphOutput(value={"value": 1}, interrupts=())
 
@@ -507,3 +507,45 @@ def test_thread_config_carries_agent_server_runtime_identity() -> None:
     runtime = config["configurable"]["__pregel_runtime"]
     assert runtime.server_info.graph_id == "assistant"
     assert runtime.server_info.user["identity"] == "user-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [False, True])
+async def test_executor_passes_context_to_nodes_and_resume(streaming: bool) -> None:
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.runtime import Runtime
+    from langgraph.types import Command, interrupt
+
+    from langgraph_runtime_pg.graph_executor import invoke_graph, thread_config
+
+    def review(state: _State, runtime: Runtime) -> _State:
+        assert runtime.context == {"increment": 4, "tools": []}
+        assert runtime.server_info.user["identity"] == "context-user"
+        approved = interrupt("approve increment")
+        return {
+            "value": state["value"] + runtime.context["increment"] if approved else state["value"]
+        }
+
+    graph = (
+        StateGraph(_State, context_schema=dict)
+        .add_node("review", review)
+        .add_edge(START, "review")
+        .add_edge("review", END)
+        .compile(checkpointer=InMemorySaver())
+    )
+    config = thread_config(
+        "context-thread",
+        context={"increment": 4, "tools": []},
+        runtime_context={"user_id": "context-user"},
+    )
+    events = []
+
+    async def collect(event):
+        events.append(event)
+
+    callback = collect if streaming else None
+    paused = await invoke_graph(graph, {"value": 1}, config=config, on_event=callback)
+    assert paused.interrupts
+    resumed = await invoke_graph(graph, Command(resume=True), config=config, on_event=callback)
+    assert resumed.value == {"value": 5}
+    assert not resumed.interrupts

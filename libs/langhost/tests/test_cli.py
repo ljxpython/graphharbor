@@ -37,6 +37,21 @@ def test_resolve_port_reuses_recently_closed_port() -> None:
     assert _resolve_port("127.0.0.1", port) == port
 
 
+def test_resolve_port_rejects_an_active_explicit_port() -> None:
+    import socket
+
+    import click
+
+    from langhost.cli import _resolve_port
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = int(listener.getsockname()[1])
+        with pytest.raises(click.UsageError, match="refusing to select a different port"):
+            _resolve_port("127.0.0.1", port)
+
+
 def test_serve_passes_resolved_port_to_banner_and_server(
     monkeypatch: Any,
     tmp_path: Path,

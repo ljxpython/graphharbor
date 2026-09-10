@@ -17,7 +17,6 @@ _MODULES = {
     "auth",
     "checkpoint",
     "database",
-    "deepagent_workspace",
     "lifespan",
     "metrics",
     "migrate",

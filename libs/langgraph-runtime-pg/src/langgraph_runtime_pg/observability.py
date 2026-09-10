@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, is_dataclass
 from typing import Any, cast
 
-_TRACE_CONTEXT_KEYS = (
+_DEFAULT_TRACE_CONTEXT_KEYS = (
     "run_id",
     "thread_id",
     "assistant_id",
@@ -19,7 +19,8 @@ _TRACE_CONTEXT_KEYS = (
     "user_id",
     "graph_id",
     "model_id",
-    "policy_version",
+    "request_id",
+    "platform_trace_id",
 )
 
 _SUMMARY_KEYS = ("data", "input", "output", "error", "interrupts", "content", "prompt", "response")
@@ -77,10 +78,20 @@ def build_trace_metadata(
     *,
     event: Mapping[str, Any] | None = None,
     context: Mapping[str, Any] | None = None,
+    allowed_keys: Sequence[str] | None = None,
 ) -> dict[str, Any]:
+    """Build trace metadata from event and context.
+
+    Args:
+        event: Event data to include in trace
+        context: Context data to extract allowed keys from
+        allowed_keys: Sequence of context keys to include. If None, uses default keys.
+                     Pass a custom sequence to include business-specific keys like 'policy_version'.
+    """
     trace: dict[str, Any] = {"schema_version": 1}
     if context:
-        for key in _TRACE_CONTEXT_KEYS:
+        keys_to_extract = allowed_keys if allowed_keys is not None else _DEFAULT_TRACE_CONTEXT_KEYS
+        for key in keys_to_extract:
             value = context.get(key)
             if value is not None and value != "":
                 trace[key] = str(value)

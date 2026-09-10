@@ -23,12 +23,13 @@ from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 
 from langgraph_runtime_pg.auth import (
-    DelegationJWTValidator,
     PrincipalMiddleware,
     in_principal_scope,
     principal_from_scope,
     scope_override_error,
 )
+
+
 from langgraph_runtime_pg.checkpoint import delete_thread_checkpoints, get_checkpointer
 from langgraph_runtime_pg.database import connect, pool_stats
 from langgraph_runtime_pg.graph_registry import GraphRegistry, resolve_within_base_dir
@@ -63,6 +64,7 @@ from langhost.core_api import (
     cron_update,
     crons_count,
     crons_search,
+    register_default_assistants,
     runs_batch,
     runs_cancel,
     runs_cancel_many,
@@ -748,6 +750,7 @@ def create_app(
         app.state.graph_registry = GraphRegistry.from_config(config, base_dir=base_dir)
         readiness.checks = {"graphs": len(app.state.graph_registry) > 0}
         async with runtime_lifespan(app, readiness=readiness):
+            await register_default_assistants(app.state.graph_registry)
             if len(app.state.graph_registry) > 0:
                 app.state.graph_registry.attach_checkpointer(get_checkpointer())
             mcp_server = None
@@ -839,9 +842,6 @@ def create_app(
         routes.append(Mount("/mcp", app=_mcp_dispatch))
     if custom_app is not None:
         routes.append(Mount("/", app=custom_app))
-    validator = None
-    if os.environ.get("GRAPHHARBOR_ENV", "development") == "production" and auth_handler is None:
-        validator = DelegationJWTValidator.from_env()
     cors_config = http_config.get("cors", {}) if isinstance(http_config, dict) else {}
     if not isinstance(cors_config, dict):
         cors_config = {}
@@ -860,7 +860,6 @@ def create_app(
     middleware = [
         Middleware(
             PrincipalMiddleware,
-            validator,
             auth_handler=auth_handler,
             allow_anonymous=os.environ.get("GRAPHHARBOR_ENV", "development") != "production",
         )

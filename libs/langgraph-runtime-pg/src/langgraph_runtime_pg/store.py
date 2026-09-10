@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from langgraph_runtime_pg.database import to_psycopg_uri
 from langgraph_runtime_pg.models import StoreItemRow
+from langgraph_runtime_pg.schema_setup import run_schema_setup
 
 _STORE_CONFIG: dict | None = None
 _STORE: AsyncPostgresStore | None = None
@@ -42,6 +43,11 @@ async def setup_store() -> AsyncPostgresStore:
             _STORE_POOL = None
 
         uri = to_psycopg_uri()
+
+        async def setup(connection: Any) -> None:
+            await AsyncPostgresStore(connection).setup()
+
+        await run_schema_setup(uri, setup)
         pool = AsyncConnectionPool(
             conninfo=uri,
             min_size=1,
@@ -56,7 +62,6 @@ async def setup_store() -> AsyncPostgresStore:
         try:
             await pool.open()
             store = AsyncPostgresStore(cast(Any, pool))
-            await store.setup()
         except Exception:
             try:
                 await pool.close()

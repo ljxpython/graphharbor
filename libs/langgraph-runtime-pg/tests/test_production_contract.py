@@ -319,6 +319,7 @@ def test_run_sse_v3_preserves_every_standard_stream_channel() -> None:
         assert typed["params"]["data"] == data
 
 
+@pytest.mark.skip(reason="DelegationJWTValidator moved to ai-agent-platform business layer")
 def test_delegation_principal_and_hs256_validation() -> None:
     from langgraph_runtime_pg.auth import DelegationJWTValidator
 
@@ -349,6 +350,7 @@ def test_delegation_principal_and_hs256_validation() -> None:
     assert principal.can("threads:read")
 
 
+@pytest.mark.skip(reason="RuntimePolicy moved to ai-agent-platform business layer")
 def test_production_delegation_requires_runtime_policy() -> None:
     from langgraph_runtime_pg.auth import AuthenticationError, DelegationJWTValidator
 
@@ -377,6 +379,7 @@ def test_production_delegation_requires_runtime_policy() -> None:
         ).validate(token)
 
 
+@pytest.mark.skip(reason="RuntimePolicy moved to ai-agent-platform business layer")
 def test_delegation_policy_is_bound_to_principal_and_runtime_context(monkeypatch) -> None:
     from langgraph_runtime_pg.auth import (
         DelegationJWTValidator,
@@ -424,6 +427,8 @@ def test_delegation_policy_is_bound_to_principal_and_runtime_context(monkeypatch
         "project_id": "project-1",
         "role": "operator",
         "permissions": ["runs:write"],
+        "request_id": "request-1",
+        "platform_trace_id": "platform-trace-1",
     }
     signed = sign_runtime_context(
         context,
@@ -445,6 +450,70 @@ def test_delegation_policy_is_bound_to_principal_and_runtime_context(monkeypatch
         validate_policy_overrides(principal.policy, configurable={"model_id": "model-b"})
     with pytest.raises(RuntimeContextError, match="rejects tool names"):
         validate_policy_overrides(principal.policy, context={"tools": ["shell"]})
+
+
+def test_runtime_context_rejects_unknown_nested_and_top_level_claims(monkeypatch) -> None:
+    import hashlib
+    import hmac
+
+    from langgraph_runtime_pg import auth as auth_module
+    from langgraph_runtime_pg.auth import RuntimeContextError, sign_runtime_context
+
+    monkeypatch.setenv("GRAPHHARBOR_RUNTIME_CONTEXT_SECRET", "runtime-secret")
+    context = {
+        "user_id": "user-1",
+        "tenant_id": "tenant-1",
+        "project_id": "project-1",
+        "role": "operator",
+        "permissions": [],
+    }
+    with pytest.raises(RuntimeContextError, match="unknown fields"):
+        sign_runtime_context(
+            {**context, "unexpected": "value"}, run_id="run-1", thread_id="thread-1"
+        )
+
+    token = sign_runtime_context(context, run_id="run-1", thread_id="thread-1")
+    encoded, _ = token.split(".", 1)
+    claims = auth_module._decode_b64_json(encoded)
+    claims["unexpected"] = "value"
+    encoded = auth_module._b64_json(claims)
+    signature = hmac.new(b"runtime-secret", encoded.encode(), hashlib.sha256).hexdigest()
+    with pytest.raises(RuntimeContextError, match="unknown claims"):
+        auth_module.verify_runtime_context(
+            f"{encoded}.{signature}",
+            run_id="run-1",
+            thread_id="thread-1",
+            tenant_id="tenant-1",
+            project_id="project-1",
+        )
+
+
+def test_api_principal_producer_preserves_correlation(monkeypatch) -> None:
+    from langgraph_runtime_pg.auth import Principal
+    from langhost.core_api import _runtime_context
+
+    principal = Principal.from_auth_user(
+        {
+            "identity": "user-1",
+            "tenant_id": "tenant-1",
+            "project_id": "project-1",
+            "role": "operator",
+            "permissions": ["runs:write"],
+            "request_id": "request-1",
+            "platform_trace_id": "platform-trace-1",
+        }
+    )
+
+    assert _runtime_context({}, principal) == {
+        "user_id": "user-1",
+        "tenant_id": "tenant-1",
+        "project_id": "project-1",
+        "role": "operator",
+        "permissions": ["runs:write"],
+        "auth_user": principal.auth_user,
+        "request_id": "request-1",
+        "platform_trace_id": "platform-trace-1",
+    }
 
 
 def test_custom_auth_user_is_preserved_in_signed_worker_context(monkeypatch) -> None:
@@ -474,7 +543,7 @@ def test_custom_auth_user_is_preserved_in_signed_worker_context(monkeypatch) -> 
     }
     monkeypatch.setenv("GRAPHHARBOR_RUNTIME_CONTEXT_SECRET", "runtime-secret")
     token = sign_runtime_context(context, run_id="run-1", thread_id="thread-1")
-    restored, _ = verify_runtime_context_envelope(
+    restored = verify_runtime_context_envelope(
         token,
         run_id="run-1",
         thread_id="thread-1",
@@ -487,6 +556,7 @@ def test_custom_auth_user_is_preserved_in_signed_worker_context(monkeypatch) -> 
     assert "auth_user" not in config["configurable"]["__graphharbor_runtime_context"]
 
 
+@pytest.mark.skip(reason="DelegationJWTValidator and JWKSCache moved to ai-agent-platform business layer")
 def test_delegation_jwt_rejects_algorithm_and_refreshes_rotated_key(monkeypatch) -> None:
     from langgraph_runtime_pg.auth import AuthenticationError, DelegationJWTValidator, JWKSCache
 
@@ -602,6 +672,38 @@ def test_runtime_context_requires_matching_issuer_and_audience(monkeypatch) -> N
             tenant_id="tenant-1",
             project_id="project-1",
         )
+
+
+def test_runtime_context_does_not_reuse_external_jwt_issuer_and_audience(monkeypatch) -> None:
+    from langgraph_runtime_pg.auth import (
+        sign_runtime_context,
+        verify_runtime_context,
+    )
+
+    monkeypatch.setenv("GRAPHHARBOR_RUNTIME_CONTEXT_SECRET", "runtime-secret")
+    monkeypatch.setenv("GRAPHHARBOR_JWT_ISSUER", "external-jwt-issuer")
+    monkeypatch.setenv("GRAPHHARBOR_JWT_AUDIENCE", "external-jwt-audience")
+    context = {
+        "user_id": "user-1",
+        "tenant_id": "tenant-1",
+        "project_id": "project-1",
+        "role": "operator",
+        "permissions": [],
+    }
+    token = sign_runtime_context(context, run_id="run-1", thread_id="thread-1")
+
+    monkeypatch.delenv("GRAPHHARBOR_JWT_ISSUER")
+    monkeypatch.delenv("GRAPHHARBOR_JWT_AUDIENCE")
+    assert (
+        verify_runtime_context(
+            token,
+            run_id="run-1",
+            thread_id="thread-1",
+            tenant_id="tenant-1",
+            project_id="project-1",
+        )
+        == context
+    )
 
 
 def test_schema_models_include_durable_ownership_and_events() -> None:
@@ -1688,6 +1790,7 @@ async def test_production_worker_persists_hitl_interrupt_without_lock_deadlock(
         )
     assert row is not None and row.status == RunStatus.INTERRUPTED.value
     assert thread is not None and thread.status == "interrupted"
+    assert thread.graph_id == "hitl"
     assert thread.interrupts["interrupt-1"]["value"] == {"question": "approve"}
     assert [event.payload["event"] for event in events] == [
         "lifecycle",
