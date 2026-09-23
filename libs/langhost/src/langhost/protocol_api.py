@@ -117,6 +117,7 @@ async def protocol_commands(request: Request) -> JSONResponse:
         return JSONResponse(
             {
                 "id": command_id,
+                "type": "success",
                 "result": {"run_id": run["run_id"], "thread_id": str(thread_id)},
                 "meta": {"applied_through_seq": 0},
             }
@@ -132,6 +133,7 @@ async def protocol_commands(request: Request) -> JSONResponse:
             return JSONResponse(
                 {
                     "id": command_id,
+                    "type": "success",
                     "result": {"run_id": str(existing.run_id), "thread_id": str(thread_id)},
                     "meta": {"applied_through_seq": 0},
                 }
@@ -144,7 +146,7 @@ async def protocol_commands(request: Request) -> JSONResponse:
         latest = await _latest_run(thread_id, request)
         if latest is None:
             return _error(command_id, "no_such_run", "thread has no run")
-        command = {"resume": params.get("response")}
+        command = {"resume": {interrupt_id: params.get("response")}}
         for field in ("graph", "update", "goto"):
             if field in params:
                 command[field] = params[field]
@@ -154,6 +156,7 @@ async def protocol_commands(request: Request) -> JSONResponse:
             "metadata": {},
             "idempotency_key": resume_key,
             "if_not_exists": "reject",
+            "version": latest.kwargs.get("version", "v2"),
         }
         result = await runs_create(request, thread_value=str(thread_id), payload=payload)
         if result.status_code >= 300:
@@ -175,6 +178,7 @@ async def protocol_commands(request: Request) -> JSONResponse:
         return JSONResponse(
             {
                 "id": command_id,
+                "type": "success",
                 "result": {"run_id": run["run_id"], "thread_id": str(thread_id)},
                 "meta": {"applied_through_seq": thread.event_seq},
             }

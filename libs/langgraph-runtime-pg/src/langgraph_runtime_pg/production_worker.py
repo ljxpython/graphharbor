@@ -9,6 +9,7 @@ import math
 import os
 import signal
 import socket
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -113,10 +114,74 @@ def _interrupts_payload(interrupts: Any) -> list[dict[str, Any]]:
     return values
 
 
+def _is_message_delta(event: dict[str, Any]) -> bool:
+    data = event.get("data")
+    return (
+        event.get("event") == "messages"
+        and isinstance(data, (list, tuple))
+        and bool(data)
+        and isinstance(data[0], dict)
+        and data[0].get("event") == "content-block-delta"
+    )
+
+
+class _StreamEventBuffer:
+    def __init__(self, publish: Callable[[list[dict[str, Any]]], Awaitable[None]]) -> None:
+        self.publish = publish
+        self.pending: list[dict[str, Any]] = []
+        self.lock = asyncio.Lock()
+        self.timer: asyncio.Task[None] | None = None
+        self.error: Exception | None = None
+
+    async def add(self, event: dict[str, Any]) -> None:
+        async with self.lock:
+            if self.error is not None:
+                raise self.error
+            self.pending.append(event)
+            if len(self.pending) >= 32:
+                await self._flush_locked()
+            elif self.timer is None or self.timer.done():
+                self.timer = asyncio.create_task(self._flush_after_delay())
+
+    async def flush(self) -> None:
+        try:
+            async with self.lock:
+                if self.error is not None:
+                    raise self.error
+                await self._flush_locked()
+        finally:
+            timer = self.timer
+            if timer is not None and timer is not asyncio.current_task():
+                timer.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await timer
+                self.timer = None
+
+    async def _flush_locked(self) -> None:
+        if self.pending:
+            try:
+                await self.publish(self.pending)
+            except Exception as exc:
+                self.error = exc
+                raise
+            self.pending = []
+
+    async def _flush_after_delay(self) -> None:
+        await asyncio.sleep(0.05)
+        try:
+            async with self.lock:
+                await self._flush_locked()
+        except Exception as exc:
+            self.error = exc
+
+
 class ProductionWorker:
-    def __init__(self, registry: GraphRegistry, *, owner: str | None = None) -> None:
+    def __init__(
+        self, registry: GraphRegistry, *, owner: str | None = None, enable_reaper: bool = True
+    ) -> None:
         self.registry = registry
         self.owner = owner or f"{socket.gethostname()}:{os.getpid()}"
+        self.enable_reaper = enable_reaper
         try:
             lease_seconds = max(int(os.environ.get("GRAPHHARBOR_LEASE_SECONDS", "60")), 5)
         except ValueError:
@@ -133,65 +198,104 @@ class ProductionWorker:
         *,
         trace_context: dict[str, Any] | None = None,
     ) -> None:
-        topic = str(event.get("event", "custom"))
-        status = event.get("status")
-        terminal = topic == "lifecycle" and str(status) in TERMINAL_RUN_STATUSES
+        await self._publish_events(run_id, thread_id, [event], trace_context=trace_context)
+
+    async def _publish_events(
+        self,
+        run_id: UUID,
+        thread_id: UUID | None,
+        events: list[dict[str, Any]],
+        *,
+        trace_context: dict[str, Any] | None = None,
+    ) -> None:
+        durable_events = []
         async with connect() as conn:
-            kwargs: dict[str, Any] = {
-                "run_id": run_id,
-                "thread_id": thread_id,
-                "topic": topic,
-                "payload": event,
-                "namespace": list(event.get("namespace") or event.get("parent_ids") or []),
-                "trace_context": trace_context,
-            }
-            if terminal:
-                kwargs["terminal"] = True
-            durable = await self.repository.record_event(conn.session, **kwargs)
-        await self._fanout_durable_event(durable)
+            if len(events) > 1 and all(_is_message_delta(event) for event in events):
+                durable_events = await self.repository.record_message_deltas(
+                    conn.session,
+                    run_id=run_id,
+                    thread_id=thread_id,
+                    events=events,
+                    trace_context=trace_context,
+                )
+            else:
+                for event in events:
+                    topic = str(event.get("event", "custom"))
+                    kwargs: dict[str, Any] = {
+                        "run_id": run_id,
+                        "thread_id": thread_id,
+                        "topic": topic,
+                        "payload": event,
+                        "namespace": list(event.get("namespace") or event.get("parent_ids") or []),
+                        "trace_context": trace_context,
+                    }
+                    if topic == "lifecycle" and str(event.get("status")) in TERMINAL_RUN_STATUSES:
+                        kwargs["terminal"] = True
+                    durable_events.append(
+                        await self.repository.record_event(conn.session, **kwargs)
+                    )
+        if len(durable_events) > 1 and all(
+            _is_message_delta(row.payload) for row in durable_events
+        ):
+            await self._fanout_durable_batch(durable_events)
+            return
+        for durable in durable_events:
+            await self._fanout_durable_event(durable)
+
+    async def _fanout_durable_batch(self, durables: list[Any]) -> None:
+        try:
+            manager = get_stream_manager()
+            run_id = durables[0].run_id
+            thread_id = durables[0].thread_id
+            messages = [self._durable_messages(durable) for durable in durables]
+            await manager.put_batch(run_id, thread_id, messages)
+        except Exception:
+            logger.warning("event transport unavailable", run_id=str(durables[0].run_id))
+
+    @staticmethod
+    def _durable_messages(durable: Any) -> tuple[Message, Message | None]:
+        run_id = durable.run_id
+        thread_id = durable.thread_id
+        event = durable.payload
+        run_message = Message(
+            topic=f"event:{durable.topic}".encode(),
+            data=json.dumps(
+                {
+                    "id": str(durable.event_id),
+                    "seq": durable.sequence,
+                    "run_id": str(run_id),
+                    "thread_id": str(thread_id) if thread_id else None,
+                    "event": event,
+                },
+                separators=(",", ":"),
+                default=str,
+            ).encode(),
+        )
+        if thread_id is None:
+            return run_message, None
+        wire_event = protocol_event(
+            event_id=str(durable.event_id),
+            sequence=durable.sequence,
+            run_id=str(run_id),
+            thread_id=str(thread_id),
+            event=event,
+        )
+        return run_message, Message(
+            topic=f"protocol:{wire_event['method']}".encode(),
+            data=json.dumps(wire_event, separators=(",", ":"), default=str).encode(),
+        )
 
     async def _fanout_durable_event(self, durable: Any) -> None:
         try:
             manager = get_stream_manager()
             run_id = durable.run_id
             thread_id = durable.thread_id
-            event = durable.payload
             if run_id is None:
                 return
-            await manager.put(
-                run_id,
-                thread_id,
-                Message(
-                    topic=f"event:{durable.topic}".encode(),
-                    data=json.dumps(
-                        {
-                            "id": str(durable.event_id),
-                            "seq": durable.sequence,
-                            "run_id": str(run_id),
-                            "thread_id": str(thread_id) if thread_id else None,
-                            "event": event,
-                        },
-                        separators=(",", ":"),
-                        default=str,
-                    ).encode(),
-                ),
-                resumable=True,
-            )
-            if thread_id is not None:
-                wire_event = protocol_event(
-                    event_id=str(durable.event_id),
-                    sequence=durable.sequence,
-                    run_id=str(run_id),
-                    thread_id=str(thread_id),
-                    event=event,
-                )
-                await manager.put_thread(
-                    thread_id,
-                    Message(
-                        topic=f"protocol:{wire_event['method']}".encode(),
-                        data=json.dumps(wire_event, separators=(",", ":"), default=str).encode(),
-                    ),
-                )
+            run_message, thread_message = self._durable_messages(durable)
+            await manager.put(run_id, thread_id, run_message, resumable=True)
+            if thread_message is not None:
+                await manager.put_thread(thread_id, thread_message)
         except Exception:
             logger.warning(
                 "event transport unavailable",
@@ -474,11 +578,19 @@ class ProductionWorker:
             if await self._cancel_requested(run_id, thread_id):
                 raise RunCancelled
 
+            event_buffer = _StreamEventBuffer(
+                lambda events: self._publish_events(
+                    run_id, thread_id, events, trace_context=trace_context
+                )
+            )
+
             async def on_event(event: dict[str, Any]) -> None:
-                if self.stop_event.is_set():
+                if self.stop_event.is_set() or cancel_event.is_set():
                     raise RunCancelled
-                if await self._cancel_requested(run_id, thread_id):
-                    raise RunCancelled
+                if _is_message_delta(event):
+                    await event_buffer.add(event)
+                    return
+                await event_buffer.flush()
                 await self._publish_event(
                     run_id,
                     thread_id,
@@ -496,18 +608,24 @@ class ProductionWorker:
                 context=run_context,
                 runtime_context=runtime_context,
             )
+            for source in config_sources:
+                if "recursion_limit" in source:
+                    config["recursion_limit"] = source["recursion_limit"]
 
             async def execute() -> Any:
-                async with self.registry.open(graph_id, config) as graph:
-                    return await invoke_graph(
-                        graph,
-                        input_value,
-                        config=config,
-                        on_event=on_event,
-                        durability=durability,
-                        interrupt_before=interrupt_before,
-                        interrupt_after=interrupt_after,
-                    )
+                try:
+                    async with self.registry.open(graph_id, config) as graph:
+                        return await invoke_graph(
+                            graph,
+                            input_value,
+                            config=config,
+                            on_event=on_event,
+                            durability=durability,
+                            interrupt_before=interrupt_before,
+                            interrupt_after=interrupt_after,
+                        )
+                finally:
+                    await event_buffer.flush()
 
             execution = asyncio.create_task(
                 execute(),
@@ -763,7 +881,8 @@ class ProductionWorker:
     async def run_forever(self) -> None:
         reaper: asyncio.Task | None = None
         try:
-            reaper = asyncio.create_task(self._reaper_loop(), name=f"reaper-{self.owner}")
+            if self.enable_reaper:
+                reaper = asyncio.create_task(self._reaper_loop(), name=f"reaper-{self.owner}")
             while not self.stop_event.is_set():
                 try:
                     did_work = await self.run_once()
@@ -795,24 +914,37 @@ class ProductionWorker:
                 logger.exception("lease reaper failed")
 
 
-async def run_worker(config_path: Path) -> None:
+async def run_worker(config_path: Path, *, n_jobs_per_worker: int = 1) -> None:
+    if n_jobs_per_worker < 1:
+        raise ValueError("n_jobs_per_worker must be a positive integer")
     configure_structured_logging()
     registry = GraphRegistry.from_path(config_path)
     previous_auto_migrate = os.environ.get("LG_RUNTIME_PG_AUTO_MIGRATE")
     os.environ["LG_RUNTIME_PG_AUTO_MIGRATE"] = "false"
     await start_pool()
-    worker = ProductionWorker(registry)
+    owner = f"{socket.gethostname()}:{os.getpid()}"
+    workers = [
+        ProductionWorker(registry, owner=f"{owner}:slot-{slot}", enable_reaper=slot == 0)
+        for slot in range(n_jobs_per_worker)
+    ]
     registry.attach_checkpointer(get_checkpointer())
     loop = asyncio.get_running_loop()
     installed_signals: list[signal.Signals] = []
+
+    def stop_workers() -> None:
+        for worker in workers:
+            worker.stop_event.set()
+
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
-            loop.add_signal_handler(sig, worker.stop_event.set)
+            loop.add_signal_handler(sig, stop_workers)
             installed_signals.append(sig)
         except (NotImplementedError, RuntimeError):
             continue
     try:
-        await worker.run_forever()
+        async with asyncio.TaskGroup() as group:
+            for worker in workers:
+                group.create_task(worker.run_forever(), name=f"worker-{worker.owner}")
     finally:
         for sig in installed_signals:
             with contextlib.suppress(NotImplementedError, RuntimeError):

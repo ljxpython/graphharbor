@@ -28,8 +28,6 @@ from langgraph_runtime_pg.auth import (
     principal_from_scope,
     scope_override_error,
 )
-
-
 from langgraph_runtime_pg.checkpoint import delete_thread_checkpoints, get_checkpointer
 from langgraph_runtime_pg.database import connect, pool_stats
 from langgraph_runtime_pg.graph_registry import GraphRegistry, resolve_within_base_dir

@@ -40,7 +40,7 @@ def test_agent_state_projection_keeps_durable_values() -> None:
 
 def _graph_config(root: Path) -> dict[str, dict[str, str]]:
     (root / "graphs.py").write_text(
-        "from typing import TypedDict\n"
+        "from typing_extensions import TypedDict\n"
         "from langgraph.graph import END, START, StateGraph\n"
         "class State(TypedDict):\n"
         "    value: int\n"
@@ -94,6 +94,9 @@ async def test_core_rest_contract_covers_resources_and_errors(tmp_path: Path) ->
             assert path in openapi["paths"]
             assert methods <= set(openapi["paths"][path])
 
+        initial_count = (
+            await client.post("/assistants/count", json={"graph_id": "assistant"})
+        ).json()
         assistant_response = await client.post(
             "/assistants", json={"graph_id": "assistant", "name": "rest-contract"}
         )
@@ -131,7 +134,9 @@ async def test_core_rest_contract_covers_resources_and_errors(tmp_path: Path) ->
         assert (
             await client.post("/assistants/search", json={"graph_id": "assistant"})
         ).status_code == 200
-        assert (await client.post("/assistants/count", json={"graph_id": "assistant"})).json() == 1
+        assert (
+            await client.post("/assistants/count", json={"graph_id": "assistant"})
+        ).json() == initial_count + 1
         assert (await client.get(f"/assistants/{assistant_id}/graph")).status_code == 200
         assert (await client.get(f"/assistants/{assistant_id}/schemas")).status_code == 200
         assert (await client.get(f"/assistants/{assistant_id}/subgraphs")).status_code == 200

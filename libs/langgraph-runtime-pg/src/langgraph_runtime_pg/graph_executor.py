@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Awaitable, Callable, Mapping
-from time import time
 from typing import Any, cast
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime, ServerInfo
+from langgraph.stream import (
+    CheckpointsTransformer,
+    CustomTransformer,
+    DebugTransformer,
+    TasksTransformer,
+    UpdatesTransformer,
+)
 from langgraph.types import Command, Durability, GraphOutput
 
 EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
@@ -115,7 +120,7 @@ async def invoke_graph(
     interrupt_before: str | tuple[str, ...] | None = None,
     interrupt_after: str | tuple[str, ...] | None = None,
 ) -> Any:
-    """Run once while retaining every documented v2 stream part."""
+    """Run once using LangGraph's native typed event stream and durable output."""
     if on_event is None:
         # LangGraph v2 returns GraphOutput(value, interrupts); preserve both fields.
         return await graph.ainvoke(
@@ -128,46 +133,54 @@ async def invoke_graph(
             version="v2",
         )
 
-    stream = graph.astream(
+    stream = await graph.astream_events(
         input_value,
         config=config,
         context=config.get("context"),
-        stream_mode=("values", "updates", "messages", "custom", "checkpoints", "tasks", "debug"),
-        subgraphs=True,
         durability=durability,
         interrupt_before=interrupt_before,
         interrupt_after=interrupt_after,
-        version="v2",
+        version="v3",
+        transformers=[
+            UpdatesTransformer,
+            CustomTransformer,
+            CheckpointsTransformer,
+            TasksTransformer,
+            DebugTransformer,
+        ],
     )
-    if inspect.isawaitable(stream):
-        stream = await stream
-    output: Any = None
-    interrupts: tuple[Any, ...] = ()
-    async for part in stream:
-        event = dict(part)
-        method = str(event.get("type", "custom"))
-        namespace = _jsonable(event.get("ns", ()))
-        data = _jsonable(event.get("data"))
-        raw_interrupts = event.get("interrupts") or ()
-        if method == "values":
-            output = data
-            interrupts = tuple(raw_interrupts)
-        projected = {
-            "event": method,
-            "method": method,
-            "data": data,
-            "namespace": namespace,
-            "timestamp": int(time() * 1000),
-            "interrupts": _jsonable(raw_interrupts),
-            "params": {
-                "namespace": namespace,
-                "timestamp": int(time() * 1000),
-                "data": data,
-                "interrupts": _jsonable(raw_interrupts),
-            },
-        }
-        await on_event(projected)
-    return GraphOutput(value=output, interrupts=tuple(interrupts or ()))
+    scope_names: dict[tuple[str, ...], str] = {}
+    async with stream:
+        async for part in stream:
+            event = _jsonable(part)
+            params = event["params"]
+            method = event["method"]
+            if method == "lifecycle":
+                data = params["data"]
+                scope = tuple(data.get("namespace") or params["namespace"])
+                if isinstance(data.get("graph_name"), str):
+                    scope_names[scope] = data["graph_name"]
+                elif scope in scope_names:
+                    params["data"] = {**data, "graph_name": scope_names[scope]}
+            # Native v3 projects child lifecycle at the root envelope; the
+            # affected scope lives in data.namespace. Only suppress actual root
+            # lifecycle, which the worker emits after committing Run state.
+            if (
+                method == "lifecycle"
+                and not params["namespace"]
+                and not params["data"].get("namespace")
+            ):
+                continue
+            await on_event(
+                {
+                    **event,
+                    "event": method,
+                    "data": params["data"],
+                    "namespace": params["namespace"],
+                    "interrupts": params.get("interrupts", []),
+                }
+            )
+        return GraphOutput(value=await stream.output(), interrupts=tuple(await stream.interrupts()))
 
 
 def resume_command(value: Any) -> Command | None:

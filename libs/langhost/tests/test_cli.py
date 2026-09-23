@@ -107,6 +107,33 @@ def test_serve_passes_resolved_port_to_banner_and_server(
     assert calls["server"] == ("127.0.0.1", 51234)
 
 
+def test_worker_passes_concurrency_to_production_runtime(monkeypatch: Any, tmp_path: Path) -> None:
+    from langgraph_runtime_pg import production_worker
+    from langhost import cli as cli_module
+
+    captured: list[int] = []
+
+    async def run_worker(_config: Path, *, n_jobs_per_worker: int) -> None:
+        captured.append(n_jobs_per_worker)
+
+    monkeypatch.setattr(cli_module, "load_dotenv", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_module, "validate_config_file", lambda _config: {})
+    monkeypatch.setattr(production_worker, "run_worker", run_worker)
+    monkeypatch.setenv("N_JOBS_PER_WORKER", "3")
+
+    for value in (None, 4):
+        cli_module.worker_command.callback(
+            config_path=tmp_path / "langgraph.json",
+            env_file=None,
+            database_uri="postgresql://example",
+            redis_uri="redis://example",
+            n_jobs_per_worker=value,
+            compatibility_spike=False,
+        )
+
+    assert captured == [3, 4]
+
+
 @pytest.mark.asyncio
 async def test_owned_server_exposes_public_health_and_capabilities() -> None:
     from langhost.server import create_app

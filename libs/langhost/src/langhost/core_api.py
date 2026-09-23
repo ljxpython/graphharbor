@@ -45,7 +45,7 @@ from langgraph_runtime_pg.redis_stream import (
     get_stream_manager,
 )
 from langgraph_runtime_pg.run_state import is_terminal, transition
-from langgraph_runtime_pg.run_store import RunRepository
+from langgraph_runtime_pg.run_store import RunConflictError, RunRepository
 
 
 def _plain(value: Any) -> Any:
@@ -93,12 +93,18 @@ def _no_content() -> Response:
 
 def _scope(query: Any, model: Any, principal: Any) -> Any:
     if principal is not None:
-        condition = and_(model.tenant_id == principal.tenant_id, model.project_id == principal.project_id)
+        condition = and_(
+            model.tenant_id == principal.tenant_id, model.project_id == principal.project_id
+        )
         if model is AssistantRow:
-            condition = or_(condition, and_(
-                model.tenant_id.is_(None), model.project_id.is_(None),
-                model.metadata_["created_by"].as_string() == "system",
-            ))
+            condition = or_(
+                condition,
+                and_(
+                    model.tenant_id.is_(None),
+                    model.project_id.is_(None),
+                    model.metadata_["created_by"].as_string() == "system",
+                ),
+            )
         query = query.where(condition)
     return query
 
@@ -228,10 +234,12 @@ async def assistants_search(request: Request) -> JSONResponse:
     query = _metadata_filter(query, AssistantRow, payload.get("metadata"))
     registry = getattr(request.app.state, "graph_registry", None)
     if registry is not None:
-        query = query.where(or_(
-            AssistantRow.metadata_["created_by"].as_string().is_distinct_from("system"),
-            AssistantRow.graph_id.in_(registry.ids()),
-        ))
+        query = query.where(
+            or_(
+                AssistantRow.metadata_["created_by"].as_string().is_distinct_from("system"),
+                AssistantRow.graph_id.in_(registry.ids()),
+            )
+        )
     if payload.get("graph_id"):
         query = query.where(AssistantRow.graph_id == str(payload["graph_id"]))
     if payload.get("name"):
@@ -251,10 +259,12 @@ async def assistants_count(request: Request) -> JSONResponse:
     query = _metadata_filter(query, AssistantRow, payload.get("metadata"))
     registry = getattr(request.app.state, "graph_registry", None)
     if registry is not None:
-        query = query.where(or_(
-            AssistantRow.metadata_["created_by"].as_string().is_distinct_from("system"),
-            AssistantRow.graph_id.in_(registry.ids()),
-        ))
+        query = query.where(
+            or_(
+                AssistantRow.metadata_["created_by"].as_string().is_distinct_from("system"),
+                AssistantRow.graph_id.in_(registry.ids()),
+            )
+        )
     if payload.get("graph_id"):
         query = query.where(AssistantRow.graph_id == str(payload["graph_id"]))
     if payload.get("name"):
@@ -319,7 +329,9 @@ async def assistants_get(request: Request) -> JSONResponse:
     try:
         value = request.path_params["assistant_id"]
         registry = getattr(request.app.state, "graph_registry", None)
-        assistant_id = uuid5(NAMESPACE_URL, value) if registry and value in registry.ids() else UUID(value)
+        assistant_id = (
+            uuid5(NAMESPACE_URL, value) if registry and value in registry.ids() else UUID(value)
+        )
     except ValueError:
         return _error("assistant not found", 404)
     async with connect() as conn:
@@ -357,16 +369,25 @@ async def register_default_assistants(registry: Any) -> None:
         for graph_id in registry.ids():
             assistant_id = uuid5(NAMESPACE_URL, graph_id)
             values = {
-                "assistant_id": assistant_id, "graph_id": graph_id, "name": graph_id,
-                "config": {}, "context": {}, "metadata_": {"created_by": "system"}, "version": 1,
+                "assistant_id": assistant_id,
+                "graph_id": graph_id,
+                "name": graph_id,
+                "config": {},
+                "context": {},
+                "metadata_": {"created_by": "system"},
+                "version": 1,
             }
             await conn.session.execute(
-                insert(AssistantRow).values(**values).on_conflict_do_nothing(
+                insert(AssistantRow)
+                .values(**values)
+                .on_conflict_do_nothing(
                     index_elements=[AssistantRow.assistant_id],
                 )
             )
             await conn.session.execute(
-                insert(AssistantVersionRow).values(**values).on_conflict_do_nothing(
+                insert(AssistantVersionRow)
+                .values(**values)
+                .on_conflict_do_nothing(
                     index_elements=[AssistantVersionRow.assistant_id, AssistantVersionRow.version],
                 )
             )
@@ -374,7 +395,8 @@ async def register_default_assistants(registry: Any) -> None:
 
 def _assistant_readable(row: Any, principal: Any) -> bool:
     return in_principal_scope(row, principal) or (
-        row.tenant_id is None and row.project_id is None
+        row.tenant_id is None
+        and row.project_id is None
         and row.metadata_.get("created_by") == "system"
         and row.assistant_id == uuid5(NAMESPACE_URL, row.graph_id)
     )
@@ -397,19 +419,21 @@ async def assistants_schemas(request: Request) -> JSONResponse:
             return _error("assistant not found", 404)
         graph_id = row.graph_id
     try:
-        async with registry.open(
-            graph_id, {"configurable": {"graph_id": graph_id}}
-        ) as graph:
+        async with registry.open(graph_id, {"configurable": {"graph_id": graph_id}}) as graph:
             # State covers public stream channels, including fields absent from input/output.
             # Copy the graph so discovery never changes the running graph's output contract.
             state_graph = copy(graph)
-            state_graph.output_channels = graph.stream_channels
+            if hasattr(graph, "builder") and hasattr(graph.builder, "state_schema"):
+                state_graph.builder = copy(graph.builder)
+                state_graph.builder.output_schema = graph.builder.state_schema
+            else:
+                state_graph.output_channels = graph.stream_channels
             return JSONResponse(
                 {
                     "graph_id": graph_id,
                     "input_schema": graph.get_input_jsonschema(),
                     "output_schema": graph.get_output_jsonschema(),
-                    "state_schema": state_graph.get_output_schema().model_json_schema(),
+                    "state_schema": state_graph.get_output_jsonschema(),
                     "config_schema": None,
                     "context_schema": graph.get_context_jsonschema(),
                 }
@@ -1071,17 +1095,22 @@ async def runs_create(
         if trusted_context is not None:
             run_payload["runtime_context"] = trusted_context
         idempotency_key = request.headers.get("idempotency-key") or payload.get("idempotency_key")
-        run = await RunRepository().create(
-            conn.session,
-            assistant_id=assistant.assistant_id,
-            thread_id=thread.thread_id if thread else None,
-            kwargs=run_payload,
-            metadata=payload.get("metadata") or {},
-            tenant_id=principal.tenant_id if principal else getattr(thread, "tenant_id", None),
-            project_id=principal.project_id if principal else getattr(thread, "project_id", None),
-            idempotency_key=idempotency_key,
-            multitask_strategy=str(payload.get("multitask_strategy") or "enqueue"),
-        )
+        try:
+            run = await RunRepository().create(
+                conn.session,
+                assistant_id=assistant.assistant_id,
+                thread_id=thread.thread_id if thread else None,
+                kwargs=run_payload,
+                metadata=payload.get("metadata") or {},
+                tenant_id=principal.tenant_id if principal else getattr(thread, "tenant_id", None),
+                project_id=principal.project_id
+                if principal
+                else getattr(thread, "project_id", None),
+                idempotency_key=idempotency_key,
+                multitask_strategy=str(payload.get("multitask_strategy") or "enqueue"),
+            )
+        except RunConflictError as exc:
+            return _error(str(exc), 409)
         if trusted_context and not run.kwargs.get("runtime_context_token"):
             run.kwargs = {
                 **run.kwargs,

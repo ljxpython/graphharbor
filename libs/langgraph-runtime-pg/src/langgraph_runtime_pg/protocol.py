@@ -162,7 +162,7 @@ def project_v3_event(
             RunStatus.ERROR.value: "failed",
             RunStatus.TIMEOUT.value: "failed",
             RunStatus.INTERRUPTED.value: "interrupted",
-        }.get(status, status)
+        }.get(status, "running")
         data = {"event": phase, "status": status}
         for key in ("graph_name", "cause", "reason", "output", "error", "interrupts"):
             if key in event:
@@ -208,16 +208,28 @@ def protocol_event(
     name = str(event.get("event") or event.get("method") or "custom")
     namespace = [str(item) for item in (event.get("namespace") or [])]
     data = event.get("data")
-    if name == "lifecycle":
+    node = None
+    if name == "messages" and isinstance(data, (list, tuple)) and len(data) == 2:
+        payload, metadata = data
+        if isinstance(payload, dict) and isinstance(metadata, dict) and "event" in payload:
+            data = dict(payload)
+            if data.get("event") == "message-start":
+                data["id"] = data.get("id") or data.get("message_id") or metadata.get("run_id")
+                data["metadata"] = metadata
+            node = metadata.get("langgraph_node")
+    if name == "lifecycle" and event.get("status"):
         status = str(event.get("status") or "")
         phase = {
-            RunStatus.RUNNING.value: "started",
+            RunStatus.RUNNING.value: "running",
             RunStatus.SUCCESS.value: "completed",
             RunStatus.ERROR.value: "failed",
             RunStatus.TIMEOUT.value: "failed",
             RunStatus.INTERRUPTED.value: "interrupted",
-        }.get(status, status or "running")
+        }.get(status, "running")
         data = {"event": phase, "status": status}
+        for key in ("graph_name", "cause"):
+            if key in event:
+                data[key] = event[key]
         if event.get("reason"):
             data["reason"] = event["reason"]
         if "output" in event:
@@ -229,13 +241,29 @@ def protocol_event(
         name = "lifecycle"
     elif name == "input.requested":
         name = "input.requested"
+        if isinstance(data, dict) and "value" in data:
+            data = {**data, "payload": data["value"]}
+    if name == "lifecycle" and isinstance(data, dict):
+        child_namespace = data.get("namespace")
+        # Match the official thread protocol: lifecycle is produced at the
+        # mux root but announces the child scope carried in its payload.
+        if (
+            isinstance(child_namespace, list)
+            and all(isinstance(part, str) for part in child_namespace)
+            and len(child_namespace) > len(namespace)
+        ):
+            namespace = list(child_namespace)
+        if isinstance(data.get("error"), dict) and "message" in data["error"]:
+            data = {**data, "error": data["error"]["message"]}
     return {
+        "type": "event",
         "event_id": event_id,
         "seq": sequence,
         "method": name,
         "params": {
             "namespace": namespace,
-            "timestamp": int(time() * 1000),
+            **({"node": node} if node is not None else {}),
+            "timestamp": project_v3_event(event)["params"]["timestamp"],
             "data": data,
             "run_id": run_id,
             "thread_id": thread_id,

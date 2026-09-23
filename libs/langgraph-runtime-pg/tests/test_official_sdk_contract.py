@@ -12,7 +12,7 @@ from httpx import ASGITransport, AsyncClient
 
 def _write_graph_project(root: Path) -> dict[str, dict[str, str]]:
     (root / "graphs.py").write_text(
-        "from typing import TypedDict\n"
+        "from typing_extensions import TypedDict\n"
         "from langgraph.graph import END, START, StateGraph\n"
         "class State(TypedDict):\n"
         "    value: int\n"

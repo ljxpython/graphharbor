@@ -584,6 +584,61 @@ class StreamManager:
         metric_inc("graphharbor_redis_events_published_total", labels={"kind": "thread"})
         await self._redis.publish(_thread_fanout_channel(thread_id), envelope)
 
+    async def put_batch(
+        self,
+        run_id: UUID | str,
+        thread_id: UUID | str | None,
+        messages: list[tuple[Message, Message | None]],
+    ) -> None:
+        """Fan out committed run events with two Redis round trips per batch."""
+        if self._redis is None:
+            raise RuntimeError(_REDIS_NOT_CONNECTED)
+        if not messages:
+            return
+        run_id = _ensure_uuid(run_id)
+        thread_id = THREADLESS_KEY if thread_id is None else _ensure_uuid(thread_id)
+
+        replay = self._redis.pipeline()
+        for run_message, _ in messages:
+            replay.xadd(
+                _stream_key(thread_id, run_id),
+                {b"topic": run_message.topic, b"data": run_message.data},
+                maxlen=_replay_maxlen(),
+                approximate=True,
+            )
+        ids = await replay.execute()
+        async with self._buf_lock:
+            for (run_message, thread_message), entry_id in zip(messages, ids, strict=True):
+                run_message.id = entry_id if isinstance(entry_id, bytes) else str(entry_id).encode()
+                buf = self.message_stores[thread_id][run_id]
+                buf.append(run_message)
+                if len(buf) > 2_000:
+                    del buf[: len(buf) - 2_000]
+                await self._deliver_local(
+                    thread_id, run_id, run_message, control=False, already_locked=True
+                )
+                if thread_message is not None and isinstance(thread_id, UUID):
+                    thread_message.id = _generate_ms_seq_id().encode()
+                    if self._mark_seen(f"thread:{thread_id}", thread_message):
+                        await _fanout_put(self.thread_streams[thread_id], thread_message)
+
+        fanout = self._redis.pipeline()
+        for run_message, thread_message in messages:
+            fanout.publish(_fanout_channel(thread_id, run_id), _encode_envelope(run_message))
+            if thread_message is not None and isinstance(thread_id, UUID):
+                fanout.publish(_thread_fanout_channel(thread_id), _encode_envelope(thread_message))
+        await fanout.execute()
+        metric_inc(
+            "graphharbor_redis_events_published_total", len(messages), labels={"kind": "run"}
+        )
+        if thread_id != THREADLESS_KEY:
+            thread_count = sum(thread_message is not None for _, thread_message in messages)
+            metric_inc(
+                "graphharbor_redis_events_published_total",
+                thread_count,
+                labels={"kind": "thread"},
+            )
+
     # -- Queue / subscriber management ---------------------------------------
 
     @staticmethod

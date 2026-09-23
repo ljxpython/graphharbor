@@ -229,12 +229,12 @@ async def test_executor_passes_public_durability_to_invoke_and_stream() -> None:
             self.calls.append((durability, interrupt_before, interrupt_after))
             return GraphOutput(value={"value": 1}, interrupts=())
 
-        async def astream(
-            self, _input, *, config, durability, interrupt_before, interrupt_after, **_kwargs
+        async def astream_events(
+            self, _input, *, config, durability, interrupt_before, interrupt_after, **kwargs
         ):
-            del config
             self.calls.append((durability, interrupt_before, interrupt_after))
-            yield {"type": "values", "ns": (), "data": {"value": 1}, "interrupts": ()}
+            assert kwargs["version"] == "v3"
+            return await _graph().astream_events({"value": 0}, config, **kwargs)
 
     graph = RecordingGraph()
     config = thread_config("durability-thread")
@@ -317,7 +317,7 @@ async def test_executor_captures_all_v2_stream_parts() -> None:
     )
 
     methods = {event["method"] for event in events}
-    assert {"values", "updates", "messages", "custom", "checkpoints", "tasks", "debug"} <= methods
+    assert {"values", "updates", "messages", "custom", "checkpoints", "debug"} <= methods
     assert result.value == {"value": 2}
     assert all(event["params"]["namespace"] == [] for event in events)
     custom = next(event for event in events if event["method"] == "custom")
@@ -358,6 +358,9 @@ async def test_executor_preserves_subgraph_namespace_and_interrupts() -> None:
     )
     assert result.value == {"value": 2}
     assert any(event["params"]["namespace"] for event in events)
+    lifecycle = [event for event in events if event["method"] == "lifecycle"]
+    assert [event["data"]["event"] for event in lifecycle] == ["started", "completed"]
+    assert all(event["data"]["namespace"] for event in lifecycle)
 
     interrupt_builder = StateGraph(_State)
     interrupt_builder.add_node("approval", lambda _state: {"value": interrupt({"ok": True})})

@@ -14,7 +14,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
 from langgraph_runtime_pg.metrics import inc as metric_inc
-from langgraph_runtime_pg.models import RunLeaseRow, RunRow, RuntimeEventRow, ThreadRow
+from langgraph_runtime_pg.models import (
+    AssistantRow,
+    RunLeaseRow,
+    RunRow,
+    RuntimeEventRow,
+    ThreadRow,
+)
 from langgraph_runtime_pg.observability import build_trace_metadata
 from langgraph_runtime_pg.protocol import RunReason, RunStatus
 from langgraph_runtime_pg.run_state import MAX_INFRASTRUCTURE_RETRIES, is_terminal, transition
@@ -22,6 +28,10 @@ from langgraph_runtime_pg.run_state import MAX_INFRASTRUCTURE_RETRIES, is_termin
 
 class RunOwnershipError(RuntimeError):
     pass
+
+
+class RunConflictError(ValueError):
+    """A run submission conflicts with a request or active execution."""
 
 
 class RunRepository:
@@ -59,6 +69,12 @@ class RunRepository:
         multitask_strategy: str | None = None,
     ) -> RunRow:
         """Create a pending run, returning the existing row for a repeated key."""
+        if thread_id is not None:
+            # Serialize submissions on this thread across API processes. Enqueue
+            # submissions take the same lock so reject cannot race past them.
+            await session.scalar(
+                select(ThreadRow).where(ThreadRow.thread_id == thread_id).with_for_update()
+            )
         if idempotency_key:
             existing = await session.scalar(
                 select(RunRow).where(
@@ -68,7 +84,20 @@ class RunRepository:
                 )
             )
             if existing is not None:
+                if existing.thread_id != thread_id or existing.assistant_id != assistant_id:
+                    raise RunConflictError("Idempotency key belongs to another run target")
                 return existing
+        if thread_id is not None and multitask_strategy == "reject":
+            active = await session.scalar(
+                select(RunRow.run_id)
+                .where(
+                    RunRow.thread_id == thread_id,
+                    RunRow.status.in_((RunStatus.PENDING.value, RunStatus.RUNNING.value)),
+                )
+                .limit(1)
+            )
+            if active is not None:
+                raise RunConflictError("Thread already has a pending or running run")
         run = RunRow(
             assistant_id=assistant_id,
             thread_id=thread_id,
@@ -99,6 +128,8 @@ class RunRepository:
             )
             if existing is None:
                 raise
+            if existing.thread_id != thread_id or existing.assistant_id != assistant_id:
+                raise RunConflictError("Idempotency key belongs to another run target") from None
             return existing
         return run
 
@@ -432,6 +463,12 @@ class RunRepository:
             if thread_id is not None and thread_id != run.thread_id:
                 raise ValueError("event thread_id does not match the run thread")
             thread_id = run.thread_id
+            if topic == "lifecycle" and payload.get("status") and "graph_name" not in payload:
+                assistant = await session.get(AssistantRow, run.assistant_id)
+                payload = {
+                    **payload,
+                    "graph_name": assistant.graph_id if assistant else str(run.assistant_id),
+                }
             if terminal:
                 existing = await session.scalar(
                     select(RuntimeEventRow).where(
@@ -487,6 +524,7 @@ class RunRepository:
             sequence = max(thread.event_seq, max_sequence) + 1
             thread.event_seq = sequence
         event_payload = dict(payload)
+        event_payload.setdefault("timestamp", int(datetime.now(UTC).timestamp() * 1000))
         event_payload["trace"] = build_trace_metadata(
             event={"event": topic, "namespace": namespace or [], **payload},
             context={
@@ -507,6 +545,81 @@ class RunRepository:
         session.add(event)
         await session.flush()
         return event
+
+    async def record_message_deltas(
+        self,
+        session: Any,
+        *,
+        run_id: UUID,
+        thread_id: UUID | None,
+        events: Sequence[dict[str, Any]],
+        trace_context: dict[str, Any] | None = None,
+    ) -> list[RuntimeEventRow]:
+        """Append one run's message deltas under a single cursor lock and flush."""
+        if not events:
+            return []
+        run = await session.scalar(select(RunRow).where(RunRow.run_id == run_id).with_for_update())
+        if run is None:
+            raise RunOwnershipError(f"run {run_id} does not exist")
+        if thread_id is not None and thread_id != run.thread_id:
+            raise ValueError("event thread_id does not match the run thread")
+        thread_id = run.thread_id
+        if thread_id is not None:
+            thread = await session.scalar(
+                select(ThreadRow).where(ThreadRow.thread_id == thread_id).with_for_update()
+            )
+            if thread is None:
+                raise RunOwnershipError(f"thread {thread_id} does not exist")
+            max_sequence = int(
+                await session.scalar(
+                    select(func.coalesce(func.max(RuntimeEventRow.sequence), 0)).where(
+                        RuntimeEventRow.thread_id == thread_id
+                    )
+                )
+                or 0
+            )
+            sequence = max(thread.event_seq, run.event_seq, max_sequence)
+        else:
+            max_sequence = int(
+                await session.scalar(
+                    select(func.coalesce(func.max(RuntimeEventRow.sequence), 0)).where(
+                        RuntimeEventRow.run_id == run_id
+                    )
+                )
+                or 0
+            )
+            sequence = max(run.event_seq, max_sequence)
+
+        rows = []
+        for event in events:
+            sequence += 1
+            namespace = list(event.get("namespace") or event.get("parent_ids") or [])
+            payload = dict(event)
+            payload.setdefault("timestamp", int(datetime.now(UTC).timestamp() * 1000))
+            payload["trace"] = build_trace_metadata(
+                event={"event": "messages", "namespace": namespace, **event},
+                context={
+                    "run_id": str(run_id),
+                    "thread_id": str(thread_id) if thread_id is not None else None,
+                    **(trace_context or {}),
+                },
+            )
+            rows.append(
+                RuntimeEventRow(
+                    run_id=run_id,
+                    thread_id=thread_id,
+                    sequence=sequence,
+                    topic="messages",
+                    namespace=namespace,
+                    payload=payload,
+                )
+            )
+        run.event_seq = sequence
+        if thread_id is not None:
+            thread.event_seq = sequence
+        session.add_all(rows)
+        await session.flush()
+        return rows
 
     async def requeue_expired(self, session: Any, *, now: datetime | None = None) -> int:
         now = now or datetime.now(UTC)

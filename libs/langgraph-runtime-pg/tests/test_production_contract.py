@@ -128,6 +128,398 @@ async def test_worker_loop_survives_transient_infrastructure_failure(monkeypatch
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("concurrency", [1, 4])
+async def test_run_worker_starts_independent_slots(monkeypatch, concurrency: int) -> None:
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from langgraph_runtime_pg import production_worker as module
+    from langgraph_runtime_pg.production_worker import ProductionWorker
+
+    ready = asyncio.Event()
+    started: list[ProductionWorker] = []
+    stopped = False
+    registry = SimpleNamespace(attach_checkpointer=lambda _: None)
+
+    async def start_pool() -> None:
+        return None
+
+    async def stop_pool() -> None:
+        nonlocal stopped
+        stopped = True
+
+    async def run_forever(worker: ProductionWorker) -> None:
+        started.append(worker)
+        if len(started) == concurrency:
+            ready.set()
+        await ready.wait()
+
+    monkeypatch.setattr(module.GraphRegistry, "from_path", lambda _: registry)
+    monkeypatch.setattr(module, "start_pool", start_pool)
+    monkeypatch.setattr(module, "stop_pool", stop_pool)
+    monkeypatch.setattr(module, "get_checkpointer", lambda: object())
+    monkeypatch.setattr(module.ProductionWorker, "run_forever", run_forever)
+    await asyncio.wait_for(
+        module.run_worker(Path("unused.json"), n_jobs_per_worker=concurrency), timeout=2
+    )
+
+    assert stopped
+    assert len({worker.owner for worker in started}) == concurrency
+    assert len({id(worker.repository) for worker in started}) == concurrency
+    assert sum(worker.enable_reaper for worker in started) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_worker_rejects_invalid_concurrency() -> None:
+    from pathlib import Path
+
+    from langgraph_runtime_pg.production_worker import run_worker
+
+    with pytest.raises(ValueError, match="positive integer"):
+        await run_worker(Path("unused.json"), n_jobs_per_worker=0)
+
+
+@pytest.mark.asyncio
+async def test_stream_event_buffer_batches_without_dropping_or_reordering() -> None:
+    from langgraph_runtime_pg.production_worker import _is_message_delta, _StreamEventBuffer
+
+    assert _is_message_delta({"event": "messages", "data": [{"event": "content-block-delta"}, {}]})
+    assert not _is_message_delta({"event": "messages", "data": [{"event": "message-end"}, {}]})
+
+    batches: list[list[int]] = []
+
+    async def publish(events: list[dict]) -> None:
+        batches.append([event["seq"] for event in events])
+
+    buffer = _StreamEventBuffer(publish)
+    for sequence in range(33):
+        await buffer.add({"seq": sequence})
+    await buffer.flush()
+
+    assert batches == [list(range(32)), [32]]
+
+
+@pytest.mark.asyncio
+async def test_stream_event_buffer_reports_timer_commit_failure() -> None:
+    from langgraph_runtime_pg.production_worker import _StreamEventBuffer
+
+    async def publish(_events: list[dict]) -> None:
+        raise OSError("database unavailable")
+
+    buffer = _StreamEventBuffer(publish)
+    await buffer.add({"seq": 1})
+    await asyncio.sleep(0.07)
+    with pytest.raises(OSError, match="database unavailable"):
+        await buffer.flush()
+
+
+@pytest.mark.asyncio
+async def test_worker_event_batch_fanout_follows_commit(monkeypatch) -> None:
+    import json
+    from types import SimpleNamespace
+
+    from langgraph_runtime_pg import production_worker as module
+
+    worker = module.ProductionWorker(SimpleNamespace(), owner="batch-test")
+    committed = False
+    transactions = 0
+    published: list[int] = []
+
+    @asynccontextmanager
+    async def connect():
+        nonlocal committed, transactions
+        transactions += 1
+        yield SimpleNamespace(session=object())
+        committed = True
+
+    async def record_message_deltas(_session, *, events, run_id, thread_id, **_kwargs):
+        assert not committed
+        return [
+            SimpleNamespace(
+                run_id=run_id,
+                thread_id=thread_id,
+                event_id=uuid4(),
+                topic="messages",
+                payload=event,
+                sequence=event["seq"],
+            )
+            for event in events
+        ]
+
+    async def put_batch(_run_id, _thread_id, messages):
+        assert committed
+        published.extend(json.loads(run_message.data)["seq"] for run_message, _ in messages)
+
+    monkeypatch.setattr(module, "connect", connect)
+    monkeypatch.setattr(worker.repository, "record_message_deltas", record_message_deltas)
+    monkeypatch.setattr(module, "get_stream_manager", lambda: SimpleNamespace(put_batch=put_batch))
+    await worker._publish_events(
+        uuid4(),
+        uuid4(),
+        [
+            {"event": "messages", "data": [{"event": "content-block-delta"}], "seq": seq}
+            for seq in range(32)
+        ],
+    )
+
+    assert transactions == 1
+    assert published == list(range(32))
+
+
+@pytest.mark.asyncio
+async def test_four_worker_slots_execute_distinct_threads_together(pg_runtime, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from sqlalchemy import select
+
+    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.models import AssistantRow, RunRow, ThreadRow
+    from langgraph_runtime_pg.production_worker import ProductionWorker
+    from langgraph_runtime_pg.run_store import RunRepository
+
+    assistant_id = uuid4()
+    thread_ids = [uuid4() for _ in range(4)]
+    async with connect() as conn:
+        conn.session.add(
+            AssistantRow(
+                assistant_id=assistant_id,
+                graph_id="assistant",
+                name="concurrent-test",
+                config={},
+                context={},
+                metadata_={},
+            )
+        )
+        for thread_id in thread_ids:
+            conn.session.add(
+                ThreadRow(
+                    thread_id=thread_id, status="idle", metadata_={}, config={}, interrupts={}
+                )
+            )
+            await RunRepository().create(
+                conn.session,
+                assistant_id=assistant_id,
+                thread_id=thread_id,
+                kwargs={"input": {}},
+                metadata={},
+                tenant_id=None,
+                project_id=None,
+            )
+
+    active = 0
+    maximum = 0
+    all_started = asyncio.Event()
+
+    async def fake_invoke(*_args, **_kwargs):
+        nonlocal active, maximum
+        active += 1
+        maximum = max(maximum, active)
+        if active == 4:
+            all_started.set()
+        await all_started.wait()
+        active -= 1
+        return SimpleNamespace(value={"ok": True}, interrupts=())
+
+    monkeypatch.setattr("langgraph_runtime_pg.production_worker.invoke_graph", fake_invoke)
+    workers = [
+        ProductionWorker(SimpleNamespace(open=_open_fake_graph), owner=f"slot-{index}")
+        for index in range(4)
+    ]
+    assert all(await asyncio.wait_for(asyncio.gather(*(w.run_once() for w in workers)), 5))
+    assert maximum == 4
+    async with connect() as conn:
+        rows = (await conn.session.scalars(select(RunRow))).all()
+    assert len(rows) == 4 and all(row.status == "success" for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_multi_slot_shutdown_requeues_all_inflight_runs(pg_runtime, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from sqlalchemy import select
+
+    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.models import AssistantRow, RunRow, ThreadRow
+    from langgraph_runtime_pg.production_worker import ProductionWorker
+    from langgraph_runtime_pg.run_store import RunRepository
+
+    assistant_id = uuid4()
+    async with connect() as conn:
+        conn.session.add(
+            AssistantRow(
+                assistant_id=assistant_id,
+                graph_id="assistant",
+                name="shutdown-test",
+                config={},
+                context={},
+                metadata_={},
+            )
+        )
+        for _ in range(4):
+            thread_id = uuid4()
+            conn.session.add(ThreadRow(thread_id=thread_id))
+            await RunRepository().create(
+                conn.session,
+                assistant_id=assistant_id,
+                thread_id=thread_id,
+                kwargs={"input": {}},
+                metadata={},
+                tenant_id=None,
+                project_id=None,
+            )
+
+    started = asyncio.Event()
+    count = 0
+
+    async def fake_invoke(*_args, **_kwargs):
+        nonlocal count
+        count += 1
+        if count == 4:
+            started.set()
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr("langgraph_runtime_pg.production_worker.invoke_graph", fake_invoke)
+    monkeypatch.setenv("LG_BG_JOB_HEARTBEAT", "2")
+    workers = [
+        ProductionWorker(SimpleNamespace(open=_open_fake_graph), owner=f"shutdown-slot-{index}")
+        for index in range(4)
+    ]
+    tasks = [asyncio.create_task(worker.run_once()) for worker in workers]
+    await asyncio.wait_for(started.wait(), 4)
+    for worker in workers:
+        worker.stop_event.set()
+    assert all(await asyncio.wait_for(asyncio.gather(*tasks), 4))
+
+    async with connect() as conn:
+        rows = (await conn.session.scalars(select(RunRow))).all()
+    assert len(rows) == 4
+    assert all(row.status == "pending" and row.lease_owner is None for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_worker_preserves_v3_message_deltas_before_terminal(pg_runtime, monkeypatch) -> None:
+    import json
+    from types import SimpleNamespace
+
+    from sqlalchemy import select
+
+    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.models import AssistantRow, RuntimeEventRow, ThreadRow
+    from langgraph_runtime_pg.production_worker import ProductionWorker
+    from langgraph_runtime_pg.redis_stream import get_stream_manager
+    from langgraph_runtime_pg.run_store import RunRepository
+
+    assistant_id, thread_id = uuid4(), uuid4()
+    count = int(os.environ.get("GRAPHHARBOR_TEST_DELTA_COUNT", "100"))
+    async with connect() as conn:
+        conn.session.add(
+            AssistantRow(
+                assistant_id=assistant_id,
+                graph_id="assistant",
+                name="delta-test",
+                config={},
+                context={},
+                metadata_={},
+            )
+        )
+        conn.session.add(
+            ThreadRow(thread_id=thread_id, status="idle", metadata_={}, config={}, interrupts={})
+        )
+        run = await RunRepository().create(
+            conn.session,
+            assistant_id=assistant_id,
+            thread_id=thread_id,
+            kwargs={"input": {}},
+            metadata={},
+            tenant_id=None,
+            project_id=None,
+        )
+        run_id = run.run_id
+
+    async def fake_invoke(*_args, on_event, **_kwargs):
+        for index in range(count):
+            await on_event(
+                {
+                    "event": "messages",
+                    "data": [
+                        {"event": "content-block-delta", "delta": {"text": str(index)}},
+                        {},
+                    ],
+                }
+            )
+        await on_event({"event": "values", "data": {"done": True}})
+        return SimpleNamespace(value={"done": True}, interrupts=())
+
+    monkeypatch.setattr("langgraph_runtime_pg.production_worker.invoke_graph", fake_invoke)
+    worker = ProductionWorker(SimpleNamespace(open=_open_fake_graph), owner="delta-test")
+    thread_events = asyncio.Queue()
+    get_stream_manager().thread_streams[thread_id].append(thread_events)
+    assert await worker.run_once()
+
+    async with connect() as conn:
+        events = (
+            await conn.session.scalars(
+                select(RuntimeEventRow)
+                .where(RuntimeEventRow.run_id == run_id)
+                .order_by(RuntimeEventRow.sequence)
+            )
+        ).all()
+    deltas = [event for event in events if event.topic == "messages"]
+    assert [event.payload["data"][0]["delta"]["text"] for event in deltas] == [
+        str(index) for index in range(count)
+    ]
+    assert len({event.event_id for event in events}) == len(events)
+    assert [event.sequence for event in events] == sorted(event.sequence for event in events)
+    assert events[-2].topic == "values"
+    assert events[-1].terminal and events[-1].payload["status"] == "success"
+    wire_sequences = [
+        json.loads(thread_events.get_nowait().data)["seq"] for _ in range(thread_events.qsize())
+    ]
+    assert wire_sequences == [event.sequence for event in events]
+
+
+@pytest.mark.asyncio
+async def test_batch_fanout_reaches_remote_run_and_thread_subscribers(pg_runtime) -> None:
+    import redis.asyncio as redis
+
+    from langgraph_runtime_pg.redis_stream import Message, StreamManager, get_stream_manager
+
+    run_id, thread_id = uuid4(), uuid4()
+    remote = StreamManager(redis.Redis.from_url(os.environ["REDIS_URI"]))
+    run_events = asyncio.Queue()
+    thread_events = asyncio.Queue()
+    remote.get_queues(run_id, thread_id).append(run_events)
+    remote.thread_streams[thread_id].append(thread_events)
+    remote.start_mux()
+    try:
+        await asyncio.sleep(0.1)
+        await get_stream_manager().put_batch(
+            run_id,
+            thread_id,
+            [
+                (
+                    Message(topic=b"event:messages", data=str(index).encode()),
+                    Message(topic=b"protocol:messages", data=str(index).encode()),
+                )
+                for index in range(3)
+            ],
+        )
+        assert [(await asyncio.wait_for(run_events.get(), 2)).data for _ in range(3)] == [
+            b"0",
+            b"1",
+            b"2",
+        ]
+        assert [(await asyncio.wait_for(thread_events.get(), 2)).data for _ in range(3)] == [
+            b"0",
+            b"1",
+            b"2",
+        ]
+    finally:
+        await remote.aclose_fanout()
+        await remote._redis.aclose()
+
+
+@pytest.mark.asyncio
 async def test_cancelled_database_scope_returns_connection_to_pool(pg_runtime) -> None:
     from sqlalchemy import text
 
@@ -556,7 +948,9 @@ def test_custom_auth_user_is_preserved_in_signed_worker_context(monkeypatch) -> 
     assert "auth_user" not in config["configurable"]["__graphharbor_runtime_context"]
 
 
-@pytest.mark.skip(reason="DelegationJWTValidator and JWKSCache moved to ai-agent-platform business layer")
+@pytest.mark.skip(
+    reason="DelegationJWTValidator and JWKSCache moved to ai-agent-platform business layer"
+)
 def test_delegation_jwt_rejects_algorithm_and_refreshes_rotated_key(monkeypatch) -> None:
     from langgraph_runtime_pg.auth import AuthenticationError, DelegationJWTValidator, JWKSCache
 
@@ -733,7 +1127,8 @@ async def test_migration_is_repeatable_and_schema_head_is_recorded(pg_runtime) -
 
 
 @pytest.mark.asyncio
-async def test_record_event_repairs_stale_sequence_counters(pg_runtime) -> None:
+@pytest.mark.parametrize("stale_cursor", [0, 1])
+async def test_record_event_repairs_stale_sequence_counters(pg_runtime, stale_cursor) -> None:
     from langgraph_runtime_pg.database import connect
     from langgraph_runtime_pg.models import AssistantRow, RuntimeEventRow, ThreadRow
     from langgraph_runtime_pg.run_store import RunRepository
@@ -758,7 +1153,7 @@ async def test_record_event_repairs_stale_sequence_counters(pg_runtime) -> None:
             metadata_={},
             config={},
             interrupts={},
-            event_seq=0,
+            event_seq=stale_cursor,
         )
         conn.session.add(thread)
         repo = RunRepository()
@@ -775,7 +1170,7 @@ async def test_record_event_repairs_stale_sequence_counters(pg_runtime) -> None:
             RuntimeEventRow(
                 run_id=run.run_id,
                 thread_id=thread_id,
-                sequence=1,
+                sequence=stale_cursor + 1,
                 topic="lifecycle",
                 namespace=[],
                 payload={"event": "lifecycle"},
@@ -789,9 +1184,9 @@ async def test_record_event_repairs_stale_sequence_counters(pg_runtime) -> None:
             topic="values",
             payload={"event": "values", "data": {"ok": True}},
         )
-        assert event.sequence == 2
-        assert thread.event_seq == 2
-        assert run.event_seq == 2
+        assert event.sequence == stale_cursor + 2
+        assert thread.event_seq == stale_cursor + 2
+        assert run.event_seq == stale_cursor + 2
 
 
 @pytest.mark.asyncio
@@ -827,6 +1222,12 @@ async def test_owned_server_core_resource_flow(pg_runtime) -> None:
         )
         assert duplicate.status_code == 201
         assert duplicate.json()["run_id"] == run_id
+
+        rejected = await client.post(
+            f"/threads/{thread_id}/runs",
+            json={"assistant_id": assistant_id, "multitask_strategy": "reject"},
+        )
+        assert rejected.status_code == 409, rejected.text
 
         cancelled = await client.post(f"/threads/{thread_id}/runs/{run_id}/cancel")
         assert cancelled.status_code == 200
@@ -919,8 +1320,26 @@ async def test_production_auth_rejects_missing_management_and_scope_override(
     async def principal_route(request: Request) -> JSONResponse:
         return JSONResponse({"tenant_id": request.scope["principal"].tenant_id})
 
+    def authenticate(authorization: str | None):
+        if not authorization or not authorization.startswith("Bearer "):
+            raise ValueError("missing authorization header")
+        claims = jwt.decode(
+            authorization.removeprefix("Bearer "),
+            secret,
+            algorithms=["HS256"],
+            issuer="https://platform.example",
+            audience="graphharbor",
+        )
+        return {
+            "identity": claims["sub"],
+            "tenant_id": claims["tenant_id"],
+            "project_id": claims["project_id"],
+        }
+
+    # Authentication is supplied by an application hook, never an engine JWT fallback.
+    monkeypatch.setattr("langhost.server._load_symbol", lambda *_args: authenticate)
     app = create_app(
-        {"graphs": {}},
+        {"graphs": {}, "auth": {"path": "test_auth:authenticate"}},
         custom_app=Starlette(routes=[Route("/internal/principal", principal_route)]),
     )
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -938,6 +1357,7 @@ async def test_production_auth_rejects_missing_management_and_scope_override(
             headers={"authorization": f"Bearer {token}"},
             json={"metadata": {"owned": True}},
         )
+        assert created.status_code == 200, created.text
         custom = await client.get(
             "/internal/principal", headers={"authorization": f"Bearer {token}"}
         )
@@ -1408,6 +1828,198 @@ async def test_production_worker_persists_one_timeout_terminal_event(
     assert lease is None
     assert terminal_count == 1
     assert terminal is not None and terminal.payload["status"] == RunStatus.TIMEOUT.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "thread_limit,run_limit,expected",
+    [(None, None, "error"), (3, None, "success"), (3, 1, "error")],
+)
+async def test_worker_preserves_recursion_limit(pg_runtime, thread_limit, run_limit, expected):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    from langgraph.graph import END, START, StateGraph
+    from sqlalchemy import select
+
+    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.models import AssistantRow, RunRow, RuntimeEventRow, ThreadRow
+    from langgraph_runtime_pg.production_worker import ProductionWorker
+    from langgraph_runtime_pg.run_store import RunRepository
+
+    builder = StateGraph(dict)
+    builder.add_node("first", lambda state: state)
+    builder.add_node("second", lambda state: state)
+    builder.add_edge(START, "first")
+    builder.add_edge("first", "second")
+    builder.add_edge("second", END)
+
+    @asynccontextmanager
+    async def open_graph(_graph_id, config):
+        assert config["recursion_limit"] == (run_limit or thread_limit or 1)
+        yield builder.compile()
+
+    assistant_id, thread_id = uuid4(), uuid4()
+    async with connect() as conn:
+        conn.session.add(
+            AssistantRow(
+                assistant_id=assistant_id,
+                graph_id="limit",
+                name="limit",
+                config={"recursion_limit": 1},
+                context={},
+                metadata_={},
+            )
+        )
+        conn.session.add(
+            ThreadRow(
+                thread_id=thread_id,
+                status="idle",
+                metadata_={},
+                config={"recursion_limit": thread_limit} if thread_limit else {},
+                interrupts={},
+            )
+        )
+        run = await RunRepository().create(
+            conn.session,
+            assistant_id=assistant_id,
+            thread_id=thread_id,
+            kwargs={
+                "input": {"ok": True},
+                "version": "v3",
+                "config": {"recursion_limit": run_limit} if run_limit else {},
+            },
+            metadata={},
+            tenant_id=None,
+            project_id=None,
+        )
+        run_id = run.run_id
+    worker = ProductionWorker(SimpleNamespace(open=open_graph), owner="limit-worker")
+    assert await worker.run_once()
+    async with connect() as conn:
+        row = await conn.session.get(RunRow, run_id)
+        terminal = (
+            await conn.session.scalars(
+                select(RuntimeEventRow).where(
+                    RuntimeEventRow.run_id == run_id, RuntimeEventRow.terminal.is_(True)
+                )
+            )
+        ).all()
+    assert row is not None and row.status == expected
+    assert len(terminal) == 1 and terminal[0].payload["status"] == expected
+    if expected == "error":
+        assert "recursion" in str(terminal[0].payload["error"]).lower()
+
+
+@pytest.mark.asyncio
+async def test_success_commit_failure_never_publishes_completed(pg_runtime, monkeypatch) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.models import AssistantRow, RunRow, RuntimeEventRow, ThreadRow
+    from langgraph_runtime_pg.production_worker import ProductionWorker
+    from langgraph_runtime_pg.protocol import protocol_event
+    from langgraph_runtime_pg.run_store import RunRepository
+
+    assistant_id, thread_id = uuid4(), uuid4()
+    async with connect() as conn:
+        conn.session.add(
+            AssistantRow(
+                assistant_id=assistant_id,
+                graph_id="commit-fixture",
+                name="commit-fixture",
+                config={},
+                context={},
+                metadata_={},
+            )
+        )
+        conn.session.add(
+            ThreadRow(
+                thread_id=thread_id,
+                status="idle",
+                metadata_={},
+                config={},
+                interrupts={},
+            )
+        )
+        run = await RunRepository().create(
+            conn.session,
+            assistant_id=assistant_id,
+            thread_id=thread_id,
+            kwargs={"input": {}, "version": "v3"},
+            metadata={},
+            tenant_id=None,
+            project_id=None,
+        )
+        run_id = run.run_id
+
+    armed = False
+    injected = False
+    original_finish, original_commit = RunRepository.finish, AsyncSession.commit
+
+    async def finish(repository, *args, **kwargs):
+        nonlocal armed
+        result = await original_finish(repository, *args, **kwargs)
+        if result is not None and result.status == "success":
+            armed = True
+        return result
+
+    async def commit(session):
+        nonlocal injected
+        if armed and not injected:
+            injected = True
+            raise ConnectionError("injected success commit failure")
+        return await original_commit(session)
+
+    monkeypatch.setattr(RunRepository, "finish", finish)
+    monkeypatch.setattr(AsyncSession, "commit", commit)
+    monkeypatch.setattr(
+        "langgraph_runtime_pg.production_worker.invoke_graph",
+        AsyncMock(
+            return_value=SimpleNamespace(value={"ok": True}, interrupts=()),
+        ),
+    )
+    monkeypatch.setattr(
+        "langgraph_runtime_pg.production_worker.reconnect_checkpointer", AsyncMock()
+    )
+    worker = ProductionWorker(
+        SimpleNamespace(
+            open=_open_fake_graph,
+            attach_checkpointer=lambda _: None,
+        ),
+        owner="commit-worker",
+    )
+    published = []
+
+    async def fanout(event):
+        published.append(event.payload)
+
+    monkeypatch.setattr(worker, "_fanout_durable_event", fanout)
+    assert await worker.run_once()
+    assert injected
+    async with connect() as conn:
+        row = await conn.session.get(RunRow, run_id)
+        assert row is not None and row.status == "pending"
+        events = (
+            await conn.session.scalars(
+                select(RuntimeEventRow).where(RuntimeEventRow.run_id == run_id)
+            )
+        ).all()
+    assert not any(event.terminal for event in events)
+    for payload in published + [event.payload for event in events]:
+        wire = protocol_event(
+            event_id="probe",
+            sequence=1,
+            run_id=str(run_id),
+            thread_id=str(thread_id),
+            event=payload,
+        )
+        if wire["method"] == "lifecycle":
+            assert wire["params"]["data"]["event"] == "running"
 
 
 @pytest.mark.asyncio

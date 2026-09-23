@@ -255,7 +255,12 @@ def _event_frame(
     name = str(typed["method"])
     typed_params = typed["params"]
     namespace = list(typed_params.get("namespace") or [])
-    if namespace and not stream_subgraphs:
+    target_namespace = (
+        typed_params["data"].get("namespace")
+        if name == "lifecycle" and isinstance(typed_params.get("data"), dict)
+        else None
+    )
+    if (namespace or target_namespace) and not stream_subgraphs:
         return None
     if name == "lifecycle" and version != "v3":
         return None

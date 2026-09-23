@@ -161,7 +161,10 @@ def _prepare_serve_env(
     if n_jobs_per_worker is None:
         raw = os.environ.get("N_JOBS_PER_WORKER")
         if raw:
-            n_jobs_per_worker = int(raw)
+            try:
+                n_jobs_per_worker = int(raw)
+            except ValueError as exc:
+                raise click.UsageError("N_JOBS_PER_WORKER must be a positive integer") from exc
     return database_uri, redis_uri, n_jobs_per_worker
 
 
@@ -462,7 +465,7 @@ def migrate_command(migration_action: str, revision: str | None) -> None:
 @click.option("--env-file", type=click.Path(exists=True, dir_okay=False, path_type=pathlib.Path))
 @click.option("--database-uri", default=None)
 @click.option("--redis-uri", default=None)
-@click.option("--n-jobs-per-worker", default=1, type=click.IntRange(min=1), show_default=True)
+@click.option("--n-jobs-per-worker", default=None, type=click.IntRange(min=1))
 @click.option(
     "--compatibility-spike",
     is_flag=True,
@@ -473,7 +476,7 @@ def worker_command(
     env_file: pathlib.Path | None,
     database_uri: str | None,
     redis_uri: str | None,
-    n_jobs_per_worker: int,
+    n_jobs_per_worker: int | None,
     compatibility_spike: bool,
 ) -> None:
     """Start only the queue worker; migrations remain an explicit command."""
@@ -482,9 +485,12 @@ def worker_command(
     worker_env = worker_config.get("env")
     if env_file is None and isinstance(worker_env, str):
         load_dotenv(worker_base_dir / worker_env, override=False)
-    database_uri, redis_uri, _ = _prepare_serve_env(
+    database_uri, redis_uri, n_jobs_per_worker = _prepare_serve_env(
         env_file, database_uri, redis_uri, n_jobs_per_worker
     )
+    n_jobs_per_worker = n_jobs_per_worker or 1
+    if n_jobs_per_worker < 1:
+        raise click.UsageError("N_JOBS_PER_WORKER must be a positive integer")
     os.environ["DATABASE_URI"] = database_uri
     os.environ["REDIS_URI"] = redis_uri
     os.environ["GRAPHHARBOR_COMPATIBILITY_SPIKE"] = "1" if compatibility_spike else "0"
@@ -505,7 +511,7 @@ def worker_command(
     async def _run() -> None:
         from langgraph_runtime_pg.production_worker import run_worker
 
-        await run_worker(config_path)
+        await run_worker(config_path, n_jobs_per_worker=n_jobs_per_worker)
 
     import asyncio
 
