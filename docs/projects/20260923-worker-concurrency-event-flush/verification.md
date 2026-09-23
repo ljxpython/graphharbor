@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-**完成度：done（本地开发与必要验证完成，未发布）。** 原始问题证据见[外部报告](/Users/lijiaxin/PyCharmMiscProject/ai-agent-platform/docs/projects/20260915-graphharbor-v3-alignment/graphharbor-worker-concurrency-and-event-flush-issue.md)。生产环境 p95 和资源消耗需部署后观测，本记录不外推本地数据。
+**完成度：done（本地开发与必要验证完成，`0.13.0.post32` 已发布 PyPI）。** 原始问题证据见[外部报告](/Users/lijiaxin/PyCharmMiscProject/ai-agent-platform/docs/projects/20260915-graphharbor-v3-alignment/graphharbor-worker-concurrency-and-event-flush-issue.md)。生产环境 p95 和资源消耗需部署后观测，本记录不外推本地数据。
 
 ## 并发功能
 
@@ -34,4 +34,11 @@
 
 **问题与修正：** 初次同时启动 API 和 worker 时，worker 提前退出，临时日志未保留，根因未确认；按迁移完成、API ready、再启动 worker 的顺序重跑成功。隔离测试未修改本机现有数据库。`record_event()` 逐条锁行/查游标/flush 的成本在初版微批后仍明显，因此补充 `record_message_deltas()`；随后补充 Redis pipeline 并重跑上述验证。
 
-**最终结论：** `done`，本地功能、顺序、持久化和真实模型链路验证通过。未发布；生产 p95、资源消耗及实际长会话负载仍需部署后观测。
+**最终结论：** `done`，本地功能、顺序、持久化和真实模型链路验证通过。`0.13.0.post32` 已发布；生产 p95、资源消耗及实际长会话负载仍需部署后观测。
+
+### 2026-09-23 发布验证
+
+- `v0.13.0.post31` 因 JavaScript SDK 验收图在 Python 3.11 使用 `typing.TypedDict` 导致 schema 500，CI 失败，未上传 PyPI。修正验收图导入后递增为 `v0.13.0.post32`。
+- `v0.13.0.post32` 的远端构建、lint、JavaScript SDK 契约，以及 Python 3.11/3.12/3.13 生产契约均通过。用户明确要求直接发布，因此取消仍在运行的上游 SDK 完整测试及自动发布流水线；该项不能计为通过。
+- 用仓库外的 `UV_PUBLISH_TOKEN` 依次上传 `graphharbor-runtime` 和 `graphharbor` 的 wheel、sdist。PyPI 上四个文件的 SHA256 与本地构建一致；从 PyPI 下载的两个 wheel 在全新 Python 3.11 环境安装成功，CLI 返回 `graphharbor, version 0.13.0.post32`。GitHub Release `v0.13.0.post32` 已附四个产物。
+- 这是包发布与安装验证，不代表生产服务已经部署。生产 p95、资源消耗和长会话负载仍需部署后观测。

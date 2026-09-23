@@ -50,4 +50,4 @@ CLI -> run_worker -> N 个独立槽位 -> PostgreSQL claim_next -> LangGraph v3 
 - 先用无外部模型的确定性慢图证明 N=4 时 4 个不同 thread 的 run 时间区间重叠、活跃数不超过 4；N=1 串行，同 thread 仍串行。
 - 用高频 fixture 比较改动前后事件数、顺序、sequence、重放、取消/失败/关闭后的完整性与性能。性能目标详见 [verification.md](verification.md)。
 - 最后使用外部验收图以 `miaomiaoai` 的 `deepseek-v4.1-flash` 做真实模型烟测。凭据只在 `~/.my_best/.env`，不读取到文档或日志；测试通过已有通用的 OpenAI 兼容客户端配置注入，GraphHarbor 核心不认识该供应商。
-- 本地实现和验证已完成，未执行发布；生产环境 p95 和资源消耗需部署后单独观测。
+- 本地实现和验证已完成，`0.13.0.post32` 已发布 PyPI；生产环境 p95 和资源消耗需部署后单独观测。

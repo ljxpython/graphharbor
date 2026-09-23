@@ -24,4 +24,4 @@ Task 1.1-1.3、2.1-2.3、3.1-3.3。
 
 ## 验证
 
-本地隔离 PostgreSQL、现有 Redis、官方 SDK 和真实模型的结果见 [verification.md](../verification.md)。未执行发布。
+本地隔离 PostgreSQL、现有 Redis、官方 SDK 和真实模型的结果见 [verification.md](../verification.md)。`0.13.0.post32` 已发布 PyPI。

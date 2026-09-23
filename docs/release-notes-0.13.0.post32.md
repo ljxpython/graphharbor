@@ -1,5 +1,7 @@
 # 0.13.0.post32: Worker concurrency and event batching
 
+Status: Published to PyPI and GitHub Release on 2026-09-23. The remaining upstream SDK CI suite was canceled after the user requested direct publication; build, lint, JavaScript SDK, and Python 3.11/3.12/3.13 production contracts passed.
+
 Carries forward the published 0.13.0.post30 source. `graphharbor worker --n-jobs-per-worker N` now starts N independent execution slots; `N_JOBS_PER_WORKER` applies when the option is absent. v3 message deltas are persisted in bounded batches and then fanned out through Redis pipelines, preserving event order, cursor, replay, and terminal barriers.
 
 Local PostgreSQL/Redis checks passed with four concurrent threads and 11,208 ordered deltas. A single 1,000-event PG+Redis comparison fell from 7.06 s to 0.65 s. Two concurrent real-model sessions and a 459-message long-output session completed. Production p95 and resource use still need observation after deployment.
