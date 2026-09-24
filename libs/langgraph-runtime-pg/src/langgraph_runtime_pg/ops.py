@@ -1786,26 +1786,41 @@ class Threads(Authenticated):
         del batch_size  # reserved for batched deletes; unused for now
         if not thread_ids:
             return 0
+        if strategy not in {"delete", "keep_latest"}:
+            raise HTTPException(status_code=422, detail="invalid prune strategy")
         if strategy == "keep_latest":
-            # AsyncPostgresSaver inherits a stub aprune that raises NotImplementedError.
-            checkpointer = await _get_checkpointer()
-            try:
-                await checkpointer.aprune(list(thread_ids), strategy=strategy)
-            except (
-                NotImplementedError,  # NOSONAR - explicit 422 mapping for both
-                RuntimeError,
-            ) as exc:
-                raise HTTPException(
-                    status_code=422,
-                    detail="keep_latest strategy is not supported by this checkpointer",
-                ) from exc
-            return len(thread_ids)
+            from langgraph_sdk import Auth
+
+            from langgraph_runtime_pg.checkpoint_mutations import (
+                CheckpointConflict,
+                prune_checkpoints,
+            )
+
+            pruned = 0
+            async with connect() as conn:
+                for tid in sorted({_ensure_uuid(value) for value in thread_ids}):
+                    filters = await Threads.handle_event(
+                        ctx, "delete", Auth.types.ThreadsDelete(thread_id=tid)
+                    )
+                    row = await conn.session.scalar(
+                        sa_select(ThreadRow).where(ThreadRow.thread_id == tid).with_for_update()
+                    )
+                    if row is None or (
+                        filters and not _check_filter_match(row.metadata_ or {}, filters)
+                    ):
+                        continue
+                    try:
+                        await prune_checkpoints(conn.session, row)
+                    except CheckpointConflict as exc:
+                        raise HTTPException(status_code=409, detail=str(exc)) from exc
+                    pruned += 1
+            return pruned
 
         pruned = 0
         async with connect() as conn:
-            for tid in thread_ids:
+            for delete_id in thread_ids:
                 try:
-                    result = await Threads.delete(conn, tid, ctx=ctx)
+                    result = await Threads.delete(conn, delete_id, ctx=ctx)
                     async for _ in result:
                         pruned += 1
                 except HTTPException:

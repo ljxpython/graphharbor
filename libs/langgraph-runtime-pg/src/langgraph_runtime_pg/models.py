@@ -186,6 +186,22 @@ class RunRow(Base):
     )
 
 
+class RunCheckpointBaselineRow(Base):
+    """Pre-execution state, retained until its run is deleted."""
+
+    __tablename__ = "run_checkpoint_baselines"
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("runs.run_id", ondelete="CASCADE"), primary_key=True
+    )
+    thread_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("threads.thread_id", ondelete="CASCADE"), index=True
+    )
+    checkpoints: Mapped[list] = mapped_column(JSONB, nullable=False)
+    writes: Mapped[list] = mapped_column(JSONB, nullable=False)
+    projection: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+
 class CronRow(Base):
     __tablename__ = "crons"
     __table_args__ = (

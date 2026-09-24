@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
+from langgraph_runtime_pg.checkpoint_mutations import capture_baseline
 from langgraph_runtime_pg.metrics import inc as metric_inc
 from langgraph_runtime_pg.models import (
     AssistantRow,
@@ -147,7 +148,10 @@ class RunRepository:
                     ~exists(
                         select(1).where(
                             running.thread_id == RunRow.thread_id,
-                            running.status == RunStatus.RUNNING.value,
+                            or_(
+                                running.status == RunStatus.RUNNING.value,
+                                running.reason == "rollback",
+                            ),
                         )
                     ),
                 ),
@@ -195,7 +199,10 @@ class RunRepository:
                         exists(
                             select(1).where(
                                 RunRow.thread_id == run.thread_id,
-                                RunRow.status == RunStatus.RUNNING.value,
+                                or_(
+                                    RunRow.status == RunStatus.RUNNING.value,
+                                    RunRow.reason == "rollback",
+                                ),
                                 RunRow.run_id != run.run_id,
                             )
                         )
@@ -203,6 +210,7 @@ class RunRepository:
                 )
                 if active:
                     return None
+                await capture_baseline(session, run, thread)
                 thread.status = "busy"
         run.status = RunStatus.RUNNING.value
         run.reason = None
@@ -237,6 +245,9 @@ class RunRepository:
 
     async def renew(self, session: Any, run_id: UUID, owner: str) -> bool:
         now = datetime.now(UTC)
+        run = await session.scalar(select(RunRow).where(RunRow.run_id == run_id).with_for_update())
+        if run is None or run.status != "running" or run.lease_owner != owner:
+            return False
         expires = now + timedelta(seconds=self.lease_seconds)
         result = await session.execute(
             update(RunLeaseRow)
@@ -347,6 +358,8 @@ class RunRepository:
             raise RunOwnershipError(f"run {run_id} does not exist")
         if run.lease_owner != owner:
             raise RunOwnershipError(f"run {run_id} is owned by another worker")
+        if is_terminal(run.status):
+            return run
         if infrastructure and run.retry_count < min(run.max_attempts, self.max_attempts):
             change = transition(
                 run.status,

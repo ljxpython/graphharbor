@@ -5,20 +5,90 @@ from __future__ import annotations
 import asyncio
 import sys
 from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from typing import Any, cast
+from uuid import UUID
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import Checkpoint, CheckpointMetadata, CheckpointTuple
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from langgraph_runtime_pg.checkpoint_mutations import CheckpointConflict, checkpoint_writer
 from langgraph_runtime_pg.database import to_psycopg_uri
 from langgraph_runtime_pg.schema_setup import run_schema_setup
 
 _POOL: AsyncConnectionPool[Any] | None = None
 _CHECKPOINTER: AsyncPostgresSaver | None = None
 _SETUP_LOCK = asyncio.Lock()
+
+
+class FencedPostgresSaver(AsyncPostgresSaver):
+    """Serialize maintenance with writes and reject stale worker generations."""
+
+    @asynccontextmanager
+    async def _writer(self, config: RunnableConfig) -> AsyncIterator[AsyncPostgresSaver]:
+        thread_id = str(config["configurable"]["thread_id"])
+        writer = checkpoint_writer.get()
+        async with (
+            cast(
+                AsyncConnectionPool[AsyncConnection[dict[str, Any]]], self.conn
+            ).connection() as connection,
+            connection.transaction(),
+        ):
+            if writer:
+                run_id, owner, generation = writer
+                cursor = await connection.execute(
+                    "SELECT thread_id, status, lease_owner, retry_count, "
+                    "lease_expires_at > now() AS valid FROM runs WHERE run_id=%s FOR UPDATE",
+                    (run_id,),
+                )
+                run = await cursor.fetchone()
+                if (
+                    not run
+                    or run["status"] != "running"
+                    or not run["valid"]
+                    or run["lease_owner"] != owner
+                    or run["retry_count"] != generation
+                    or str(run["thread_id"]) != thread_id
+                ):
+                    raise CheckpointConflict("checkpoint writer no longer owns the run")
+            try:
+                resource_id = UUID(thread_id)
+            except ValueError:
+                resource_id = None  # MCP/standalone graph checkpoint identifiers.
+            if resource_id:
+                await connection.execute(
+                    "SELECT thread_id FROM threads WHERE thread_id=%s FOR UPDATE",
+                    (resource_id,),
+                )
+                if not writer:
+                    cursor = await connection.execute(
+                        "SELECT 1 FROM runs WHERE thread_id=%s "
+                        "AND (status='running' OR reason='rollback') LIMIT 1",
+                        (resource_id,),
+                    )
+                    if await cursor.fetchone():
+                        raise CheckpointConflict("thread has an active run or rollback")
+                    # An explicit state update supersedes old rollback snapshots.
+                    await connection.execute(
+                        "DELETE FROM run_checkpoint_baselines WHERE thread_id=%s",
+                        (resource_id,),
+                    )
+            yield AsyncPostgresSaver(connection, serde=self.serde)
+
+    async def aput(self, config, checkpoint, metadata, new_versions):
+        async with self._writer(config) as saver:
+            writer = checkpoint_writer.get()
+            if writer:
+                metadata = {**metadata, "run_id": writer[0]}
+            return await saver.aput(config, checkpoint, metadata, new_versions)
+
+    async def aput_writes(self, config, writes, task_id, task_path=""):
+        async with self._writer(config) as saver:
+            await saver.aput_writes(config, writes, task_id, task_path)
 
 
 async def setup_checkpointer() -> AsyncPostgresSaver:
@@ -54,7 +124,7 @@ async def setup_checkpointer() -> AsyncPostgresSaver:
         )
         try:
             await pool.open()
-            saver = AsyncPostgresSaver(cast(Any, pool))
+            saver = FencedPostgresSaver(cast(Any, pool))
         except Exception:
             try:
                 await pool.close()
@@ -159,7 +229,7 @@ async def put_writes(
 
 
 async def delete_thread_checkpoints(thread_id: str) -> None:
-    """Delete all checkpoints for rollback or thread deletion."""
+    """Delete all checkpoints only when deleting the entire thread."""
     await get_checkpointer().adelete_thread(thread_id)
 
 

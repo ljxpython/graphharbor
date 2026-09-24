@@ -23,6 +23,7 @@ from langgraph_runtime_pg.auth import (
     verify_runtime_context_envelope,
 )
 from langgraph_runtime_pg.checkpoint import get_checkpointer, reconnect_checkpointer
+from langgraph_runtime_pg.checkpoint_mutations import checkpoint_writer, complete_rollbacks
 from langgraph_runtime_pg.database import connect, start_pool, stop_pool
 from langgraph_runtime_pg.graph_executor import (
     invoke_graph,
@@ -567,6 +568,8 @@ class ProductionWorker:
         heartbeat = asyncio.create_task(
             self._heartbeat(run_id, thread_id, cancel_event), name=f"heartbeat-{run_id}"
         )
+        execution: asyncio.Task[Any] | None = None
+        cancellation: asyncio.Task[Any] | None = None
         await set_run_heartbeat(run_id)
         try:
             await self._publish_event(
@@ -613,6 +616,7 @@ class ProductionWorker:
                     config["recursion_limit"] = source["recursion_limit"]
 
             async def execute() -> Any:
+                writer_token = checkpoint_writer.set((str(run_id), self.owner, run.retry_count))
                 try:
                     async with self.registry.open(graph_id, config) as graph:
                         return await invoke_graph(
@@ -625,7 +629,10 @@ class ProductionWorker:
                             interrupt_after=interrupt_after,
                         )
                 finally:
-                    await event_buffer.flush()
+                    try:
+                        await event_buffer.flush()
+                    finally:
+                        checkpoint_writer.reset(writer_token)
 
             execution = asyncio.create_task(
                 execute(),
@@ -860,14 +867,23 @@ class ProductionWorker:
                     await self._fanout_durable_event(event)
             logger.exception("run execution failed", run_id=str(run_id), graph_id=graph_id or "")
         finally:
+            for task in (execution, cancellation):
+                if task is not None and not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                *(task for task in (execution, cancellation) if task is not None),
+                return_exceptions=True,
+            )
             heartbeat.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat
             await clear_run_heartbeat(run_id)
+            await complete_rollbacks(owner=self.owner, run_id=run_id)
         return True
 
     async def reap_once(self) -> int:
         """Reclaim expired PostgreSQL leases independently of queue traffic."""
+        await complete_rollbacks()
         async with connect() as conn:
             count = await self.repository.requeue_expired(conn.session)
             events = list(self.repository.last_requeued_events)

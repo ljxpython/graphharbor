@@ -37,8 +37,11 @@ async def test_empty_schema_migration_is_repeatable(pg_runtime) -> None:
 
     try:
         isolated_uri = _schema_uri(base_uri, schema)
-        assert upgrade_head(isolated_uri, version_table_schema=schema) == "006_terminal_events"
-        assert upgrade_head(isolated_uri, version_table_schema=schema) == "006_terminal_events"
+        migration_config = alembic_config(isolated_uri, version_table_schema=schema)
+        command.upgrade(migration_config, "006_terminal_events")
+        assert upgrade_head(isolated_uri, version_table_schema=schema) == "007_checkpoint_baselines"
+        command.downgrade(migration_config, "006_terminal_events")
+        assert upgrade_head(isolated_uri, version_table_schema=schema) == "007_checkpoint_baselines"
         command.check(alembic_config(isolated_uri, version_table_schema=schema))
         with psycopg.connect(isolated_uri) as connection:
             tables = {

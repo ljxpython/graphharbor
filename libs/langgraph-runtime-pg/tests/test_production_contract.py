@@ -1119,11 +1119,11 @@ async def test_migration_is_repeatable_and_schema_head_is_recorded(pg_runtime) -
     from langgraph_runtime_pg.database import connect, get_database_uri
     from langgraph_runtime_pg.migrate import upgrade_head
 
-    assert upgrade_head(get_database_uri()) == "006_terminal_events"
-    assert upgrade_head(get_database_uri()) == "006_terminal_events"
+    assert upgrade_head(get_database_uri()) == "007_checkpoint_baselines"
+    assert upgrade_head(get_database_uri()) == "007_checkpoint_baselines"
     async with connect() as conn:
         revision = await conn.session.scalar(text("SELECT version_num FROM alembic_version"))
-    assert revision == "006_terminal_events"
+    assert revision == "007_checkpoint_baselines"
 
 
 @pytest.mark.asyncio
@@ -1249,7 +1249,7 @@ async def test_owned_server_core_resource_flow(pg_runtime) -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_rollback_deletes_run_and_schedules_checkpoint_cleanup(
+async def test_pending_rollback_never_deletes_thread_checkpoints(
     pg_runtime, monkeypatch
 ) -> None:
     from langhost.server import create_app
@@ -1278,7 +1278,7 @@ async def test_run_rollback_deletes_run_and_schedules_checkpoint_cleanup(
     assert cancelled.status_code == 200
     assert cancelled.json() == {}
     assert missing.status_code == 404
-    assert cleanup == [thread_id]
+    assert cleanup == []
 
 
 @pytest.mark.asyncio

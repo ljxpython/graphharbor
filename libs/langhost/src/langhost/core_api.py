@@ -26,6 +26,12 @@ from langgraph_runtime_pg.checkpoint import (
     delete_thread_checkpoints,
     get_checkpointer,
 )
+from langgraph_runtime_pg.checkpoint_mutations import (
+    CheckpointConflict,
+    complete_rollbacks,
+    prune_checkpoints,
+    rollback_run,
+)
 from langgraph_runtime_pg.database import connect
 from langgraph_runtime_pg.graph_executor import normalize_durability, normalize_interrupt_nodes
 from langgraph_runtime_pg.metrics import inc as metric_inc
@@ -33,6 +39,7 @@ from langgraph_runtime_pg.models import (
     AssistantRow,
     AssistantVersionRow,
     CronRow,
+    RunCheckpointBaselineRow,
     RunLeaseRow,
     RunRow,
     RuntimeEventRow,
@@ -956,10 +963,14 @@ async def threads_copy(request: Request) -> JSONResponse:
 
 async def threads_prune(request: Request) -> JSONResponse:
     principal = _principal(request)
-    payload = await request.json()
-    ids = payload.get("thread_ids") or []
     try:
-        thread_ids = [UUID(str(item)) for item in ids]
+        payload = await request.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("thread_ids"), list):
+            return _error("thread_ids must be a list of UUIDs")
+        strategy = payload.get("strategy", "delete")
+        if strategy not in ("delete", "keep_latest"):
+            return _error("strategy must be delete or keep_latest")
+        thread_ids = list(dict.fromkeys(UUID(str(item)) for item in payload["thread_ids"]))
     except (TypeError, ValueError):
         return _error("thread_ids must contain UUIDs")
     deleted = 0
@@ -967,18 +978,27 @@ async def threads_prune(request: Request) -> JSONResponse:
         query = _scope(
             select(ThreadRow).where(ThreadRow.thread_id.in_(thread_ids)), ThreadRow, principal
         )
-        rows = (await conn.session.execute(query)).scalars().all()
-        if payload.get("strategy", "delete") == "delete":
+        rows = (
+            (await conn.session.execute(query.order_by(ThreadRow.thread_id).with_for_update()))
+            .scalars()
+            .all()
+        )
+        if strategy == "delete":
             deleted = len(rows)
             for row in rows:
                 await conn.session.delete(row)
             await conn.session.flush()
-    if payload.get("strategy", "delete") == "delete":
+        else:
+            try:
+                for row in rows:
+                    await prune_checkpoints(conn.session, row)
+            except CheckpointConflict as exc:
+                await conn.session.rollback()
+                return _error(str(exc), 409)
+            deleted = len(rows)
+    if strategy == "delete":
         for thread_id in [row.thread_id for row in rows]:
             await delete_thread_checkpoints(str(thread_id))
-    else:
-        await get_checkpointer().aprune([str(item) for item in thread_ids], strategy="keep_latest")
-        deleted = len(rows)
     return JSONResponse({"pruned_count": deleted})
 
 
@@ -1190,17 +1210,25 @@ async def runs_delete(request: Request) -> JSONResponse | Response:
 
 async def _cancel_row(request: Request, conn: Any, row: RunRow, action: str) -> None:
     locked = await conn.session.scalar(
-        select(RunRow).where(RunRow.run_id == row.run_id).with_for_update()
+        select(RunRow)
+        .where(RunRow.run_id == row.run_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if locked is None:
         return
     row = locked
     if action == "rollback":
-        thread_id = row.thread_id
-        await conn.session.delete(row)
+        await rollback_run(conn.session, row, validate_only=True)
+        if row.lease_owner is None:
+            await rollback_run(conn.session, row)
+            return
+        # Retain the lease until the worker acknowledges or it expires. The
+        # checkpoint fence rejects writes as soon as this transaction commits.
+        row.status = RunStatus.INTERRUPTED.value
+        row.reason = RunReason.ROLLBACK.value
+        row.updated_at = datetime.now(UTC)
         await conn.session.flush()
-        if thread_id:
-            conn.schedule_after_commit(lambda: delete_thread_checkpoints(str(thread_id)))
         return
     if is_terminal(row.status):
         return
@@ -1312,10 +1340,24 @@ async def runs_cancel(request: Request) -> JSONResponse:
         row = await conn.session.get(RunRow, run_id)
         if row is None or row.thread_id != thread_id or not in_principal_scope(row, principal):
             return _error("run not found", 404)
-        await _cancel_row(request, conn, row, action)
+        try:
+            await _cancel_row(request, conn, row, action)
+        except CheckpointConflict as exc:
+            await conn.session.rollback()
+            return _error(str(exc), 409)
         response = {} if action == "rollback" else _run(row)
     if request.query_params.get("wait") in {"1", "true", "True"} and response:
         response = await _wait_for_run(thread_id, run_id, principal)
+    if action == "rollback" and request.query_params.get("wait") in {"1", "true", "True"}:
+        deadline = asyncio.get_running_loop().time() + 60
+        while True:
+            await complete_rollbacks(run_id=run_id)
+            async with connect() as conn:
+                if await conn.session.get(RunRow, run_id) is None:
+                    break
+            if asyncio.get_running_loop().time() >= deadline:
+                return _error("rollback is still waiting for worker shutdown", 503)
+            await asyncio.sleep(0.05)
     metric_inc("graphharbor_runs_cancel_requested_total", labels={"action": action})
     return JSONResponse(response)
 
@@ -1345,9 +1387,29 @@ async def runs_cancel_many(request: Request) -> JSONResponse:
     elif status not in {None, "all"}:
         return _error("status must be pending, running, or all")
     async with connect() as conn:
-        rows = (await conn.session.execute(query)).scalars().all()
-        for row in rows:
-            await _cancel_row(request, conn, row, action)
+        rows = (
+            (
+                await conn.session.execute(
+                    query.outerjoin(
+                        RunCheckpointBaselineRow, RunCheckpointBaselineRow.run_id == RunRow.run_id
+                    ).order_by(
+                        RunCheckpointBaselineRow.projection["_captured_at"]
+                        .astext.desc()
+                        .nullsfirst(),
+                        RunRow.created_at.desc(),
+                        RunRow.run_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        try:
+            for row in rows:
+                await _cancel_row(request, conn, row, action)
+        except CheckpointConflict as exc:
+            await conn.session.rollback()
+            return _error(str(exc), 409)
     metric_inc("graphharbor_runs_cancel_requested_total", len(rows), labels={"action": action})
     return JSONResponse({})
 

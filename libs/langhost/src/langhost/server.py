@@ -28,7 +28,7 @@ from langgraph_runtime_pg.auth import (
     principal_from_scope,
     scope_override_error,
 )
-from langgraph_runtime_pg.checkpoint import delete_thread_checkpoints, get_checkpointer
+from langgraph_runtime_pg.checkpoint import get_checkpointer
 from langgraph_runtime_pg.database import connect, pool_stats
 from langgraph_runtime_pg.graph_registry import GraphRegistry, resolve_within_base_dir
 from langgraph_runtime_pg.metrics import prometheus_text, set_gauge
@@ -39,9 +39,8 @@ from langgraph_runtime_pg.models import (
     ThreadRow,
 )
 from langgraph_runtime_pg.production import RuntimeReadiness, lifespan as runtime_lifespan
-from langgraph_runtime_pg.protocol import RunReason, RunStatus, official_info_document
+from langgraph_runtime_pg.protocol import official_info_document
 from langgraph_runtime_pg.redis_stream import wake_run_queue
-from langgraph_runtime_pg.run_state import is_terminal, transition
 from langgraph_runtime_pg.run_store import RunRepository
 from langhost.core_api import (
     assistants_count,
@@ -617,54 +616,7 @@ async def _run_list(request: Request) -> JSONResponse:
 
 
 async def _run_cancel(request: Request) -> JSONResponse:
-    principal = _principal(request)
-    run_id = UUID(request.path_params["run_id"])
-    thread_id = UUID(request.path_params["thread_id"])
-    action = request.query_params.get("action", "interrupt")
-    if action not in {"interrupt", "rollback"}:
-        return JSONResponse({"detail": "action must be interrupt or rollback"}, status_code=422)
-    async with connect() as conn:
-        run = await conn.session.get(RunRow, run_id)
-        if (
-            run is None
-            or run.thread_id != thread_id
-            or (
-                principal
-                and (run.tenant_id != principal.tenant_id or run.project_id != principal.project_id)
-            )
-        ):
-            return JSONResponse({"detail": "run not found"}, status_code=404)
-        if action == "rollback":
-            await conn.session.delete(run)
-            await conn.session.flush()
-            conn.schedule_after_commit(lambda: delete_thread_checkpoints(str(thread_id)))
-            return JSONResponse({}, status_code=200)
-        if is_terminal(run.status):
-            return JSONResponse(_run_payload(run), status_code=200)
-        change = transition(
-            run.status,
-            RunStatus.INTERRUPTED,
-            reason=RunReason.CANCEL_REQUESTED,
-            retry_count=run.retry_count,
-        )
-        run.status = change.status.value
-        run.reason = change.reason.value
-        run.updated_at = datetime.now(UTC)
-        await conn.session.flush()
-        from langgraph_runtime_pg.redis_stream import Message, get_stream_manager
-
-        async def _publish_cancel() -> None:
-            try:
-                await get_stream_manager().put(
-                    run_id,
-                    thread_id,
-                    Message(topic=b"run:control", data=json.dumps({"action": action}).encode()),
-                )
-            except RuntimeError:
-                pass
-
-        conn.schedule_after_commit(_publish_cancel)
-        return JSONResponse(_run_payload(run), status_code=200)
+    return await runs_cancel(request)
 
 
 def _assistant_payload(row: AssistantRow) -> dict[str, Any]:
