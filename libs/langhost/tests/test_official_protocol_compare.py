@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
+from hashlib import sha256
+from importlib.metadata import distribution
 from pathlib import Path
 
 
@@ -67,21 +70,162 @@ def test_compare_openapi_reports_missing_official_path() -> None:
     assert differences[0].graphharbor == "<missing>"
 
 
-def test_compare_openapi_uses_path_and_method_shape_only() -> None:
+def test_compare_openapi_reports_contract_field_differences() -> None:
     compare = _module()
     official = compare.Response(
         200,
         {"content-type": "application/json"},
-        {"paths": {"/runs": {"post": {"summary": "official"}}}},
+        {"paths": {"/runs": {"post": {"requestBody": {"required": True}}}}},
     )
     graphharbor = compare.Response(
         200,
         {"content-type": "application/json"},
-        {"paths": {"/runs": {"post": {"summary": "different framework metadata"}}}},
+        {"paths": {"/runs": {"post": {"requestBody": {"required": False}}}}},
     )
 
     assert compare.compare(official, graphharbor, path="/openapi.json") == []
-    assert compare._compare_openapi(official, graphharbor, set()) == []
+    differences = compare._compare_openapi(official, graphharbor, set())
+    assert differences[0].path.endswith("requestBody.required")
+
+
+def test_compare_openapi_ignores_descriptions_but_checks_components() -> None:
+    compare = _module()
+    official = compare.Response(
+        200,
+        {},
+        {
+            "paths": {"/runs": {"post": {"description": "a"}}},
+            "components": {"schemas": {"Run": {"required": ["id"]}}},
+        },
+    )
+    graphharbor = compare.Response(
+        200,
+        {},
+        {
+            "paths": {"/runs": {"post": {"description": "b"}}},
+            "components": {"schemas": {"Run": {"required": []}}},
+        },
+    )
+    differences = compare._compare_openapi(official, graphharbor, set())
+    assert any(item.path.endswith("required.length") for item in differences)
+
+
+def test_compare_openapi_checks_parameters_and_responses() -> None:
+    compare = _module()
+    official = compare.Response(
+        200,
+        {},
+        {
+            "paths": {
+                "/threads/{thread_id}": {
+                    "parameters": [
+                        {"name": "thread_id", "required": True, "schema": {"type": "string"}}
+                    ],
+                    "get": {"responses": {"200": {"description": "ok"}}},
+                }
+            }
+        },
+    )
+    graphharbor = compare.Response(
+        200,
+        {},
+        {
+            "paths": {
+                "/threads/{thread_id}": {
+                    "parameters": [
+                        {"name": "thread_id", "required": False, "schema": {"type": "integer"}}
+                    ],
+                    "get": {"responses": {"404": {"description": "missing"}}},
+                }
+            }
+        },
+    )
+    differences = compare._compare_openapi(official, graphharbor, set())
+    assert any("parameters" in item.path for item in differences)
+    assert any("responses" in item.path for item in differences)
+
+
+def test_compare_openapi_checks_nested_schema_fields() -> None:
+    compare = _module()
+    base = {
+        "paths": {
+            "/threads": {
+                "post": {
+                    "responses": {
+                        "200": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Thread"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "components": {
+            "schemas": {
+                "Thread": {
+                    "properties": {"thread_id": {"type": "string", "format": "uuid", "enum": ["a"]}}
+                }
+            }
+        },
+    }
+    changed = json.loads(json.dumps(base))
+    changed["components"]["schemas"]["Thread"]["properties"]["thread_id"]["format"] = "date"
+    changed["paths"]["/threads"]["post"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ]["$ref"] = "#/components/schemas/Other"
+    differences = compare._compare_openapi(
+        compare.Response(200, {}, base), compare.Response(200, {}, changed), set()
+    )
+    assert any(item.path.endswith("format") for item in differences)
+    assert any(item.path.endswith("$ref") for item in differences)
+
+
+def test_fixed_official_openapi_exposes_current_gaps() -> None:
+    from langhost.server import _openapi_document
+
+    source = distribution("langgraph-api").locate_file("openapi.json")
+    raw = source.read_bytes()
+    assert (
+        sha256(raw).hexdigest()
+        == "0b4d3d1e2da065a50a53838e7f63f5d90763a1dc759b165dd7a4409b5959888c"
+    )
+    compare = _module()
+    differences = compare._compare_openapi(
+        compare.Response(200, {}, json.loads(raw)),
+        compare.Response(200, {}, _openapi_document()),
+        set(),
+    )
+    assert differences
+    assert any("requestBody" in item.path for item in differences)
+
+
+def test_compare_openapi_keeps_schema_properties_named_like_prose() -> None:
+    compare = _module()
+    official = compare.Response(
+        200,
+        {},
+        {
+            "paths": {},
+            "components": {
+                "schemas": {"Item": {"properties": {"description": {"type": "string"}}}}
+            },
+        },
+    )
+    graphharbor = compare.Response(
+        200,
+        {},
+        {
+            "paths": {},
+            "components": {
+                "schemas": {"Item": {"properties": {"description": {"type": "integer"}}}}
+            },
+        },
+    )
+    differences = compare._compare_openapi(official, graphharbor, set())
+    assert any(item.path.endswith("properties.description.type") for item in differences)
 
 
 def test_compare_openapi_supports_documented_method_exclusions() -> None:
@@ -159,6 +303,8 @@ def test_scenario_stream_uses_triggered_capture(monkeypatch, tmp_path: Path) -> 
     captured: dict[str, object] = {}
 
     def request(*_args, **_kwargs):
+        if len(_args) > 2 and _args[2] == "/openapi.json":
+            return compare.Response(200, {"content-type": "application/json"}, {"paths": {}})
         return compare.Response(200, {"content-type": "application/json"}, {"thread_id": "one"})
 
     def triggered(**kwargs):

@@ -303,6 +303,30 @@ def _load_scenario(path: str) -> list[dict[str, Any]]:
 
 
 _OPENAPI_METHODS = frozenset({"get", "post", "put", "patch", "delete", "head", "options"})
+_OPENAPI_PROSE = frozenset(
+    {
+        "description",
+        "summary",
+        "title",
+        "operationId",
+        "tags",
+        "example",
+        "examples",
+        "externalDocs",
+    }
+)
+
+
+def _openapi_contract(value: Any, *, parent: str | None = None) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _openapi_contract(item, parent=key)
+            for key, item in value.items()
+            if parent == "properties" or key not in _OPENAPI_PROSE
+        }
+    if isinstance(value, list):
+        return [_openapi_contract(item) for item in value]
+    return value
 
 
 def _compare_openapi(
@@ -312,31 +336,46 @@ def _compare_openapi(
     ignored_methods: set[tuple[str, str]] | None = None,
 ) -> list[Difference]:
     if not isinstance(official.body, dict) or not isinstance(graphharbor.body, dict):
-        return []
+        return [Difference("$.openapi", official.body, graphharbor.body)]
     left = official.body.get("paths")
     right = graphharbor.body.get("paths")
     if not isinstance(left, dict) or not isinstance(right, dict):
-        return []
+        return [Difference("$.openapi.paths", left, right)]
     ignored_methods = ignored_methods or set()
-    official_paths = {
-        path: sorted(
-            method
-            for method in value
-            if method in _OPENAPI_METHODS and (path, method.upper()) not in ignored_methods
-        )
-        for path, value in left.items()
-        if path not in ignored_paths and isinstance(value, dict)
-    }
-    graphharbor_paths = {
-        path: sorted(
-            method
-            for method in value
-            if method in _OPENAPI_METHODS and (path, method.upper()) not in ignored_methods
-        )
-        for path, value in right.items()
-        if path not in ignored_paths and isinstance(value, dict)
-    }
-    return _differences(official_paths, graphharbor_paths, "$.openapi.paths")
+    contract_keys = {"parameters", "requestBody", "responses", "security"}
+
+    def contract_paths(paths: dict[str, Any]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for path, value in paths.items():
+            if path in ignored_paths or not isinstance(value, dict):
+                continue
+            methods: dict[str, Any] = {}
+            if isinstance(value.get("parameters"), list):
+                methods["parameters"] = value["parameters"]
+            for method, operation in value.items():
+                if method not in _OPENAPI_METHODS or (path, method.upper()) in ignored_methods:
+                    continue
+                methods[method] = (
+                    {key: operation[key] for key in contract_keys if key in operation}
+                    if isinstance(operation, dict)
+                    else operation
+                )
+            result[path] = methods
+        return result
+
+    def schemas(document: dict[str, Any]) -> Any:
+        components = document.get("components", {})
+        return components.get("schemas", {}) if isinstance(components, dict) else components
+
+    return _differences(
+        _openapi_contract(contract_paths(left)),
+        _openapi_contract(contract_paths(right)),
+        "$.openapi.paths",
+    ) + _differences(
+        _openapi_contract(schemas(official.body)),
+        _openapi_contract(schemas(graphharbor.body)),
+        "$.openapi.components.schemas",
+    )
 
 
 def _capture_stream(

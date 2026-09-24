@@ -183,6 +183,53 @@ def _openapi_document() -> dict[str, Any]:
     return {
         "openapi": "3.1.0",
         "info": {"title": "GraphHarbor Agent Server", "version": "1"},
+        "components": {
+            "schemas": {
+                "ThreadCreate": {
+                    "type": "object",
+                    "properties": {
+                        "thread_id": {"type": "string", "format": "uuid"},
+                        "metadata": {"type": "object"},
+                        "if_exists": {
+                            "type": "string",
+                            "enum": ["raise", "do_nothing"],
+                            "default": "raise",
+                        },
+                        "ttl": {
+                            "type": "object",
+                            "properties": {
+                                "strategy": {"type": "string", "enum": ["delete", "keep_latest"]},
+                                "ttl": {"type": "number"},
+                            },
+                        },
+                        "supersteps": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["updates"],
+                                "properties": {"updates": {"type": "array"}},
+                            },
+                        },
+                    },
+                },
+                "ErrorResponse": {
+                    "type": "object",
+                    "required": ["detail"],
+                    "properties": {"detail": {"type": "string"}},
+                },
+                "Thread": {
+                    "type": "object",
+                    "required": ["thread_id", "created_at", "updated_at", "metadata", "status"],
+                    "properties": {
+                        "thread_id": {"type": "string", "format": "uuid"},
+                        "created_at": {"type": "string", "format": "date-time"},
+                        "updated_at": {"type": "string", "format": "date-time"},
+                        "metadata": {"type": "object"},
+                        "status": {"type": "string"},
+                    },
+                },
+            }
+        },
         "paths": {
             "/ok": {"get": {"responses": {"200": {"description": "ready"}}}},
             "/live": {"get": {"responses": {"200": {"description": "alive"}}}},
@@ -201,7 +248,45 @@ def _openapi_document() -> dict[str, Any]:
             "/assistants/{assistant_id}/schemas": {"get": {}},
             "/assistants/{assistant_id}/subgraphs": {"get": {}},
             "/assistants/{assistant_id}/subgraphs/{namespace}": {"get": {}},
-            "/threads": {"get": {}, "post": {}},
+            "/threads": {
+                "get": {},
+                "post": {
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/ThreadCreate"}
+                            }
+                        },
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "Thread created",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Thread"}
+                                }
+                            },
+                        },
+                        "409": {
+                            "description": "Conflict",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+                                }
+                            },
+                        },
+                        "422": {
+                            "description": "Validation Error",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+                                }
+                            },
+                        },
+                    },
+                },
+            },
             "/threads/search": {"post": {}},
             "/threads/count": {"post": {}},
             "/threads/prune": {"post": {}},

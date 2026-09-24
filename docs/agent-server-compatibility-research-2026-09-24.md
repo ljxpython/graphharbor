@@ -2,6 +2,8 @@
 
 调研日期：2026-09-24；同日补充 checkpoint 修剪与回滚修复结果。性质：技术调研、整改进度与证据索引，不是全量验收报告。
 
+更新日期：2026-09-25。Thread 输入校验与 OpenAPI 比较器进展见第 13 节；第 5、8、11 节中的 500、零差异和 10 passed 是最初调研证据，不再代表当前实现。
+
 ## 1. 结论
 
 **GraphHarbor 已有独立 Agent Server 的主要运行骨架，但没有完整实现官方 Agent Server，也还不能声明“与 langgraph-api 功能和接口完全相同”。**
@@ -10,7 +12,7 @@
 
 1. **是否都实现了？没有。** Assistants、Threads、Runs、状态持久化、队列、SSE、HITL、Store REST 等已有实现；但完整 OpenAPI schema、资源级授权、完整并发策略、生产 cron 调度、生产 webhook、Store 自动注入、部分配置和协议能力仍有实质缺口。
 2. **是否还与业务耦合？有，需要修改。** `model_id`、`platform_trace_id`、固定 tenant/project 身份映射、专属 runtime context、DeepAgent workspace 辅助代码仍在核心源码中。不能把“删除了几个业务类”视为边界治理完成。
-3. **怎么保证接口一样？** 固定官方版本，以官方 OpenAPI、同图双服务行为差分、官方 SDK/RemoteGraph、授权与故障场景组成持续门禁。现有测试设施可以复用，但目前的路径/方法对照远远不够。
+3. **怎么保证接口一样？** 固定官方版本，以官方 OpenAPI、同图双服务行为差分、官方 SDK/RemoteGraph、授权与故障场景组成持续门禁。比较器已从路径/方法扩展到部分结构契约比较，但完整规范与运行行为仍未对齐（见第 13 节）。
 
 **同日整改进度：** 第 6.2、6.3 节的 prune 授权范围与 rollback 历史误删问题已完成核心修复，并通过真实 PostgreSQL 专项和相关回归。治理项目仍为 `partial`：完整官方差分、规模性能和发布预演尚缺；不能据此升级为全量兼容。详见[修复项目](projects/20260924-checkpoint-mutation-safety/README.md)。
 
@@ -431,3 +433,36 @@ asyncio.run(main())
 - [现有排除项](compatibility-exclusions.json)、[兼容矩阵](compatibility-matrix.md)
 - [历史统一结果](../artifacts/compatibility-result.json)、[26 项 lifecycle 差异](../artifacts/v3-lifecycle-diff.json)
 - [边界分离旧总结](projects/20260909-graphharbor-business-boundary-separation/FINAL_SUMMARY.md)、[worker 存量业务字段记录](projects/20260923-worker-concurrency-event-flush/open-issues.md)
+
+
+## 13. 2026-09-25 整改进展：Thread 输入边界与 OpenAPI 差异检测
+
+对应项目：[Agent Server 契约验证与兼容门禁](projects/20260925-agent-server-contract-validation/README.md)。总体状态 **partial**，不是完整兼容验收通过。
+
+### 已落地改动
+
+| 范围 | 当前实现与证据 | 结论边界 |
+| --- | --- | --- |
+| Thread 创建输入 | `threads_create()` 先解析、验证再连接数据库；三类原始问题（非法 UUID、数组 body、数字 metadata）均返回 422；malformed JSON 返回 400 | 已消除这三类无数据库 500；不是所有 endpoint 输入校验完成 |
+| 附加输入约束 | 校验 config/metadata 类型、if_exists 枚举、ttl 类型/strategy/数值、supersteps 的 updates 数组 | 仅基础校验；null、嵌套 update、TTL 执行与 supersteps 状态初始化仍需完整对齐 |
+| 官方实机对照 | 在 `tests/javascript/fixtures` 启动 `langgraph dev`，固定 `langgraph-api==0.13.0`；三类非法请求均为 422、application/json、字符串 detail | 已核对 status、媒体类型和 envelope；detail 文本不相同，未完成逐字错误响应兼容；malformed JSON 的官方行为本轮未对照 |
+| OpenAPI 比较器 | `_compare_openapi()` 递归比较 operation parameters/requestBody/responses/security、path 级 parameters 和 components.schemas；覆盖 required、类型、format、响应状态和 `$ref` 的差异测试 | `$ref` 字符串被比较，但不是完整引用解析；compare() 的 OpenAPI body 仍由 CLI 单独调用此函数比较 |
+| 本地 OpenAPI | `/threads` POST 增加必需请求体、200/409/422 响应及 ThreadCreate/Thread/ErrorResponse 组件 | 仍是部分 schema，其他大量 operation 为空；复制或声明 schema 不等于运行时能力实现 |
+| CI | production-contract 加入比较器测试；固定官方规范 SHA-256，缺失或漂移会导致测试失败 | 日常 CI 是比较器回归检查，不是全量官方契约一致性门禁；完整差分仍由 Compatibility Upgrade 执行 |
+
+### 当前验证结果
+
+- `uv run pytest libs/langhost/tests/test_cli.py libs/langhost/tests/test_official_protocol_compare.py -q`：23 passed。
+- 本次涉及 Python 文件的 Ruff check 与 format check 通过；`uv run mypy`：37 个源文件通过。
+- 官方规范 hash：`0b4d3d1e2da065a50a53838e7f63f5d90763a1dc759b165dd7a4409b5959888c`，由安装包 `openapi.json` 校验。
+- 最终工作树重新统计：**未应用排除项 203 处结构差异；应用 docs/compatibility-exclusions.json 的 path/method 排除项后 194 处**。此前 235 处是中间版本统计，已被本次数值替代。差异数量是比较器输出项数，不是缺失接口数量或兼容率。
+- 上述 pytest 包含“当前官方规范应检出差异”的回归断言。因此测试通过证明检测器工作，不能表述为这 194 处差异已通过验收。
+
+### 剩余工作与验收出口
+
+1. 补齐真实 handler 对应的 OpenAPI operation、参数、请求和响应模型；逐项处理当前差异，不能靠整份复制官方 JSON 或扩大 exclusions 清零。
+2. 输入验证还需覆盖合法创建路径、显式 null、嵌套 updates 及其它创建入口；错误文案和未对照的状态码需要固定版本官方实机证据。
+3. 比较器还需覆盖 components 中的共享 parameters/responses/securitySchemes、顶层 security、path `$ref` 等；当前 prose 归一化只特别保护 properties 映射，仍须核查其它命名映射和 default/const 等数据对象，避免误删同名业务数据键。
+4. 现有固定规范回归锁定了上游 hash，但不阻断任意新增本地差异。真正的日常严格兼容门禁仍需比较完整目标契约并对差异返回非零；在此之前保持 partial，不能用单测绿灯升级兼容矩阵。
+
+本次改动没有引入业务模型、供应商、工具或 trace 字段，也未改变第 6 节已完成的 prune/rollback 修复结论。

@@ -178,6 +178,36 @@ async def test_owned_server_exposes_public_health_and_capabilities() -> None:
     assert stream.status_code == 422 and stream.json()["detail"] == "assistant_id is required"
 
 
+@pytest.mark.asyncio
+async def test_thread_create_rejects_invalid_input_before_database_access() -> None:
+    from langhost.server import create_app
+
+    transport = httpx.ASGITransport(app=create_app({"graphs": {}}))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        for body in (
+            "[]",
+            "null",
+            '{"thread_id":"not-a-uuid"}',
+            '{"metadata":3}',
+            '{"config":3}',
+            '{"if_exists":"ignore"}',
+            '{"ttl":3}',
+            '{"ttl":{"strategy":"unknown"}}',
+            '{"ttl":{"ttl":"later"}}',
+            '{"supersteps":3}',
+            '{"supersteps":[{}]}',
+        ):
+            response = await client.post(
+                "/threads", content=body, headers={"content-type": "application/json"}
+            )
+            assert response.status_code == 422, body
+            assert isinstance(response.json()["detail"], str)
+        malformed = await client.post(
+            "/threads", content="{", headers={"content-type": "application/json"}
+        )
+        assert malformed.status_code == 400
+
+
 def test_owned_server_source_has_no_private_api_startup_import() -> None:
     source = (Path(__file__).parents[1] / "src" / "langhost" / "server.py").read_text()
     cli_source = (Path(__file__).parents[1] / "src" / "langhost" / "cli.py").read_text()

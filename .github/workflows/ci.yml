@@ -138,6 +138,7 @@ jobs:
       - name: Production, security and persistence regression
         run: |
           uv run pytest \
+            libs/langhost/tests/test_official_protocol_compare.py \
             libs/langgraph-runtime-pg/tests/test_production_contract.py \
             libs/langgraph-runtime-pg/tests/test_persistence_contract.py \
             libs/langgraph-runtime-pg/tests/test_public_runtime.py \

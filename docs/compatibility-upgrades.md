@@ -12,7 +12,7 @@ GraphHarbor 的公开 HTTP、SSE 和官方 SDK 可见输出以固定版本官方
      --graphharbor-url http://127.0.0.1:31397
    ```
 
-4. 若输出有差异，先调整 GraphHarbor；UUID、时间戳、生成位置 header 是唯一允许归一化的动态字段。OpenAPI 只比较路径和方法，操作描述由各框架自行生成。工作流失败时下载两端日志定位差异。
+4. 若输出有差异，先调整 GraphHarbor；UUID、时间戳、生成位置 header 是运行时响应允许归一化的动态字段。OpenAPI 比较路径、方法、参数、请求体、响应及组件 schema；描述和 operationId 不作为契约字段。工作流失败时下载两端日志定位差异。
 5. Python/JavaScript SDK、REST/SSE、持久化和 P0 graph 门禁均通过后，更新 `docs/compatibility-matrix.json` 和 `docs/compatibility-matrix.md`，再发布 GraphHarbor。
 
 统一验收命令（本地 PostgreSQL/Redis，不依赖 Docker）：
@@ -43,7 +43,7 @@ GitHub Actions 的 `Compatibility Upgrade` 提供 `run_real_acceptance` 手动�
 runner 默认是严格门禁：任何 `failed`、`blocked_external_dependency` 或 `not_run`
 都会返回非零退出码。`--allow-incomplete` 仅用于明确标注的非门禁诊断运行。
 
-差分工具不会启动服务。它比较 `/ok`、`/info` 和 `/openapi.json` 的路径/方法；workflow 还会运行 [`official-protocol-scenario.json`](../tests/javascript/fixtures/official-protocol-scenario.json)，逐步比对 assistant、thread、Store 生命周期、thread-scoped stream 和最小 `runs/stream` SSE。Store 与 `/threads/{thread_id}/stream` 必须直接通过 OpenAPI 和场景差分，不得加入排除项。可用 `--probe GET:/path` 增加 HTTP 探针，或使用 `--sse-path /path` 比较已创建 run 的 SSE 帧序列。官方新增 endpoint 会导致比较失败；只有在 [`compatibility-exclusions.json`](compatibility-exclusions.json) 明确记录为不支持能力时，才可通过 `--ignore-openapi-path` 或 `--ignore-openapi-method` 排除。排除项是当前 core profile 的边界，不代表 GraphHarbor 已实现该官方能力。
+差分工具不会启动服务。它比较 `/ok`、`/info` 和 `/openapi.json` 的路径、方法、参数、请求体、响应和组件 schema；workflow 还会运行 [`official-protocol-scenario.json`](../tests/javascript/fixtures/official-protocol-scenario.json)，逐步比对 assistant、thread、Store 生命周期、thread-scoped stream 和最小 `runs/stream` SSE。Store 与 `/threads/{thread_id}/stream` 必须直接通过 OpenAPI 和场景差分，不得加入排除项。可用 `--probe GET:/path` 增加 HTTP 探针，或使用 `--sse-path /path` 比较已创建 run 的 SSE 帧序列。官方新增 endpoint 或契约字段变化会导致比较失败；只有在 [`compatibility-exclusions.json`](compatibility-exclusions.json) 明确记录为不支持能力时，才可通过 `--ignore-openapi-path` 或 `--ignore-openapi-method` 排除。排除项是当前 core profile 的边界，不代表 GraphHarbor 已实现该官方能力。
 
 升级完成并人工确认兼容矩阵后，应将本次结果的最小能力快照提交到
 `tests/acceptance_app/baselines/`，以供下一次升级使用。例如：

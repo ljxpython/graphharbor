@@ -93,6 +93,45 @@ def _error(detail: str, status: int = 422) -> JSONResponse:
     return JSONResponse({"detail": detail}, status_code=status)
 
 
+async def _thread_create_payload(request: Request) -> dict[str, Any] | JSONResponse:
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return _error("request body must be valid JSON", 400)
+    if not isinstance(payload, dict):
+        return _error("request body must be an object")
+    if payload.get("thread_id") is not None:
+        try:
+            UUID(str(payload["thread_id"]))
+        except (TypeError, ValueError):
+            return _error("thread_id must be a valid UUID")
+    for field in ("metadata", "config"):
+        if field in payload and payload[field] is not None and not isinstance(payload[field], dict):
+            return _error(f"{field} must be an object")
+    if payload.get("if_exists") not in (None, "raise", "do_nothing"):
+        return _error("if_exists must be 'raise' or 'do_nothing'")
+    ttl = payload.get("ttl")
+    if ttl is not None:
+        if not isinstance(ttl, dict):
+            return _error("ttl must be an object")
+        if ttl.get("strategy") not in (None, "delete", "keep_latest"):
+            return _error("ttl.strategy must be 'delete' or 'keep_latest'")
+        if "ttl" in ttl and (
+            isinstance(ttl["ttl"], bool) or not isinstance(ttl["ttl"], (int, float))
+        ):
+            return _error("ttl.ttl must be a number")
+    supersteps = payload.get("supersteps")
+    if supersteps is not None:
+        if not isinstance(supersteps, list):
+            return _error("supersteps must be an array")
+        if any(
+            not isinstance(item, dict) or not isinstance(item.get("updates"), list)
+            for item in supersteps
+        ):
+            return _error("supersteps entries must contain an updates array")
+    return payload
+
+
 def _no_content() -> Response:
     """Return a standards-compliant empty 204 response."""
     return Response(status_code=204)
@@ -600,7 +639,9 @@ async def assistants_latest(request: Request) -> JSONResponse:
 
 async def threads_create(request: Request) -> JSONResponse:
     principal = _principal(request)
-    payload = await request.json()
+    payload = await _thread_create_payload(request)
+    if isinstance(payload, JSONResponse):
+        return payload
     if error := scope_override_error(payload, principal):
         return _error(error, 403)
     thread_id = UUID(str(payload["thread_id"])) if payload.get("thread_id") else uuid4()
