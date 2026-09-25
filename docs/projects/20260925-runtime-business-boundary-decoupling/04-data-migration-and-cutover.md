@@ -138,7 +138,7 @@ TTL、调度、后台清理等系统动作不冒充 end-user 请求，但必须�
 
 **2026-09-26 官方契约续验：** 使用同一 identity-only Auth fixture 启动锁定的 `langgraph-api==0.13.0` 开发服务与 GraphHarbor post33（独立 PG17 `graphharbor_boundary_auth_verify`、Redis DB15、测试签名密钥及独立 API/worker）。`check_boundary_auth.py` 的 12 类结果一致，包括创建 metadata 受信修改、跨用户 Thread/Run/state/history/search 拒绝、`runs/wait`、HITL 与 SSE 拒绝。随后执行 `scripts/compare_official_protocol.py --official-url http://127.0.0.1:31398 --graphharbor-url http://127.0.0.1:31399 --result-out /tmp/graphharbor-boundary-protocol-20260926.json`：比较失败，203 处差异全部位于 OpenAPI，其中路径/操作请求响应及参数 140 处、`components.schemas` 63 处。比较器现会识别 requestBody/schema 变化；此结果属于真实协议缺口，不得标 V-D06 通过。首次未设置签名密钥的 500 和未启动 worker 的超时均是隔离启动配置失败，不计成功；临时服务已停止。当前结果文件仅在本机 `/tmp`，后续需对差异按官方目标与明确排除项逐条分类并补行为验证。
 
-**2026-09-26 平台创建故障注入：** `create_thread` 的 ready 确认失败、5xx 后对账探测失败、明确 4xx 后 ACL 清理失败，以及 ACL 预留记录缺失，均有定向测试；前两类保留可用于受限 reconcile 的 UUID，缺 ACL 不报告 ready。平台五个 ACL/gateway/委托/SDK 测试模块共 71 tests、3 skipped；提交钩子 Ruff 和格式检查通过。明确 4xx 后清理数据库失败仍可能遗留 pending ACL，运行端没有 Thread；需平台侧人工核对清理，此场景不算自动补偿成功。GraphHarbor 不承担该业务 ACL 清理。
+**2026-09-26 平台创建故障注入：** `create_thread` 的 ready 确认失败、5xx 后对账探测或委托签发失败、明确 4xx 后 ACL 清理失败，以及 ACL 预留记录缺失，均有定向测试；未知结果保留可用于受限 reconcile 的 UUID，缺 ACL 不报告 ready。平台五个 ACL/gateway/委托/SDK 测试模块共 72 tests、3 skipped；提交钩子 Ruff 和格式检查通过。明确 4xx 后清理数据库失败仍可能遗留 pending ACL，运行端没有 Thread；需平台侧人工核对清理，此场景不算自动补偿成功。GraphHarbor 不承担该业务 ACL 清理。
 
 ## 状态
 
