@@ -87,7 +87,7 @@ ACL 仍由 platform-api 的 thread_access.get / require_action / visible_records
 | A01 | G server/core_api/protocol_api/streaming/mcp_transport/store_api 挂载清单；锁定官方 Auth probe | 明确每个入口的事件和边界 | V-A01、V-A02 | 进行中：核心 API 授权盘点已确认大量直接 SQL scope 尚未清除；完整路由矩阵与官方 probe 未完成 |
 | A02 | G auth.py、生产 handlers；提取可复用纯 filter 逻辑 | 新授权在完整候选版本生效；固定 scope 直接移除，联合验证后部署 | V-A01—A04 | 部分完成：REST/SSE 资源授权已接入；协议 run 查找、input.respond 与历史/实时流撤权检查改用标准授权；`test_application_authorization.py` 14 passed、1 skipped，PG 项隔离运行时跳过。大量 REST 操作仍依赖旧 scope，未满足移列条件 |
 | A03 | P auth/platform.py、runtime/auth.py、gateway presentation + application；内部授权端点 | operation/目标校验、ACL 复核、可信 metadata | V-A03—A06 | 部分完成：内部批量 ACL 端点与线程回查已完成；创建回查限 pending 且 owner/project 匹配；Runtime Auth 限制委托 operation 并 fail-closed。2026-09-25 平台 ACL/runtime delegation 定向 pytest：36 passed、3 skipped、335 subtests passed；Runtime Auth：43 passed。全入口授权差分、撤权链路和 production API 直连矩阵未完成 |
-| A04 | P gateway create_thread/copy/补偿与 thread_access | 创建、超时、对账不发生授权空窗 | V-A06 | 部分完成：先 ACL 预留；`thread-create` UUID 绑定且不伪造 assistant；明确 4xx 清理，5xx/504 保留 pending 预留；用户可对账自身 pending 线程，Runtime 用受限 reconcile 委托读取并置 ready。缺少可调度的 pending 对账执行器和故障注入全链路验收 |
+| A04 | P gateway create_thread/copy/补偿与 thread_access | 创建、超时、对账不发生授权空窗 | V-A06 | 部分完成：先 ACL 预留；`thread-create` UUID 绑定且不伪造 assistant；明确 4xx 清理，5xx/504 保留 pending 预留；用户可对账自身 pending 线程，Runtime 用受限 reconcile 委托读取并置 ready。探测 404 时 504 错误扩展现在返回 UUID 与 reconcile 路径；平台服务层 22 项通过、3 项跳过。其他故障注入和完整联合验收未完成 |
 | A05 | G auth.py/core_api/graph_executor/production_worker；P graph factories | v2 传递任意合法自定义 user；无业务特判 | V-A07—A08 | 部分完成：v2 accepted_at 快照、run/thread 绑定、opaque auth_user、MCP 同步；平台敏感策略与排队/重启全链路待验 |
 | A06 | 完成 04 后删除固定 Principal/scope/旧身份分支及陈旧测试假设 | 核心运行链不依赖固定身份结构 | V-A09 + Final | 待开始 |
 
@@ -112,6 +112,8 @@ ACL 仍由 platform-api 的 thread_access.get / require_action / visible_records
 **2026-09-25 创建授权收口：** 平台 `thread_access.pending_owner` 将 Runtime `create` 回查限制为仍 pending、project 与 owner 均匹配的 UUID 预留；ready ACL 不再接受创建委托重放。由于 platform-api 虚拟环境缺少 pytest，使用 `python -m unittest tests.test_thread_acl -q` 验证：15 项通过、3 项跳过；直接执行 `tests/test_runtime_thread_authorization.py` 的 3 个断言检查通过。相关文件 `compileall` 和平台 `git diff --check` 通过；平台 Ruff 未安装，未运行。Runtime Service `tests/runtime/test_platform_auth.py` 23 passed。后台只读委托和可调度对账机制仍未实现。
 
 **2026-09-25 联合定向复测：** Runtime Service `tests/runtime/test_platform_auth.py`、`test_auth.py`：43 passed；Platform API `test_thread_acl.py`、`test_runtime_gateway_http_matrix.py`、`test_runtime_delegation.py`：36 passed、3 skipped、335 subtests passed。测试使用 `apps/runtime-service/.venv` 并从 `apps/platform-api` 设置 `PYTHONPATH=src`。GraphHarbor PostgreSQL 17 隔离库 `graphharbor_boundary_pg17` 上 `test_production_contract.py`：65 passed、4 skipped；完整 REST/cron/store 路由矩阵和旧 SQL scope 尚未完成。
+
+**2026-09-25 未知创建结果修复：** `RuntimeGatewayService.create_thread` 在上游创建超时且受限 reconcile 查询返回 404 时，保留原 504，并在 `error.extra` 添加 `thread_id` 与 `/api/langgraph/threads/{thread_id}/reconcile`；pending ACL 不清理，其他探测错误不附加对账信息。验证：`PYTHONPATH=src ../runtime-service/.venv/bin/python -m unittest tests.test_thread_acl -q`，22 项通过、3 项跳过。错误 payload 通用 handler 会保留 `extra`，但本轮未单独执行真实 HTTP 客户端断言，也未完成 Web 端恢复交互验收。
 
 ## 状态
 

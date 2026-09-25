@@ -5,7 +5,7 @@
 - **启动日期：** 2026-09-25（Asia/Shanghai）
 - **目标：** GraphHarbor 提供通用 LangGraph Agent Server；平台负责业务身份、ACL、模型与工具策略、业务观测和 workspace。
 - **改动级别：** 治理改动，跨仓库，涉及鉴权、持久化隔离、后台执行与升级回退。
-- **状态：** `partial`。Worker 业务字段收口、workspace 源码移除与发行包核验已完成阶段验收；REST/Store/cron 的完整标准授权和 SQL scope 移除、平台最终联合验收及数据切换仍未完成。
+- **状态：** `partial`。Worker 业务字段收口、workspace 源码移除与发行包核验已完成阶段验收；Thread 创建结果未知时现可从错误扩展字段取得 UUID 并调用 pending 对账。REST/Store/cron 的完整标准授权和 SQL scope 移除、平台最终联合验收及数据切换仍未完成。
 - **负责人：** 待指定；评审人由用户指定，AI 不代替人工批准。
 - **预计工作量：** 12—18 人天，含联合验证；历史数据量、第三方消费者和官方授权差分结果可能调整估算。未承诺完成日期。
 - **事实基线：** 本地源码，GraphHarbor / platform runtime 声明版本均为 0.13.0.post32；兼容参照为 langgraph-api 0.13.0、langgraph-sdk 0.4.3。不把在线文档更新自动当成升级目标。
