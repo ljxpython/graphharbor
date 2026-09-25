@@ -60,4 +60,6 @@ GraphHarbor 核心发行包不提供 DeepAgent 工作目录、业务 skills 路�
 
 **2026-09-25 本机候选启动：** 最新双 wheel 已安装到平台 Runtime 虚拟环境，平台本机栈健康。平台 `uv.lock` 仍锁旧 PyPI wheel，候选启动需要 `UV_NO_SYNC=1`；这不是可重复安装的正式交付。文件浏览器正向操作与 workspace 恢复仍未验证。
 
-partial：C01 阶段完成，C03 候选包安装/平台加载通过；C02 平台浏览器文件链路和恢复场景未完成。不能替代 01/04 的安全与迁移准入。
+partial：C01 阶段完成，C03 候选包安装/平台加载通过；C02 平台浏览器文件正向链路已通过，重启/HITL/fork 资源绑定及完整安全矩阵仍未完成。不能替代 01/04 的安全与迁移准入。
+
+2026-09-25 正式 post33 联调：在普通 `local-stack.sh restart` 启动的本机平台栈运行 `pnpm exec playwright test e2e/retired-result-service.spec.ts --project=chromium --reporter=line --workers=1`，1 passed（1.7 分钟）。该用例经浏览器创建 Dear Agent 会话，模型调用 `write_file` 写入 `/workspace/work/retirement-check.md`，经审批和 `present_artifacts` 发布后，在成果页完成在线预览与安全下载，并清理测试 Thread/项目。模型来自平台当时已配置且可用的项目模型；`miaomiaoai` 的真实模型独立烟测见 04。此证据覆盖文件正向链路，不覆盖跨租户路径逃逸、重启/HITL/fork 恢复或 zip/terminal/skills。

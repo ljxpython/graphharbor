@@ -130,6 +130,12 @@ TTL、调度、后台清理等系统动作不冒充 end-user 请求，但必须�
 
 **本机候选依赖限制：** 平台 `apps/runtime-service/uv.lock` 仍绑定同版本旧 PyPI wheel；从当前源码构建的双候选 wheel 已安装到该虚拟环境，但普通 `uv run --frozen` 会重新同步为旧 wheel。本轮栈用 `UV_NO_SYNC=1 bash scripts/local-stack.sh start` 启动，后续候选验收也必须保持 `UV_NO_SYNC=1`。正式交付前须锁定一个可重复安装的新版本或可审查的本地候选来源，否则用户直接启动将测到旧代码。
 
+**2026-09-25 依赖来源更新：** GraphHarbor 双包 `0.13.0.post33` 已从本次源码构建并上传 PyPI；公开索引的隔离安装确认 `graphharbor` 与 `graphharbor-runtime` 均为 post33。平台 runtime-service 已将 `pyproject.toml` 与 `uv.lock` 同步到 post33，普通 `uv sync --frozen` 将原本机临时候选 post32 替换为公开 post33；`uv run --frozen` 双包导入和版本检查通过。上段限制是历史记录，不再是当前启动条件。业务 Run/SSE/HITL、文件与 Final 仍须另行验收。
+
+**2026-09-25 正式依赖本机联调：** 平台 `local-stack.sh restart` 不设 `UV_NO_SYNC`，Runtime 迁移到 `009_event_retention_watermarks`，API/worker/platform-api/Web 全部就绪。runtime-service 的 Auth/模型/工具/资源绑定/workspace 定向测试 99 passed；通过平台登录和 `x-project-id` 的网关创建 Thread 200、创建 `workflow_demo` Run 200，Run success、state 200、历史 SSE 有 16 帧。随后仅向本机 worker 进程注入 `~/.my_best/.env` 的 `miaomiaoai` 代理凭据及 `deepseek-v4.1-flash`，真实模型 Run success 且响应非空；另一次含“需要人工确认”的 Run 为 interrupted、1 个 interrupt，按平台恢复契约只提交 `command.resume` 后新 Run success、响应非空、interrupts 清零。首次恢复请求额外携带 `assistant_id` 被平台按 `resume_configuration_override` 以 400 正确拒绝，该次不计成功。此证据覆盖本机单项目管理员链路，不替代跨用户 ACL、文件、恢复或 Final。
+
+**2026-09-25 完整备份恢复：** 用本机 PostgreSQL 17 的 `pg_restore --exit-on-error --no-owner --no-acl` 将两份切换前归档分别恢复到新库 `graphharbor_boundary_restore_post33` 和 `platform_boundary_restore_post33`；两个命令均退出 0。Runtime 归档恢复后 revision 为 `006_terminal_events`，有 Threads 57、Runs 324、Events 434,742、Store items 0，库约 7.8 GB；平台归档恢复后 revision 为 `20260922_0004`，有 Thread ACL 57、run requests 401，库约 29 MB。这证明本机备份可完整恢复到隔离库，不等于生产环境切换后的全量回退演练。首次误用 PATH 上 PostgreSQL 14 的 `pg_restore`，因归档头 1.16 失败；两个新库仍为空，改用 PG17 后成功。恢复库仅用于只读核对，不覆盖现有业务库。
+
 ## 状态
 
 partial：D02/D03/D04/D05 有阶段实现；本机两库盘点、ACL 协调清理与 schema 切换已完成，但本机备份的完整恢复、可重复安装依赖、业务 run/HITL/文件正向链路及 Final V-D06—D08 尚未完成。2026-09-25 暂停后续实施，先处理[Runtime 流事件保留治理](../20260925-runtime-event-retention/README.md)；恢复顺序见本项目 README 的“暂停点与恢复入口”。worker 租约恢复已有回归，不能替代平台业务联合验收；不得据此切换生产。
