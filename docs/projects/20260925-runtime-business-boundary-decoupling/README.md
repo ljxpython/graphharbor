@@ -6,10 +6,10 @@
 - **目标：** GraphHarbor 提供通用 LangGraph Agent Server；平台负责业务身份、ACL、模型与工具策略、业务观测和 workspace。
 - **改动级别：** 治理改动，跨仓库，涉及鉴权、持久化隔离、后台执行与升级回退。
 - **状态：** `partial`。Worker 业务字段、workspace 源码及核心 SQL tenant/project scope 已完成代码移除；Thread 创建未知结果可用 UUID 对账。本机 PG17 两库已备份、清理旧运行数据并升级到新 schema，候选包 local stack 已启动。完整备份恢复、业务 run/HITL、浏览器文件正向链路及最终联合验收仍缺证据。
-- **当前安排：** 2026-09-25 起暂停本专项的后续实施，先规划并处理[Runtime 流事件保留治理](../20260925-runtime-event-retention/README.md)；`partial` 是实施状态，不因暂停改为完成。
+- **当前安排：** 事件保留专项已有核心实现，两项专项现进入联合验收；仍须完成官方全入口差分、跨项目故障路径和 Final 门禁。`partial` 不因阶段测试通过改为完成。
 - **负责人：** 待指定；评审人由用户指定，AI 不代替人工批准。
 - **预计工作量：** 12—18 人天，含联合验证；历史数据量、第三方消费者和官方授权差分结果可能调整估算。未承诺完成日期。
-- **事实基线：** 本地源码，GraphHarbor / platform runtime 声明版本均为 0.13.0.post32；兼容参照为 langgraph-api 0.13.0、langgraph-sdk 0.4.3。不把在线文档更新自动当成升级目标。
+- **事实基线：** 本地源码，GraphHarbor / platform runtime 声明版本均为 0.13.0.post33；兼容参照为 langgraph-api 0.13.0、langgraph-sdk 0.4.3。不把在线文档更新自动当成升级目标。
 
 **2026-09-25 用户决策：彻底解耦，不维护旧业务接口、旧字段语义或旧版本混跑兼容。两仓完成适配后维护窗口一次切换；官方 LangGraph API/SDK 契约仍是产品目标。历史数据允许在明确的维护切换窗口直接删除，不做旧业务字段回填。**
 
@@ -127,6 +127,8 @@ ACL = Access Control List（访问控制列表），在本项目指“某个用�
 **2026-09-25 迁移前复核：** 隔离 PG17 runtime-pg 全组 149 passed、18 skipped，官方 0.13.0 的 identity-only Auth/Thread/`runs/wait`/HITL/SSE 子集差分通过。当时平台 2142 数据库缺少 Alembic `20260925_0005` 的 Thread ACL 列，浏览器 Thread 创建 500 已定位于平台 SQL，未进入 Runtime；平台 API 新增启动时旧 schema 拒绝检查，临时 SQLite 回归通过。平台现役源码未发现 GraphHarbor Store 消费者，外部消费者未盘点。全入口差分、业务执行与文件正向验收仍未完成。
 
 **2026-09-25 本机切换进展：** 上段是迁移前诊断。本机两库已停写并分别归档到仅本机可读的 `/tmp/graphharbor-boundary-20260925-prewipe-runtime.dump` 和 `/tmp/graphharbor-boundary-20260925-prewipe-platform.dump`；`pg_restore --list` 已核对归档目录，完整恢复尚未演练。旧 Runtime 运行历史及平台 Thread ACL/run submission ledger 已按明确表名清理，Dear memory/skills 保留。Runtime 已升至 `008_remove_business_scope`，平台已升至 `20260925_0005`；现役 Runtime 库 11 MB，Thread/Run/Event 均为 0。候选 wheel 安装到平台 Runtime 虚拟环境，本机栈健康；当前必须以 `UV_NO_SYNC=1` 启动，普通 `uv run --frozen` 会按平台锁文件重新安装旧版 PyPI wheel。这个本机启动限制和剩余验收见专题 04。
+
+2026-09-26 续验：隔离治理浏览器矩阵 10 passed 且 fixture ACL 残留为 0；平台 Runtime workspace 定向 54 passed、PG17 restart/HITL 1 passed、skill snapshot restart 4 passed。GraphHarbor 隔离 PG17 + Redis DB15 的事件/worker/授权定向回归 102 passed、4 skipped。完整官方 Auth/SSE 差分、故障注入和跨项目联合流程仍未完成。
 
 ## 暂停点与恢复入口
 

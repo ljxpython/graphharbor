@@ -2,6 +2,10 @@
 
 **项目状态：`partial`（2026-09-25）。** 功能与隔离 PG17 容量验证已有结果；官方差分、平台 API 联合安全链路、清理/订阅竞态及稳定容量/回退证据尚缺，不可宣称全面兼容或上线完成。完成门槛是 GraphHarbor、runtime-service 和平台 API 的 HTTP/worker/数据库链路；浏览器烟测只是补充。数据库验证只使用 `graphharbor_event_retention_test`、`graphharbor_event_retention_verify`、`graphharbor_event_retention_restore` 和新建的 `graphharbor_event_retention_candidate`，未运行会清空默认库的 `scripts/test.sh`。
 
+2026-09-26 定向复测：显式设置隔离 `DATABASE_URI` 与 `REDIS_URI` 后，事件保留、官方 SDK 契约、生产 worker 和应用授权为 102 passed、4 skipped；Ruff 通过。平台 runtime-gateway 为 68 tests、2 skipped，Web chat session 为 20 passed、1 skipped。首次省略隔离 URI 的命令连接默认 `langgraph` 失败，未计入结果；项目仍为 partial。
+
+同日旧归档只读组成分析：PG17 独立恢复库 `graphharbor_boundary_restore_post33` 的 `runtime_events` 共 434,742 行；messages、debug、checkpoints 分别占 399,549 / 18,387 / 6,277 行，JSONB payload 大小分别为 4.06 / 1.87 / 1.01 GB。其余 topic 及精确字节数见 `tasks.md`。未读取正文，不代表新版本稳态容量。
+
 | 场景 | 预期与实际证据 | 状态 |
 | --- | --- | --- |
 | V01 事实基线 | `measure_event_storage.py` 走真实 `record_message_deltas`；同一 Run 10,000 条增量，payload 6,540,000 B、heap 8,265,728 B、TOAST 32,768 B、索引 1,687,552 B，写入 2.557s；停维护后的等量重写 2.623s。未含端到端 SSE 延迟；旧归档未作 topic 细分。 | 部分通过 |

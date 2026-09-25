@@ -160,3 +160,5 @@ ACL 仍由 platform-api 的 thread_access.get / require_action / visible_records
 partial：A02/A03/A04/A05/A06 有阶段实现，A01 官方全入口 Auth 差分和 Final 尚未完成；已完成的 Thread HTTP 链路不能代替所有资源与 SSE 拒绝路径，仍禁止生产切换。
 
 2026-09-25 隔离治理浏览器补验：将运行中 Runtime API 的 `PLATFORM_THREAD_AUTHORIZATION_URL` 临时指向隔离治理平台 12142 后，`RUN_LOCAL_GOVERNANCE_E2E=1 ... playwright test e2e/platform-access-governance.spec.ts --workers=1` 10 项均通过（29.4 秒），覆盖私有/共享/接管/撤权、服务账号 grant/token、子资源拒绝和成员移除。第一次未切换回查地址时 5 项创建 Thread 返回 403，原因是隔离平台 token 被 Runtime 回查主平台 2142 拒绝；该次不计通过。测试 fixture 退出时留下 6 条临时 ACL，导致 shutdown cleanup 抛错；测试数据库在临时目录内，未触及正式平台库。完成跨资源动态差分和清理无残留仍需单独核对。
+
+2026-09-26 联合治理复测：隔离平台 API 12142 + Runtime 8123 + Web 13000 的治理矩阵为 10 passed；fixture `thread_access` 残留为 0，正式 Runtime ACL 回查地址已恢复到 2142。首轮 5 failed 的 503 是临时地址漏写 `/api/runtime/internal/thread-authorization`，不计通过。本结果不等于官方全入口 Auth 差分完成。
