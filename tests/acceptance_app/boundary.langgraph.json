@@ -1,0 +1,8 @@
+{
+  "dependencies": ["./"],
+  "graphs": {
+    "basic": "./graphs.py:basic",
+    "hitl": "./graphs.py:hitl"
+  },
+  "auth": {"path": "./boundary_auth.py:auth"}
+}

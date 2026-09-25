@@ -16,13 +16,8 @@ export GRAPHHARBOR_RUNTIME_CONTEXT_SECRET='replace-with-a-managed-secret'
 export GRAPHHARBOR_RUNTIME_CONTEXT_ISSUER='https://platform.example'
 export GRAPHHARBOR_RUNTIME_CONTEXT_AUDIENCE='graphharbor-worker'
 
-# These are the platform-api delegation JWT claims, not the internal
-# RuntimeContext envelope claims above. Keep the audience aligned with
-# PLATFORM_API_RUNTIME_DELEGATION_AUDIENCE (default: runtime-service).
-export GRAPHHARBOR_JWT_ISSUER='platform-api'
-export GRAPHHARBOR_JWT_AUDIENCE='runtime-service'
-export GRAPHHARBOR_JWT_ALGORITHMS='HS256'
-export GRAPHHARBOR_JWT_SHARED_SECRET='use-the-managed-platform-delegation-secret'
+# 业务 JWT 的签发和校验由应用 auth.path 与平台负责。
+# GRAPHHARBOR_RUNTIME_CONTEXT_SECRET 只签 API→worker 内部身份快照，不能复用业务 JWT 密钥。
 
 # 只执行一次或在发布 job 中重复执行，必须先于 API/worker。
 graphharbor migrate upgrade
@@ -37,25 +32,12 @@ graphharbor worker --n-jobs-per-worker 1
 graphharbor worker --compatibility-spike --n-jobs-per-worker 1
 ```
 
-生产 delegation JWT 还必须携带由 platform-api 签发的策略 claim，且其 `aud` 必须等于
-`GRAPHHARBOR_JWT_AUDIENCE`（platform-api 默认值为 `runtime-service`）：
+生产环境设置 `GRAPHHARBOR_ENV=production` 后，数据入口需要应用通过 `auth.path`
+注册 SDK Auth 认证与资源授权。GraphHarbor 只保存通用 `identity`/`permissions` 和签名
+API→worker 身份快照；平台的 tenant/project、ACL、模型与工具策略由平台 Auth 和 graph 负责。
+内部快照必须使用独立的 `GRAPHHARBOR_RUNTIME_CONTEXT_SECRET`，并配置配对的 issuer/audience。
+候选版本在完整授权矩阵、迁移及联合验收完成前不得切换生产。
 
-```json
-{
-  "policy_version": "policy-2026-08-31",
-  "allowed_model_ids": ["provider:model"],
-  "allowed_tool_names": ["read_only_tool"]
-}
-```
-
-GraphHarbor 会在 API 创建 Run 和 worker 恢复 Run 时分别校验策略；缺少策略、模型或工具越界
-都会拒绝执行。策略不应从客户端 `context` 或 `config.configurable` 生成，也不会通过 Run
-响应返回签名 runtime token。
-
-生产环境设置 `GRAPHHARBOR_ENV=production` 后，API 和 custom routes 只接受
-platform-api delegation JWT；issuer、audience、JWKS URL 必须同时配置。`tenant_id`
-和 `project_id` 始终从 JWT Principal 获取，客户端请求体中的覆盖值会被拒绝。
-`GRAPHHARBOR_JWT_ALGORITHMS` 默认只允许 `RS256`；只有明确配置算法时才允许对称密钥模式。
 生产 worker 使用公共 LangGraph executor、PostgreSQL lease/reaper 和最多三次基础设施重试；
 v2 SSE、Protocol v2 和 worker 对 LangGraph `Runtime(ServerInfo)` 的身份注入已可用；v3 typed
 projections、完整 graceful drain 和多实例故障验收仍必须通过后才能作为最终生产发布。
@@ -89,3 +71,9 @@ checkpoint 或事件终态；客户端应使用最后事件 cursor 重连。
 `success`；PostgreSQL 重启后的 checkpointer 会重连，run 按基础设施重试策略完成。重启窗口中三条
 run 的持久化 `retry_count` 分别为 1、1、2，均以 `success` 终态结束。SSE 以
 `Last-Event-ID: 1` 重连时返回后续事件和 `end`。
+
+## 流事件保留与回退
+
+候选 worker 默认在 Run 最后更新时间满 24 小时后清理其非终态原始流事件；运行中、终态、checkpoint、Store 和无 Run 事件不按此规则删除。`GRAPHHARBOR_EVENT_RETENTION_SECONDS` 默认 `86400`，设为 `0` 可停止后续清理；`GRAPHHARBOR_EVENT_PRUNE_BATCH_SIZE` 默认 `1000`，每轮 reaper 最多执行 20 个独立事务批次。`/metrics` 暴露 `graphharbor_runtime_events_pruned_total` 与 `graphharbor_runtime_event_prune_duration_ms`。调低 reaper 间隔会增加清理频率，需观察写入延迟与数据库锁等待。
+
+清理前核对数据库目标、终态 Run 数、预计待删行数并保留 PG 备份。已删原始事件不能由 checkpoint 无损重建；回退时先将 `GRAPHHARBOR_EVENT_RETENTION_SECONDS=0` 并重启 worker，再从备份恢复到独立库，按 Run/事件 ID 离线提取，不能直接覆盖已有新事件的在线库。`DELETE` 后表文件不会立即缩小；观察活跃行、`n_dead_tup`、autovacuum 与索引大小，必要时按数据库维护窗口处理。明确过期游标应由客户端改用 Run/Thread state/history 建立新订阅；Protocol 的 HTTP 410 携带 `code=cursor_expired` 和 `recovery=thread_snapshot`。

@@ -16,7 +16,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 
 from langgraph_runtime_pg.database import connect
 from langgraph_runtime_pg.metrics import inc as metric_inc
-from langgraph_runtime_pg.models import RunRow, RuntimeEventRow
+from langgraph_runtime_pg.models import RunRow, RuntimeEventRow, ThreadRow
 from langgraph_runtime_pg.protocol import RunStatus, project_v3_event
 from langgraph_runtime_pg.redis_stream import Message, get_stream_manager
 
@@ -119,14 +119,19 @@ def _thread_cursor(value: str | None) -> int | JSONResponse:
     return int(value.partition("-")[0])
 
 
-async def _thread_events(thread_id: UUID, after: int) -> list[RuntimeEventRow]:
+async def _thread_events(thread_id: UUID, after: int) -> tuple[int, list[RuntimeEventRow]]:
     query = (
         select(RuntimeEventRow)
         .where(RuntimeEventRow.thread_id == thread_id, RuntimeEventRow.sequence > after)
         .order_by(RuntimeEventRow.sequence)
     )
     async with connect() as conn:
-        return list((await conn.session.execute(query)).scalars())
+        thread = await conn.session.scalar(
+            select(ThreadRow).where(ThreadRow.thread_id == thread_id).with_for_update(read=True)
+        )
+        if thread is None:
+            return 0, []
+        return thread.event_pruned_through, list((await conn.session.execute(query)).scalars())
 
 
 async def _thread_event_sequence(thread_id: UUID) -> int:
@@ -185,7 +190,15 @@ async def thread_stream(request: Request) -> JSONResponse | StreamingResponse:
     cursor_value = int(cursor)
     thread, _, _ = await _get_thread(request)
     if thread is None:
-        return JSONResponse({"detail": "thread not found"}, status_code=404)
+
+        async def denied() -> AsyncIterator[str]:
+            yield _sse("error", {"error": "HTTPException", "message": "404: Thread not found"})
+
+        return StreamingResponse(
+            denied(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
     heartbeat = max(float(os.environ.get("GRAPHHARBOR_THREAD_STREAM_HEARTBEAT_SECONDS", "15")), 0.1)
     manager = get_stream_manager()
 
@@ -198,7 +211,14 @@ async def thread_stream(request: Request) -> JSONResponse | StreamingResponse:
             while True:
                 if (await _get_thread(request))[0] is None:
                     return
-                for row in await _thread_events(thread_id, cursor_value):
+                watermark, rows = await _thread_events(thread_id, cursor_value)
+                if (
+                    request.headers.get("last-event-id") not in (None, "-")
+                    and cursor_value < watermark
+                ):
+                    yield _sse("error", {"detail": "cursor_expired", "recovery": "thread_snapshot"})
+                    return
+                for row in rows:
                     if (await _get_thread(request))[0] is None:
                         return
                     cursor_value = row.sequence
@@ -293,12 +313,33 @@ async def _load_events(run_id: UUID, *, after: int = 0) -> list[dict[str, Any]]:
     return [_event_envelope(row) for row in rows]
 
 
-async def _minimum_run_event_sequence(run_id: UUID) -> int | None:
+async def _run_replay(
+    request: Request, run_id: UUID, after: int
+) -> tuple[RunRow | None, list[dict[str, Any]]]:
+    from langhost.core_api import _authorized_run
+
     async with connect() as conn:
-        value = await conn.session.scalar(
-            select(func.min(RuntimeEventRow.sequence)).where(RuntimeEventRow.run_id == run_id)
+        run = await _authorized_run(request, conn.session, run_id)
+        if run is None:
+            return None, []
+        run = await conn.session.scalar(
+            select(RunRow)
+            .where(RunRow.run_id == run_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
         )
-    return None if value is None else int(value)
+        rows = (
+            (
+                await conn.session.execute(
+                    select(RuntimeEventRow)
+                    .where(RuntimeEventRow.run_id == run_id, RuntimeEventRow.sequence > after)
+                    .order_by(RuntimeEventRow.sequence)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return run, [_event_envelope(row) for row in rows]
 
 
 async def _run_snapshot(request: Request, run_id: UUID) -> RunRow | None:
@@ -343,12 +384,11 @@ async def _run_sse(
         queue = await manager.add_queue(run_id, thread_id, replay=True)
         seen: set[int] = set()
         try:
-            snapshot = await _run_snapshot(request, run_id)
+            snapshot, replay = await _run_replay(request, run_id, cursor)
             if snapshot is None:
                 yield _sse("error", {"detail": "run not found"})
                 return
-            minimum_sequence = await _minimum_run_event_sequence(run_id)
-            if cursor and minimum_sequence is not None and cursor < minimum_sequence - 1:
+            if cursor and cursor < snapshot.event_pruned_through:
                 metric_inc("graphharbor_sse_cursor_expired_total", labels={"version": version})
                 yield _sse(
                     "error",
@@ -376,7 +416,7 @@ async def _run_sse(
                 metric_inc("graphharbor_sse_events_total", labels={"version": version})
                 yield _sse(name, data, event_id=sequence if resumable else None)
 
-            for envelope in await _load_events(run_id, after=cursor):
+            for envelope in replay:
                 if await _run_snapshot(request, run_id) is None:
                     return
                 async for frame in emit_envelope(envelope):

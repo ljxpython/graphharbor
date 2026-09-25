@@ -12,12 +12,12 @@
 |---|---|---|
 | Assistant/Thread/Run/Cron 的 tenant/project 列 | G libs/langgraph-runtime-pg/src/langgraph_runtime_pg/models.py | 应用授权 metadata + 标准 Auth；最终删除运行时列依赖 |
 | scope/status 索引 | 同上 ix_runs_scope_status | 根据实际通用查询重建索引，保留 worker claim/锁正确性 |
-| scope/idempotency 唯一性 | uq_runs_scope_idempotency、run_store.py::RunRepository.create | 通用身份与幂等契约；禁止直接换成全局唯一 key |
+| scope/idempotency 唯一性 | uq_runs_scope_idempotency、run_store.py::RunRepository.create | API 对标准 identity 与匿名域生成不同的内部 key，再用单列唯一索引；不能直接把客户端原 key 设为全局唯一 |
 | HTTP Store 前缀 | G libs/langhost/src/langhost/store_api.py | 核心停止解释 tenant/project；平台负责 namespace 策略 |
 | 执行上下文 v1 | G auth.py/core_api.py/production_worker.py | 只保留通用 v2；旧任务离线处置，见 01 |
 | 平台幂等提交 | P apps/platform-api/src/platform_api/modules/runtime_gateway/application/service.py::launch_runtime_run，及同模块 infra/sqlalchemy models/repository | 已有项目/thread/key 唯一审计与稳定 platform:SHA256(project,thread,key) 上游 key，直接复用 |
 
-### 2. metadata 回填与旧列退出
+### 2. 历史运行数据清理与旧列退出
 
 先做只读盘点：四类资源数量、NULL/__default、scope 与 metadata 不一致、assistant versions、内置 graph assistant、run/thread 不一致、cron、进行中任务和 Store namespace 分布。未知数据不得自动归入默认项目。
 
@@ -25,27 +25,26 @@
 
 1. 在隔离环境完成新代码和迁移演练；新代码直接删除固定 Principal、业务 SQL、旧字段和旧快照运行分支，不加切换开关。
 2. 切换时停止新请求写入、cron 和旧 worker，备份一致性数据。平台所有新建/更新仅由应用 Auth 写入受保护的 tenant_id/project_id metadata。
-3. 在明确目标数据库和备份完成后删除旧 threads/runs/assistants/crons/checkpoints/store 数据；不从旧列回填业务 metadata，也不把未知行归入默认项目。生产数据库未经单独指定不得执行清理。
+3. 在明确目标数据库和备份完成后删除旧 threads/runs/assistants/crons/checkpoints 运行历史；Store 数据由平台消费者盘点后另行决定，不能随运行历史隐式清理。不从旧列回填业务 metadata，也不把未知行归入默认项目。生产数据库未经单独指定不得执行清理。
 4. 执行新 schema 迁移删除旧列和索引。新运行代码只依赖通用字段与应用 Auth。普通 metadata GIN 优先复用。
 5. 历史 Alembic revision 仅保留升级历史；一次性转换脚本可以读取旧字段，但不得成为在线兼容层。两仓及所有 API/worker 同步升级，验收后开放写入。
 6. 内置 graph assistant 的只读使用与管理修改分别授权；NULL 归属不等于所有人可写。无法判断归属的资源先隔离，不能自动分配默认项目。
 
 此过程不重写 checkpoint IDs、父子链或 pending writes；沿用已修复的 checkpoint mutation 安全逻辑，迁移测试覆盖它。
 
-### 3. 幂等键：先明确行为，再改索引
+### 3. 幂等键：已采用域化摘要
 
-现状为 tenant/project/key 内重复；不同 target 冲突。平台已有自己的 submission 记录与上游稳定键。推荐 GraphHarbor 新通用契约为：
+旧契约为 tenant/project/key 内重复；不同 target 冲突。平台已有自己的 submission 记录与上游稳定键。候选代码采用以下通用契约：
 
 - 认证请求：以规范化标准 identity 和 key 确定幂等域，不认识 tenant/project；不同 target 在相同域重用 key 仍冲突。
-- 无认证开发模式：显式独立匿名域；有/无身份的编码必须有类型标签，不让普通字符串 identity 与匿名标记碰撞。
+- 无认证开发模式：显式 `anonymous:` 域；认证 key 使用 `auth:` 域，两者保存为带标签的 SHA-256 摘要，不让普通字符串 identity 与匿名标记碰撞。
 - 同 key 重试先按当前权限检查既有 run/thread，禁止通过幂等命中返回已失权资源；同 target 不同请求体的目标行为在 P0 与参照比较后锁定，不顺带扩大功能。
-- 可用规范 JSON 元组的摘要生成内部非空幂等域；唯一约束使用 (domain, key)，保持事务冲突恢复。域仅来自标准身份，不能开放任意客户端参数伪造。
+- 现有 `runs.idempotency_key` 单列存内部域化摘要，并由 `uq_runs_idempotency` 保持事务冲突恢复；域仅来自标准身份或服务器匿名模式，不能开放任意客户端参数伪造。
 - 这是现有扩展行为的变化，不能宣称同用户跨项目 raw key 仍自动隔离。平台现有上游 SHA256 已包含 project/thread，可保留平台业务语义；其余调用者必须有迁移说明。
-- 旧 key 回填先从可信执行身份或平台 submission 映射重建。v1 过期不等于历史签名不可校验，但迁移验证与 worker 执行授权必须分离，不能以迁移为借口重新执行过期任务。
-- 身份无法恢复、跨旧 scope 合并后出现碰撞、NULL key/匿名边界必须在只读报告列出并阻止切换。未知行不统一塞到 anonymous。
-- 保存旧→新 domain/key 映射和约束备份；回填、并发请求、worker claim 均在隔离 PostgreSQL 演练，不能只靠 mock。
+- 用户已选择删除旧运行历史，不回填旧 key 或重启旧任务。迁移前仍须只读统计 NULL key、匿名边界和旧 scope 冲突；未知行不统一塞到 anonymous。
+- 新 key 的并发请求、跨身份与跨 target 冲突均在隔离 PostgreSQL 演练，不能只靠 mock。
 
-若 P0 发现锁定官方版本没有同等幂等扩展，单列 GraphHarbor 扩展 profile；官方协议比较与平台扩展测试分开，不能静默忽略差异。最终 domain/key 方案需在 D01 评审确认后执行 D03。
+若锁定官方版本没有同等幂等扩展，单列 GraphHarbor 扩展 profile；官方协议比较与平台扩展测试分开，不能静默忽略差异。
 
 ### 4. Store namespace
 
@@ -70,7 +69,7 @@
 |---|---|---|
 | R0 | 锁定两仓实际 commit+diff、依赖、数据清单；完整候选版本在隔离环境验证 | 新授权、平台业务链路、官方协议测试通过 |
 | R1 | 维护窗口停写、停 cron、停止旧 API/worker；运行任务排空或逐项处置；一致性备份 | 没有旧进程继续写入；备份恢复已演练 |
-| R2 | 离线迁移 metadata、幂等域、保留任务的身份快照；删除旧列/约束 | 数据归属、数量、映射、冲突检查通过 |
+| R2 | 按已批准范围清理旧运行历史，核对平台 ACL 与 Store；删除旧列/约束 | 清理对象与备份可核对，迁移无旧列和索引 |
 | R3 | 两仓和所有进程一次升级，平台依赖新版本；新代码仅识别新契约 | 候选 wheel、ACL、run/SSE、workspace 烟测通过 |
 | R4 | 开放写入，记录切换点与新增数据 | 无旧业务代码、旧运行格式或旧依赖残留 |
 
@@ -84,19 +83,19 @@ TTL、调度、后台清理等系统动作不冒充 end-user 请求，但必须�
 
 | ID | 改动内容 / 代码位置 | 预期结果 | 验证项 | 状态 |
 |---|---|---|---|---|
-| D01 | 两仓版本、实际消费者、G models/run_store/Store/签名历史只读盘点；官方 probe | 数据/依赖/差异清单，确认幂等及 namespace 契约 | V-D01 | 待开始 |
-| D02 | P 迁移脚本 + G 可扩展 schema/metadata 查询 | 离线可恢复转换、冲突拒绝、数据一致 | V-D02 | 部分完成：G `008_remove_business_scope` 删除四表旧列及索引；PG17 空隔离库已升级。旧 head 非空迁移、冲突/恢复及平台清理演练未完成 |
-| D03 | G run_store/models/migrations；P 既有稳定 key 接入测试 | 通用幂等域、无 NULL 穿透和跨域命中 | V-D03 | 部分完成：唯一索引改全局 key，API 用标准 Auth identity 域化；PG17 并发提交 1 passed。跨 identity/项目/响应丢失与平台联合验收未完成 |
-| D04 | G store_api；P 实际 Store 消费者和 auth | namespace 授权及旧数据可读，无物理搬迁 | V-D04 | 待开始 |
-| D05 | API/worker 格式版本切换、排队/恢复清点、候选包联调 | 维护窗口一次切换，无旧格式运行分支，故障恢复可操作 | V-D05 | 待开始 |
-| D06 | 完整联合验收、发行说明、旧列/业务分支清理、能力文档更新 | 全部 Final 门禁通过后才能 done | V-D06—D08 | 待开始 |
+| D01 | 两仓版本、实际消费者、G models/run_store/Store/签名历史只读盘点；官方 probe | 数据/依赖/差异清单，确认幂等及 namespace 契约 | V-D01 | 部分完成：平台现役源码未发现 GraphHarbor Store 调用，官方 Auth 子集差分通过；本机 PG17 两库完成计数级盘点，Store 两表为空；外部消费者与生产目标仍未知 |
+| D02 | G schema 迁移 + P 维护窗口 ACL 协调清理 | 旧运行数据清理后可迁移，备份可恢复 | V-D02 | 部分完成：隔离 PG17 已验证非空拒绝及旧 schema 备份恢复；本机两库已备份、协调清理 ACL/运行历史并升级至 `008` / `20260925_0005`，但本机两份归档尚未全量恢复演练 |
+| D03 | G run_store/models/migrations；P 既有稳定 key 接入测试 | 通用幂等域、无 NULL 穿透和跨域命中 | V-D03 | 部分完成：唯一索引改全局内部 key，API 用标准 Auth identity/匿名标签域化；PG17 并发提交和跨身份 2 passed。跨项目/响应丢失与平台联合验收未完成 |
+| D04 | G store_api；P 实际 Store 消费者和 auth | namespace 授权及旧数据可读，无物理搬迁 | V-D04 | 部分完成：GraphHarbor 隔离 PG17 Store 跨身份搜索/列举、suffix/max_depth、TTL sweep 回归通过；本机 Store 两表为空，平台现役源码未发现消费者，外部消费者未知 |
+| D05 | API/worker 格式版本切换、排队/恢复清点、候选包联调 | 维护窗口一次切换，无旧格式运行分支，故障恢复可操作 | V-D05 | 部分完成：双包候选安装并加载平台三份配置；PG17 worker 租约失效后重新入队及新 worker 完成回归通过；本机候选栈健康，既有临时 Thread HTTP 链路通过。HITL、业务 run/SSE、完整恢复与依赖锁定仍缺 |
+| D06 | 完整联合验收、发行说明、旧列/业务分支清理、能力文档更新 | 全部 Final 门禁通过后才能 done | V-D06—D08 | 部分完成：治理浏览器文件 10 passed，覆盖 Thread 私有/共享/接管、服务账号撤权与子资源拒绝；官方协议差分、业务 run/HITL、文件正向链路和完整回退仍缺 |
 
 ## 验证要求与记录
 
 ### Phase 验证
 
 - [ ] V-D01：记录两仓实际 commit+diff、Python/SDK/API 版本、授权路径表、所有消费入口；只读报告包含数据数量/异常数量，不导出业务内容或凭据。
-- [ ] V-D02：隔离 PostgreSQL 从旧 revision 升级；覆盖 metadata 缺失/冲突、NULL scope、内置 assistant、versions、cron 和孤立 run；中断重跑幂等，迁移前后对象数及抽样摘要一致。
+- [ ] V-D02：隔离 PostgreSQL 从旧 revision 升级；四表任一非空时拒绝，按批准范围清理后重试，核对旧列/索引已删除；备份恢复原 schema 与数据。生产维护步骤另需核对平台 ACL 与 Store，不做 metadata 回填。
 - [ ] V-D03：同 key 并发、不同 identity、相同用户跨项目、不同 target、匿名、旧 key 碰撞、权限撤回后重试、API 响应丢失；不多建 run、不返回他人 run。保留已有并发提交/锁测试。
 - [ ] V-D04：原 namespace 数据 get/search/delete/list 与 TTL/索引均保持；跨项目、空前缀、suffix/max_depth、graph 内直接 Store 均验证。
 - [ ] V-D05：新格式排队、重试/after_seconds、HITL、重启；旧任务离线转换或重新授权；旧快照在新运行端明确拒绝；整套备份恢复通过，禁止伪造身份补签。
@@ -117,6 +116,20 @@ TTL、调度、后台清理等系统动作不冒充 end-user 请求，但必须�
 
 文档检查已执行：6 份新增文档、12 个相对链接、9 个完整代码路径引用均通过自动存在性校验；4 个专题的规定章节齐全。两仓 git diff --check 通过；平台既有 scripts/check_docs.py 的 self_check 和本轮 3 个平台文档检查通过。此结果仅证明文档结构与引用，不证明计划中的功能已实现。
 
+**2026-09-25 PG17 与候选包阶段验证：** `graphharbor_boundary_pg17` 中独立 schema 从 `007_checkpoint_baselines` 种旧 thread；迁移 `008` 对 assistants/threads/runs/crons 任一非空明确拒绝，清理后可重复升级。用 PostgreSQL 17 的 `pg_dump -Fc -n gh_restore_probe_20260925_b1` 备份旧 schema，升级后丢弃仅该演练 schema，再以 `pg_restore --exit-on-error` 恢复；版本回到 `007_checkpoint_baselines`，一条 thread 的旧 tenant/project/metadata 值一致。临时 schema 已清理，归档仅在 `/tmp`。最终双 wheel/sdist 构建安装、无业务 workspace/备份文件；隔离 PG17 的 runtime-pg 全组 148 passed、18 skipped，langhost 独立进程 58 passed。生产 worker 租约丢失、重新入队和新 worker 完成已回归；平台真实 HTTP Thread ACL 链路通过。尚无生产目标清单、平台 ACL/Store 联合清理、完整 run/SSE、浏览器及官方全入口差分 Final。
+
+**2026-09-25 Final 子集：** 隔离平台 API + 候选 Runtime + Web 的 `platform-access-governance.spec.ts` 全文件 10 passed；含服务账号项目 grant/token 即时撤销、管理员限时接管、子资源拒绝及浏览器身份失效。用户创建旧测试与现行一次提交表单不符，修正后全文件通过。此结果仅覆盖治理浏览器子集，不能勾选 V-D07；业务 run/HITL、文件正向操作、生产数据清单与切换回退仍缺。
+
+**2026-09-25 追加诊断与准入：** 隔离 PG17 全组在 root run checkpoint fencing 修复后为 149 passed、18 skipped；官方 0.13.0 identity-only Auth/Thread/`runs/wait`/HITL/SSE 子集动态差分通过。平台现有 2142 服务的数据库缺少 Alembic `20260925_0005` 中 `thread_access.provisioning_status`，浏览器创建 Thread 和列表/计数均返回 500；平台 API 新增启动时列检查，临时 SQLite 旧 schema 启动拒绝测试通过。该服务使用 `--reload`，新代码热重启后按预期拒绝旧 schema 启动；其数据库未迁移，`scripts/local-stack.sh start` 会先运行迁移。平台源码静态盘点未发现 GraphHarbor HTTP Store 或注入式 Store 调用，不能推断目标库 Store 无数据。用户尚未指定维护目标、备份和窗口，未执行平台 ACL 协调清理或生产回退演练。
+
+**本机 PG17 只读盘点（2026-09-25）：** 两份应用 `.env` 均指向本机 5432；Runtime 库 `graphharbor_acceptance` 在 `006_terminal_events`，Platform 库 `platform_api` 在 `20260922_0004`，未执行任何写入。Runtime 有 assistants 66、assistant_versions 66、threads 57、runs 324、crons 0、checkpoints 6,196、checkpoint_writes 9,526、checkpoint_blobs 1,912、runtime_events 434,742、store_items/旧 store 均 0。Run 状态为 success 218、interrupted 100、error 4、timeout 2；Thread 为 idle 51、interrupted 6。平台有 thread_access 57、run_requests 401；ACL 与 Runtime Thread ID 集合摘要一致，submission ledger 覆盖 73 个不同 Thread，不能假定它会随 Thread 清理自动消失。旧 scope 与 metadata 的不一致计数：assistants 55、threads 57、runs 324；这批旧记录不得直接进入无 scope 的新代码。应用表另有 runtime_message_inbox 5、Dear memory 3、Dear skills 2、skill bindings 0；记忆和 skills 属平台数据，不能用测试用的 `truncate_all()` 清理。Runtime 库约 7.7 GB，其中 runtime_events 约 7.7 GB；本机 `/tmp` 所在卷余量约 22 GB，实际备份位置及恢复空间须在窗口前确认。上述是本机配置指向的数据，不冒充生产盘点。
+
+**本机切换前置步骤：** 确认目标确为上述两库和维护窗口；停止 API、worker、cron 与平台写入后再次核对 pending/running 数量；将两库分别做一致性备份并在隔离库恢复校验。清理仅限旧运行数据、其 checkpoint/event/lease/inbox 及平台对应 Thread ACL 与 run submission ledger，保留项目、用户、模型配置、Dear memory、skills 和 Store；清理范围按实际外键先核对，不能运行 `truncate_all()` 的 `CASCADE`。核对四类旧 scope 主表为空、平台 ACL/ledger 不再指向删除的 Thread 后，先升级 GraphHarbor 至 `008`、平台至 `20260925_0005`，再启动同版 API/worker 和平台，执行 Auth/业务 run/SSE/文件验收。任一步失败时保持停写，以整套旧应用和两库备份恢复；开放写入后不得直接覆盖新增数据。未确认目标和备份前，不执行这些步骤。
+
+**本机执行记录（2026-09-25）：** 已确认本机 PG17 的 `graphharbor_acceptance`、`platform_api` 为本轮目标，并在停止 local stack 后核对无 pending/running Run。用 PostgreSQL 17 `pg_dump` 分别生成权限 0600 的 `/tmp/graphharbor-boundary-20260925-prewipe-runtime.dump`（约 2.8 GB）与 `/tmp/graphharbor-boundary-20260925-prewipe-platform.dump`（约 1.7 MB），`pg_restore --list` 成功；这只验证归档可列目录，**未完成两库全量恢复演练**。按明确表名 `TRUNCATE ... RESTRICT` 清理 Runtime 的旧 Assistant/Thread/Run/Cron、checkpoint、event、lease、retry、inbox，及平台 `thread_access`、`run_requests`，没有使用 `CASCADE`；Dear memory 3 条和 skills 2 个保留。平台迁移至 `20260925_0005`，Runtime 迁移至 `008_remove_business_scope`，四类资源表旧 scope 列均已删除。当前 Runtime 库约 11 MB，Thread/Run/Event 均为 0，平台 ACL/ledger 均为 0；本机栈的 8123 `/ready` 和 2142 `/_system/health` 返回健康。这不代表 V-D07/V-D08 通过。
+
+**本机候选依赖限制：** 平台 `apps/runtime-service/uv.lock` 仍绑定同版本旧 PyPI wheel；从当前源码构建的双候选 wheel 已安装到该虚拟环境，但普通 `uv run --frozen` 会重新同步为旧 wheel。本轮栈用 `UV_NO_SYNC=1 bash scripts/local-stack.sh start` 启动，后续候选验收也必须保持 `UV_NO_SYNC=1`。正式交付前须锁定一个可重复安装的新版本或可审查的本地候选来源，否则用户直接启动将测到旧代码。
+
 ## 状态
 
-partial：D02/D03 有核心阶段实现；D01 数据盘点、旧 head 非空迁移、Store、worker 恢复与 Final V-D06—D08 未完成。不得据此切换生产。
+partial：D02/D03/D04/D05 有阶段实现；本机两库盘点、ACL 协调清理与 schema 切换已完成，但本机备份的完整恢复、可重复安装依赖、业务 run/HITL/文件正向链路及 Final V-D06—D08 尚未完成。2026-09-25 暂停后续实施，先处理[Runtime 流事件保留治理](../20260925-runtime-event-retention/README.md)；恢复顺序见本项目 README 的“暂停点与恢复入口”。worker 租约恢复已有回归，不能替代平台业务联合验收；不得据此切换生产。

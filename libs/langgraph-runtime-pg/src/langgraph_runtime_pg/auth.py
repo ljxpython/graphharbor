@@ -18,7 +18,9 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 
 class AuthenticationError(ValueError):
-    pass
+    def __init__(self, message: str, status_code: int = 401) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class AuthorizationError(ValueError):
@@ -49,11 +51,7 @@ def _correlation_value(value: object, field: str) -> str | None:
 
 
 def _runtime_context_secret() -> bytes:
-    value = (
-        os.environ.get("GRAPHHARBOR_RUNTIME_CONTEXT_SECRET")
-        or os.environ.get("GRAPHHARBOR_JWT_SHARED_SECRET")
-        or ""
-    ).strip()
+    value = os.environ.get("GRAPHHARBOR_RUNTIME_CONTEXT_SECRET", "").strip()
     if not value:
         raise RuntimeContextError("runtime context signing secret is not configured")
     return value.encode("utf-8")
@@ -258,7 +256,7 @@ class Principal:
         """Bind client retry keys to the authenticated generic identity."""
         if not key:
             return None
-        return sha256(f"{self.subject}\0{key}".encode()).hexdigest()
+        return "auth:" + sha256(f"{self.subject}\0{key}".encode()).hexdigest()
 
     @classmethod
     def from_claims(cls, claims: dict[str, Any]) -> Principal:
@@ -321,9 +319,14 @@ class Principal:
 
         jti = str(value("jti", value("delegation_id", subject)) or subject).strip()
         try:
-            auth_user = _auth_user_mapping(
-                user if isinstance(user, Mapping) else {"identity": subject}
-            )
+            if isinstance(user, Mapping) or callable(getattr(user, "keys", None)):
+                user_payload = dict(user)
+            elif callable(getattr(user, "model_dump", None)):
+                user_payload = user.model_dump()
+            else:
+                user_payload = {"identity": subject}
+            user_payload["identity"] = subject
+            auth_user = _auth_user_mapping(user_payload)
         except RuntimeContextError as exc:
             raise AuthenticationError(str(exc)) from exc
         return cls(
@@ -341,6 +344,17 @@ class Principal:
 def principal_from_scope(scope: Scope) -> Principal | None:
     value = scope.get("principal")
     return value if isinstance(value, Principal) else None
+
+
+def scoped_idempotency_key(principal: Principal | None, key: object | None) -> str | None:
+    if not key:
+        return None
+    value = str(key)
+    return (
+        principal.idempotency_key(value)
+        if principal is not None
+        else "anonymous:" + sha256(value.encode()).hexdigest()
+    )
 
 
 def in_principal_scope(resource: Any, principal: Principal | None) -> bool:
@@ -411,7 +425,7 @@ class PrincipalMiddleware:
             await _json_error(send, 403, str(exc))
             return
         except AuthenticationError as exc:
-            await _json_error(send, 401, str(exc))
+            await _json_error(send, exc.status_code, str(exc))
             return
         await self.app(scope, receive, send)
 
@@ -455,11 +469,11 @@ async def authenticate_with_auth_handler(
     except Exception as exc:
         status = getattr(exc, "status_code", None)
         detail = str(getattr(exc, "detail", exc))
-        if status is not None and int(status) < 500:
+        if status is not None:
             if int(status) == 403:
                 raise AuthorizationError(detail) from exc
-            raise AuthenticationError(detail) from exc
-        raise AuthenticationError(detail) from exc
+            raise AuthenticationError(detail, status_code=int(status)) from exc
+        raise AuthenticationError("authentication handler failed", status_code=500) from exc
     if result is None or result is False:
         raise AuthenticationError("custom authentication rejected the request")
     return result

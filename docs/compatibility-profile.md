@@ -223,6 +223,8 @@ Core Runs + Streaming v2 + Events v3 + HITL + Subgraphs
 
 未来官方新增能力不能自动算作已支持。
 
+当前候选的流历史期限存在明确差异：已结束 Run 的非终态原始事件在最后更新时间满 24 小时后由 worker 清理，终态和 checkpoint 保留。Run/Thread 的明确旧 `Last-Event-ID` 通过 SSE `error` 报 `cursor_expired`；Protocol 的明确旧 `since` 返回 HTTP 410、顶层 `code=cursor_expired`。无游标、Thread `Last-Event-ID: -`、Protocol `since=0` 是新订阅，旧会话应从 state/history 恢复。锁定的官方 `langgraph-api 0.13.0` 开发服务重启后即不回放，且无 `stream_resumable` 的完成 Run 不回放；GraphHarbor 当前完成 Run 仍保留窗口内事件。错误 Run 也有既存差异：官方 v2 流有 `error` 帧，GraphHarbor 的失败终态虽保存在 PG，v2 Run SSE 不输出该帧。此差异和未完成的故障/鉴权/平台 Web 验收见 [事件保留项目](projects/20260925-runtime-event-retention/README.md)，不能据此宣称全面官方兼容。
+
 ## 6. 垂直切片实施
 
 每个切片都沿完整链路实现：

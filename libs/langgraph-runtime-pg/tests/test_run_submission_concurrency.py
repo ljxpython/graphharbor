@@ -53,7 +53,7 @@ async def test_reject_serializes_concurrent_submissions_and_replays_key(pg_runti
 
 @pytest.mark.asyncio
 async def test_same_client_key_isolated_by_authenticated_identity(pg_runtime):
-    from langgraph_runtime_pg.auth import Principal
+    from langgraph_runtime_pg.auth import Principal, scoped_idempotency_key
     from langgraph_runtime_pg.database import connect
     from langgraph_runtime_pg.models import AssistantRow, ThreadRow
     from langgraph_runtime_pg.run_store import RunRepository
@@ -82,3 +82,4 @@ async def test_same_client_key_isolated_by_authenticated_identity(pg_runtime):
     bob = await submit("bob", bob_thread)
     assert alice != bob
     assert await submit("alice", alice_thread) == alice
+    assert scoped_idempotency_key(None, Principal(subject="alice").idempotency_key("retry")) != Principal(subject="alice").idempotency_key("retry")

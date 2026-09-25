@@ -13,8 +13,10 @@ from uuid import uuid4
 from langchain_core.runnables import RunnableConfig
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from starlette.exceptions import HTTPException
 
 from langgraph_runtime_pg.auth import Principal, principal_from_scope
+from langgraph_runtime_pg.authorization import authorize
 from langgraph_runtime_pg.graph_executor import thread_config
 
 
@@ -84,7 +86,7 @@ async def _open_graph(registry: Any, graph_id: str, config: RunnableConfig):
     yield getter(graph_id)
 
 
-def _tool_for_graph(graph_id: str, registry: Any):
+def _tool_for_graph(graph_id: str, registry: Any, auth_handler: Any | None = None):
     async def invoke(ctx: Context, **kwargs: Any) -> dict[str, Any]:
         try:
             request_context = ctx.request_context
@@ -93,6 +95,22 @@ def _tool_for_graph(graph_id: str, registry: Any):
         request = getattr(request_context, "request", None)
         principal = principal_from_scope(request.scope) if request is not None else None
         payload = kwargs["input"]
+        if auth_handler is not None and principal is None:
+            raise HTTPException(401, "Authentication required")
+        if request is not None:
+            user = principal.auth_user if principal is not None else None
+            assistant_filter = await authorize(
+                auth_handler, user, "assistants", "read", {"assistant_id": graph_id}
+            )
+            run_filter = await authorize(
+                auth_handler,
+                user,
+                "threads",
+                "create_run",
+                {"thread_id": None, "assistant_id": graph_id, "input": payload},
+            )
+            if assistant_filter or run_filter:
+                raise HTTPException(403, "MCP cannot apply resource metadata filters")
         config = thread_config(
             f"mcp-{uuid4()}",
             graph_id=graph_id,
@@ -108,7 +126,7 @@ def _tool_for_graph(graph_id: str, registry: Any):
     return invoke
 
 
-def create_mcp_transport(registry: Any) -> tuple[FastMCP, Any]:
+def create_mcp_transport(registry: Any, auth_handler: Any | None = None) -> tuple[FastMCP, Any]:
     """Build the MCP server and its mounted Starlette application."""
     server = FastMCP(
         "graphharbor",
@@ -127,7 +145,7 @@ def create_mcp_transport(registry: Any) -> tuple[FastMCP, Any]:
         ),
     )
     for graph_id in registry.ids():
-        server.add_tool(_tool_for_graph(graph_id, registry), name=graph_id)
+        server.add_tool(_tool_for_graph(graph_id, registry, auth_handler), name=graph_id)
     return server, server.streamable_http_app()
 
 

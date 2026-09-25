@@ -2,7 +2,7 @@
 
 调研日期：2026-09-24；同日补充 checkpoint 修剪与回滚修复结果。性质：技术调研、整改进度与证据索引，不是全量验收报告。
 
-更新日期：2026-09-25。Thread 输入校验与 OpenAPI 比较器进展见第 13 节；第 5、8、11 节中的 500、零差异和 10 passed 是最初调研证据，不再代表当前实现。
+更新日期：2026-09-25。业务边界实施现状见第 7 节，Thread 输入校验与 OpenAPI 比较器进展见第 13 节；第 5、8、11 节中的 500、零差异和 10 passed 是最初调研证据，不再代表当前实现。未标注整改结果的能力表和源码描述仍是 9 月 24 日的调研快照。
 
 ## 1. 结论
 
@@ -10,8 +10,8 @@
 
 三个问题的直接回答：
 
-1. **是否都实现了？没有。** Assistants、Threads、Runs、状态持久化、队列、SSE、HITL、Store REST 等已有实现；但完整 OpenAPI schema、资源级授权、完整并发策略、生产 cron 调度、生产 webhook、Store 自动注入、部分配置和协议能力仍有实质缺口。
-2. **是否还与业务耦合？有，需要修改。** `model_id`、`platform_trace_id`、固定 tenant/project 身份映射、专属 runtime context、DeepAgent workspace 辅助代码仍在核心源码中。不能把“删除了几个业务类”视为边界治理完成。
+1. **是否都实现了？没有。** Assistants、Threads、Runs、状态持久化、队列、SSE、HITL、Store REST 等已有实现；资源级授权已接入候选生产链路，但全入口兼容验收仍缺。完整 OpenAPI schema、并发策略、生产 cron 调度、生产 webhook、Store 自动注入、部分配置和协议能力仍有实质缺口。
+2. **业务边界解耦完成了吗？代码迁移已落地，整体验收未完成。** 核心 worker 不再解释 `model_id`/`platform_trace_id`，固定 tenant/project 身份与 SQL scope 已从当前模型和生产路径移除，DeepAgent workspace 已移出核心源码与候选包；业务授权、模型/trace 和 workspace 由平台负责。官方全入口 Auth 差分、业务 run/HITL、文件正向链路和维护切换仍缺证据，因此专项状态为 `partial`，不能宣称已完成或可上线，详见第 7 节。
 3. **怎么保证接口一样？** 固定官方版本，以官方 OpenAPI、同图双服务行为差分、官方 SDK/RemoteGraph、授权与故障场景组成持续门禁。比较器已从路径/方法扩展到部分结构契约比较，但完整规范与运行行为仍未对齐（见第 13 节）。
 
 **同日整改进度：** 第 6.2、6.3 节的 prune 授权范围与 rollback 历史误删问题已完成核心修复，并通过真实 PostgreSQL 专项和相关回归。治理项目仍为 `partial`：完整官方差分、规模性能和发布预演尚缺；不能据此升级为全量兼容。详见[修复项目](projects/20260924-checkpoint-mutation-safety/README.md)。
@@ -86,7 +86,7 @@ LangSmith 的组织管理、计费、部署控制平面、实验评估、托管 
 | MCP Server | 将图暴露为 MCP tools，协议与 schema 正确 | 有基础实现，未证明官方等价 | FastMCP Streamable HTTP；统一 `input: dict`，直接调用 graph |
 | A2A | 官方 agent-to-agent 服务契约 | 缺失 | 无 `/a2a/{assistant_id}` route，排除表明确排除 |
 | 自定义认证 | `Auth.authenticate`，用户上下文 | 已有部分 | 支持 `_authenticate_handler` 和 callable，保留部分 user 数据 |
-| 资源级授权 | `@auth.on.*` 事件、过滤器、Store namespace 改写 | 核心缺口 | 没有发现生产 handler 分发这些回调；固定 tenant/project scope 不能替代它 |
+| 资源级授权 | `@auth.on.*` 事件、过滤器、Store namespace 改写 | 候选实现已接入，待全入口差分 | 9 月 24 日未发现生产 handler 分发；9 月 25 日已接入通用 Auth，Thread 拒绝路径通过，官方事件/过滤器/Store 差分未完成，见第 6.1、7 节 |
 | Custom routes/lifespan/CORS | 用户应用扩展 | 已有部分 | app mount、lifespan、CORS 有；路由冲突优先级、middleware、mount prefix 等需逐项核对 |
 | 定制 Store/Checkpointer | 官方配置加载自定义后端 | 缺口 | CLI 接收配置，但生产 factory 固定 PostgreSQL 实现 |
 | JS/TS 图运行 | 运行 LangGraphJS 图 | 明确不支持 | CLI 检测 `node_version` 后报错；JS SDK 支持不代表 JS graph 支持 |
@@ -166,6 +166,8 @@ auth user {identity: bob}   -> tenant/project 均为 __default
 
 整改必须保留现有隔离保障，先接通通用授权机制、迁移现有使用方，再考虑移除固定平台字段；不能直接删除过滤条件。
 
+**2026-09-25 更新：** 上述 `PrincipalMiddleware` 与固定 scope 的观察是初始状态。当前生产路由已接入通用 Auth 授权，平台通过 runtime-service Auth 和平台 ACL 回查执行项目及 Thread 规则；固定 tenant/project SQL scope 已从候选实现移除。已验证私有/共享/接管/撤权等 Thread 路径，但官方全入口授权事件与拒绝副作用差分未完成，不能将局部验证写成完整授权兼容。
+
 ### 6.2 prune 的 keep_latest 授权范围：核心修复已完成
 
 原实现查询授权 rows 后，却将客户端原始 thread_ids 传入 saver；非法 strategy 也会进入 keep_latest 分支。锁定的 checkpoint-postgres 3.1.2 的 `aprune` 是未实现 stub，因此初始发现是源码风险，不是默认后端已发生越权删除的实测结论。
@@ -194,11 +196,11 @@ PostgreSQL keep_latest 已实现：保留各 namespace 最新 checkpoint、pendi
 
 这不是完整双端差分，不能宣称严格 API 等价。剩余验证包括 running/batch/repeated/auth/input 官方矩阵、大历史与并发压力、故障部署演练及负责人验收。项目状态为 **partial**，详见[实现记录](projects/20260924-checkpoint-mutation-safety/implementation/01-transactional-checkpoint-maintenance.md)和[验证记录](projects/20260924-checkpoint-mutation-safety/verification.md)。
 
-## 7. 业务边界：哪些要迁移，哪些应保留
+## 7. 业务边界：原始发现与实施进度
 
 判断标准不是字段名字里有没有 business，而是 **Server 是否解释了某个使用方特有的语义并替它作决定**。
 
-| 位置 | 耦合内容 | 建议 |
+| 原始位置 | 9 月 24 日发现的耦合 | 原建议 |
 | --- | --- | --- |
 | `production_worker.py` metadata/trace 构建 | 读取 `configurable.model_id`；读取/写入 `platform_trace_id` | 不再作为核心预定义字段；由 graph factory 或上层 tracing 接入，必要时走不透明 metadata |
 | `observability.py` 默认 allowlist | `model_id`、`platform_trace_id`；额外识别 `tool_names` | 默认仅留通用运行标识；工具名可作为不透明图事件数据，不应特判业务配置字段 |
@@ -221,7 +223,21 @@ PostgreSQL keep_latest 已实现：保留各 namespace 最新 checkpoint、pendi
 
 本轮核心 Python 源码搜索未发现固定 miaomiao/deepseek 模型供应商路由；明确问题集中在字段解释、身份结构和专用辅助模块，不能夸大成“运行时已经硬编码所有模型业务”。
 
-现有 `20260909-graphharbor-business-boundary-separation/FINAL_SUMMARY.md` 声称“移除所有业务耦合”，与本次源码及 20260923 open-issues 不一致。应改为“部分迁移完成，仍有存量字段与隔离契约待治理”。
+现有 `20260909-graphharbor-business-boundary-separation/FINAL_SUMMARY.md` 曾声称“移除所有业务耦合”，与 9 月 24 日源码及 20260923 open-issues 不一致。以下为后续整改进度，不能用旧总结代替当前验收。
+
+### 2026-09-25 实施现状
+
+| 边界问题 | 已落地且有证据的改动 | 尚未完成的验收 |
+| --- | --- | --- |
+| model / platform trace | 核心 worker 不再提取模型、项目或平台 trace 字段；默认 trace 只含通用运行标识，应用 `configurable` 同名字段可透传。平台 graph factory、模型引用和 Langfuse/OTel 继续解释业务数据；PG17 生产契约测试 65 passed、4 skipped，平台模型/工具/观测定向测试 58 passed | 正常/失败/cancel/retry/HITL/子图并发的业务 trace 联合关联、伪造字段与观测故障矩阵尚未完成；不以静态字符串搜索代替行为验证。见[模型与 trace 专题](projects/20260925-runtime-business-boundary-decoupling/02-model-and-tracing.md) |
+| 固定 tenant/project 身份结构 | 核心 Principal 接受仅含 identity 的用户；执行身份改为绑定 run/thread 的通用 v2 签名快照。当前模型与查询不再持有固定 tenant/project scope，迁移 `008_remove_business_scope` 在隔离 PG17 对非空旧表拒绝、清理后升级及备份恢复已验证。本机两库旧运行数据已协调清理并迁移；平台保留业务身份、授权和 ACL。真实 HTTP 与治理浏览器用例覆盖 Thread 私有/共享/接管、服务账号 grant/token 撤销；官方 0.13.0 的 identity-only Auth/Thread/`runs/wait`/HITL/SSE 子集差分通过 | 官方全入口 Auth/API/SSE 差分、排队/HITL 完整业务执行、外部 Store 消费者盘点、本机归档完整恢复仍缺。见[身份授权专题](projects/20260925-runtime-business-boundary-decoupling/01-identity-and-authorization.md)与[迁移专题](projects/20260925-runtime-business-boundary-decoupling/04-data-migration-and-cutover.md) |
+| DeepAgent workspace | `deepagent_workspace.py` 已从 GraphHarbor 源码、wheel 和 sdist 移除；平台继续使用自己的 `runtime_service.workspace.deepagent`，平台 workspace 定向测试 54 passed，候选包安装并加载三份平台配置各 65 条路由 | Showcase/DearFlow 浏览器文件创建、预览、下载和 zip、terminal、skills、fork/restart/HITL 恢复尚未联合验收。见[workspace 专题](projects/20260925-runtime-business-boundary-decoupling/03-workspace-and-packaging.md) |
+
+**结论：三项指定耦合的核心代码迁移已完成，但“业务边界需求完成”尚不能判定为是。** 已跑的 GraphHarbor 隔离 PG17 全组为 149 passed、18 skipped，langhost 全组 58 passed；平台 ACL/gateway 定向 43 tests（3 skipped）、Runtime Auth 46 passed、治理浏览器 10 passed。官方 Auth 子集差分通过，但全入口、业务执行、文件正向链路和目标数据切换仍缺证据。平台旧 schema 的 Thread 500 已定位，现由启动检查明确拦截，现有数据库尚未迁移。项目状态仍为 [`partial`](projects/20260925-runtime-business-boundary-decoupling/README.md)。
+
+**2026-09-25 本机切换更新：** 上段所述“现有数据库尚未迁移”是当时状态。本机 PG17 两库已停写、归档、清理旧运行历史并迁移；Runtime 现为 `008_remove_business_scope`，平台为 `20260925_0005`。清理前 57 Threads、324 Runs、434,742 条事件，约 7.7 GB Runtime 库几乎全部在 `runtime_events`；清理后 Runtime 11 MB、Thread/Run/Event 均为 0。归档目录已核对，完整恢复未演练；候选包 local stack 健康，但平台锁文件仍绑定旧 PyPI wheel，须以 `UV_NO_SYNC=1` 保持本机候选安装。专项仍为 `partial`，业务 run/HITL、文件正向链路和最终差分未完成。
+
+**2026-09-25 优先级调整与实施进度：** 高频流事件逐条永久保存在 `runtime_events` 的容量问题另立[Runtime 流事件保留治理](projects/20260925-runtime-event-retention/README.md)。已实现 24 小时已结束 Run 原始事件保留、分批清理与三入口过期游标响应；隔离 PG17 的 10,000 条增量清理实测 0.398s，新增失败终态保留回归后四文件定向测试 100 passed、4 skipped。候选双 wheel 已在独立 Runtime/Platform PG17 库和端口通过 Thread 创建/读取、state/history、Graph 搜索及未登录拒绝；但官方错误 Run 的 `error` 帧与 GraphHarbor v2 存在既有映射差异，官方超窗/鉴权、撤权重连、平台 Web/业务 Run、稳定容量仍未完成，项目为 `partial`。业务边界专项暂缓后续实施，状态也为 `partial`；已完成证据、候选环境限制及恢复顺序见其[暂停点与恢复入口](projects/20260925-runtime-business-boundary-decoupling/README.md)。事件保留项目完成不自动使业务边界专项完成。
 
 ## 8. 现有兼容保障为什么不够
 
@@ -418,7 +434,7 @@ asyncio.run(main())
 - [protocol_api.py：command 分发和 SSE](../libs/langhost/src/langhost/protocol_api.py)
 - [streaming.py：Run/Thread SSE](../libs/langhost/src/langhost/streaming.py)
 - [cli.py：配置转交、JS 限制、worker 分支](../libs/langhost/src/langhost/cli.py)
-- [auth.py：Principal、固定 scope、签名上下文、认证](../libs/langgraph-runtime-pg/src/langgraph_runtime_pg/auth.py)
+- [auth.py：通用 Principal、v2 签名上下文、认证](../libs/langgraph-runtime-pg/src/langgraph_runtime_pg/auth.py)
 - [production.py：生产 lifespan](../libs/langgraph-runtime-pg/src/langgraph_runtime_pg/production.py)
 - [production_worker.py：实际 worker](../libs/langgraph-runtime-pg/src/langgraph_runtime_pg/production_worker.py)
 - [run_store.py：提交与 claim](../libs/langgraph-runtime-pg/src/langgraph_runtime_pg/run_store.py)
@@ -426,7 +442,7 @@ asyncio.run(main())
 - [graph_executor.py：原生执行和上下文](../libs/langgraph-runtime-pg/src/langgraph_runtime_pg/graph_executor.py)
 - [store.py：生产 Store 初始化](../libs/langgraph-runtime-pg/src/langgraph_runtime_pg/store.py)
 - [observability.py：默认 trace keys](../libs/langgraph-runtime-pg/src/langgraph_runtime_pg/observability.py)
-- [deepagent_workspace.py：核心源码中的专用辅助代码](../libs/langgraph-runtime-pg/src/langgraph_runtime_pg/deepagent_workspace.py)
+- [Workspace 移除与平台承接记录](projects/20260925-runtime-business-boundary-decoupling/03-workspace-and-packaging.md)
 - [MCP transport](../libs/langhost/src/langhost/mcp_transport.py)
 - [官方比较器](../scripts/compare_official_protocol.py)与[对应测试](../libs/langhost/tests/test_official_protocol_compare.py)
 - [常规 CI](../.github/workflows/ci.yml)与[手动兼容升级流程](../.github/workflows/compatibility-upgrade.yml)

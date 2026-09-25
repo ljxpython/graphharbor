@@ -44,7 +44,7 @@ GraphHarbor 默认日志/事件只记录 run_id、thread_id、assistant_id、ass
 | B01 | P tokens.py、gateway presentation/http.py、runtime/auth.py | 按新契约统一签发和传递可信关联字段；不增加旧委托兼容路径 | V-B01 | 部分完成：签发端已支持并校验 request/platform trace；定向单测通过 |
 | B02 | P observability/langfuse.py、otel.py 和现役 graph factories | 模型与业务 trace 完整，复用现有解析链 | V-B02—B04 | 部分完成：客户端同名 request/platform trace 不再进入可信 trace；37 项观测测试通过 |
 | B03 | G production_worker.py、observability.py、graph_executor.py；依赖 A05 | 移除业务字段特判与默认 trace；保留通用诊断 | V-B03—B05 | 阶段完成：worker 不再过滤应用 configurable 中恰好名为 tenant/project/user/role/permissions 的普通业务配置，也不再提取 model/platform trace；默认诊断只保留通用 run/thread/assistant/graph/request 字段。2026-09-25 PG17 隔离库 `test_production_contract.py` 65 passed、4 skipped；核心观测、worker 自定义字段透传回归覆盖通过。V-B03 全部生命周期及平台联合验收仍待 Final |
-| B04 | G/P 配置、示例、发行说明、边界检查 | 再引入业务特判会被检查发现 | V-B05 + Final | 待开始 |
+| B04 | G/P 配置、示例、发行说明、边界检查 | 再引入业务特判会被检查发现 | V-B05 + Final | 部分完成：核心能力描述改为 application-auth，回归测试保护；完整业务字段静态/运行边界检查和 Final 未完成 |
 
 ## 验证要求与记录
 

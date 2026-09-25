@@ -40,13 +40,39 @@
 
 表为覆盖清单，不宣称所有行都已经符合参照。P0 必须列出实际 method/path→handler→resource/action→对象范围→对应测试；参照未支持的扩展单列，不能发明官方事件名。
 
+### 2026-09-25 生产挂载路由核对
+
+按 `langhost/server.py:create_app` 实际挂载合并同类路径。GET `/assistants` 与 GET `/threads` 的包装函数调用核心 search handler。MCP、protocol commands/events 为 GraphHarbor 扩展，不能冒充官方 Auth 事件。
+
+| method / path 组 | handler | Auth resource.action / 对象范围 |
+|---|---|---|
+| GET `/ok` `/live` `/ready` `/info` `/openapi.json` `/docs` `/metrics` | server 公共处理器 | 无资源事件，middleware 公开范围单独核对 |
+| GET `/assistants`，POST `/assistants/search` `/assistants/count` | assistants_search/count | assistants.search，metadata SQL filter 先于分页/count |
+| POST `/assistants` | assistants_create | assistants.create；重复 ID 另查 assistants.read |
+| GET `/assistants/{id}` `/graph` `/schemas` `/subgraphs`，POST `/versions` | assistants_get/graph/schemas/subgraphs/versions | assistants.read，目标 ID |
+| PATCH/DELETE `/assistants/{id}`，POST `/latest` | assistants_update/delete/latest | assistants.update/delete，目标 ID |
+| GET `/threads`，POST `/threads/search` `/threads/count` | threads_search/count | threads.search，metadata SQL filter 先于分页/count |
+| POST `/threads`，GET/PATCH/DELETE `/threads/{id}` | threads_create/get/update/delete | threads.create/read/update/delete，目标 ID |
+| POST `/threads/{id}/copy` `/threads/prune` | threads_copy/prune | 源 read + 目标 create；prune 逐目标 delete/update |
+| GET/POST/PATCH `/threads/{id}/state*` `/history` | threads_state/update_state/history | threads.read/update，目标 ID |
+| POST `/runs` `/runs/stream` `/runs/wait` `/runs/batch` 与 `/threads/{id}/runs*` 创建型路径 | runs_create 与包装处理器 | threads.create_run + assistants.read；隐式 thread 还需 threads.create |
+| GET/DELETE `/threads/{id}/runs/{run_id}`，GET `/threads/{id}/runs` `/join` | runs_get/delete/list/join | threads.read/delete/search，run 绑定目标 thread |
+| POST `/threads/{id}/runs/{run_id}/cancel` `/runs/cancel` | runs_cancel/cancel_many | threads.update，逐 run 核对 |
+| GET `/runs/{run_id}/stream` `/threads/{id}/runs/{run_id}/stream` `/threads/{id}/stream` | streaming | threads.read，首连、重放、实时发送与心跳复核 |
+| POST `/runs/crons*`，PATCH/GET/DELETE `/runs/crons/{id}` | cron handlers | crons.create/search/update/read/delete；创建还读 assistant/thread |
+| PUT/GET/DELETE `/store/items`，POST `/store/items/search` `/store/namespaces` | store_api | store.put/get/delete/search/list_namespaces，namespace 由应用授权 |
+| POST `/threads/{id}/commands` `/stream/events` | protocol_api | run.start→threads.create_run；input.respond→threads.update/create_run；事件流→threads.read |
+| `/mcp` tools/call；`/` 自定义 app | mcp_transport；应用 app | MCP 调用 assistants.read + threads.create_run，无法应用 filter 时拒绝；自定义 app 自行授权 |
+
+静态路由清单不替代官方动态 Auth 差分，也不证明所有拒绝路径已覆盖。
+
 ### 2. 平台授权适配器
 
 继续使用 `runtime_service/auth/platform.py` 和 `runtime/auth.py`。每个资源处理器显式调用一个公共平台 guard，核对 operation、tenant/project、assistant/thread、context_hash 与所需权限；不能依赖全局 handler 自动叠加。
 
 平台保留真实 user identity，不能改成 project service identity 来绕开多租户。角色、模型与工具策略只在平台解释。read 委托不得创建/更新/删除；run-create 不得用于 workspace、terminal、memory 或其他会话；自定义操作令牌拒绝所有原生资源操作。现有网关用 read 委托执行的写入必须同步改为目标绑定的相应操作委托。
 
-metadata 中 tenant_id/project_id 是**平台保留业务键**：创建时由认证事实写入；更新时拒绝改动或覆盖为原值；调用者同名字段不能提供权限。当前已有 project_id，优先复用，不新增一套复杂嵌套 schema。历史回填以旧隔离列为可信来源，冲突停止迁移。
+metadata 中 tenant_id/project_id 是**平台保留业务键**：创建时由认证事实写入；更新时拒绝改动或覆盖为原值；调用者同名字段不能提供权限。当前已有 project_id，优先复用，不新增一套复杂嵌套 schema。旧运行历史按 04 的维护窗口方案清理，不从旧隔离列回填。
 
 ACL 仍由 platform-api 的 thread_access.get / require_action / visible_records 决定。推荐在现有 runtime_gateway 内新增一个小型内部批量授权 HTTP 端点，复用现有 memory-authorization 的 HMAC/时间窗/httpx 模式，不能把“个人记忆允许”直接当成“会话允许”。
 
@@ -84,9 +110,9 @@ ACL 仍由 platform-api 的 thread_access.get / require_action / visible_records
 
 | ID | 改动内容 / 代码位置 | 预期结果 | 验证项 | 状态 |
 |---|---|---|---|---|
-| A01 | G server/core_api/protocol_api/streaming/mcp_transport/store_api 挂载清单；锁定官方 Auth probe | 明确每个入口的事件和边界 | V-A01、V-A02 | 进行中：主路由与 SQL scope 已盘点；完整路由矩阵、官方 probe 未完成 |
-| A02 | G auth.py、生产 handlers；提取可复用纯 filter 逻辑 | 新授权在完整候选版本生效；固定 scope 直接移除，联合验证后部署 | V-A01—A04 | 部分完成：REST/SSE Auth filter 与撤权检查已接入；Principal 与 ORM 固定 scope 已移除。cron/MCP/Store/协议全入口拒绝副作用差分仍待验，禁止发布 |
-| A03 | P auth/platform.py、runtime/auth.py、gateway presentation + application；内部授权端点 | operation/目标校验、ACL 复核、可信 metadata | V-A03—A06 | 部分完成：内部批量 ACL 端点与线程回查已完成；创建回查限 pending 且 owner/project 匹配；Runtime Auth 限制委托 operation 并 fail-closed。2026-09-25 平台 ACL/runtime delegation 定向 pytest：36 passed、3 skipped、335 subtests passed；Runtime Auth：43 passed。全入口授权差分、撤权链路和 production API 直连矩阵未完成 |
+| A01 | G server/core_api/protocol_api/streaming/mcp_transport/store_api 挂载清单；锁定官方 Auth probe | 明确每个入口的事件和边界 | V-A01、V-A02 | 部分完成：实际挂载核心路由与扩展入口已分组映射；官方动态 Auth probe 未完成 |
+| A02 | G auth.py、生产 handlers；提取可复用纯 filter 逻辑 | 新授权在完整候选版本生效；固定 scope 直接移除，联合验证后部署 | V-A01—A04 | 部分完成：REST/SSE Auth filter 与撤权检查已接入；MCP tools/call 现先授权，缺身份或无法应用 filter 则拒绝；cron/Store/协议 run.start 拒绝无副作用用例通过。全入口动态差分仍待验，禁止发布 |
+| A03 | P auth/platform.py、runtime/auth.py、gateway presentation + application；内部授权端点 | operation/目标校验、ACL 复核、可信 metadata | V-A03—A06 | 部分完成：内部批量 ACL 端点与线程回查已完成；创建回查限 pending 且 owner/project 匹配；Runtime Auth 限制委托 operation 并 fail-closed。服务账号 token/grant 撤销、浏览器共享/接管与 operator 目录刷新通过。完整入口授权差分和跨资源直连矩阵未完成 |
 | A04 | P gateway create_thread/copy/补偿与 thread_access | 创建、超时、对账不发生授权空窗 | V-A06 | 部分完成：先 ACL 预留；`thread-create` UUID 绑定且不伪造 assistant；明确 4xx 清理，5xx/504 保留 pending 预留；用户可对账自身 pending 线程，Runtime 用受限 reconcile 委托读取并置 ready。探测 404 时 504 错误扩展现在返回 UUID 与 reconcile 路径；平台服务层 22 项通过、3 项跳过。其他故障注入和完整联合验收未完成 |
 | A05 | G auth.py/core_api/graph_executor/production_worker；P graph factories | v2 传递任意合法自定义 user；无业务特判 | V-A07—A08 | 部分完成：v2 accepted_at 快照、run/thread 绑定、opaque auth_user、MCP 同步；平台敏感策略与排队/重启全链路待验 |
 | A06 | 完成 04 后删除固定 Principal/scope/旧身份分支及陈旧测试假设 | 核心运行链不依赖固定身份结构 | V-A09 + Final | 部分完成：固定 Principal 字段、SQL 列与查询已删除；旧 helper 和测试仍需收口，Final 未完成 |
@@ -117,4 +143,18 @@ ACL 仍由 platform-api 的 thread_access.get / require_action / visible_records
 
 ## 状态
 
-partial：A02/A03/A04/A05/A06 有阶段实现，A01、完整 PostgreSQL 跨用户验证和 Final 尚未完成；候选代码虽移除旧 SQL 列，仍禁止生产切换。
+**2026-09-25 候选最终验证：** GraphHarbor runtime-pg 全组在隔离 PG17 串行执行 148 passed、18 skipped；langhost 全组另起进程 58 passed；mypy 37 个源文件与相关 Ruff 通过。安装双包候选后，平台 Runtime Service 定向 164 passed，Platform API ACL/gateway 51 passed、3 skipped、335 subtests passed。临时平台 API `127.0.0.1:2342` 和候选 Runtime `127.0.0.1:8323` 通过真实 HTTP 创建 Thread：同项目另一用户私有读取 403，共享 read/comment 后读取 200、修改 403，撤权后读取 403，所有者仍可读取 200；临时服务已停止。此前同进程数据库测试会被测试自身改写的 `DATABASE_URI` 干扰，最终分进程运行均通过。官方全入口动态 Auth 差分及 SSE 撤权并发仍未执行。
+
+**2026-09-25 最终复跑：** 在两个独立进程分别运行 `DATABASE_URI=postgresql+asyncpg://lijiaxin@localhost:5432/graphharbor_boundary_pg17 BOUNDARY_TEST_DATABASE_URI=postgresql+asyncpg://lijiaxin@localhost:5432/graphharbor_boundary_pg17 REDIS_URI=redis://localhost:6379/0 uv run pytest -q libs/langgraph-runtime-pg/tests` 与同环境的 `uv run pytest -q libs/langhost/tests`，结果分别为 148 passed、18 skipped 和 58 passed。首次复跑发现旧认证测试用普通 `ValueError` 表示缺少凭据，当前契约将未声明状态的异常脱敏为 500；测试 fixture 改用 `Auth.exceptions.HTTPException(401)` 后定向和全组均通过，相关 Ruff 通过。平台 ACL 当前权限回查单测 1 passed，平台 `scripts/check_docs.py` 通过。
+
+**2026-09-25 实际委托链复核：** 在候选 wheel Runtime + 临时 SQLite 平台服务上，owner 创建 Thread 为 200；管理员无 takeover 删除为 403；授予限时 takeover 后管理员读取为 200、通过 `thread-delete` 委托删除为 200。另验证 owner 删除可作为 E2E 失败清理路径。修复 platform browser governance fixture：服务 teardown 时 ACL HTTP 监听已关闭，不能再从 lifespan teardown 调 Runtime；fixture 改为检查遗留 ACL 记录，测试必须在平台仍在线时经网关清理。临时服务已停止。
+
+**2026-09-25 服务账号与目录追加验证：** 平台委托签入服务账号 `credential_id`，Runtime 只将已验签值放入 HMAC ACL 回查；平台按 token 所属账号、状态、到期时间和项目 grant 重建 actor。SQLite 单测覆盖私有拒绝、grant 与项目共享同时满足后放行、冒用其他账号 token、grant 撤销、token 过期及撤销后拒绝。仅平台 operator/superadmin 的 read 委托允许 Graph 目录搜索，真实 `/api/runtime/graphs/refresh` 为 200。平台 ACL/gateway 43 tests（3 skipped）、Runtime Auth 46 passed；候选 Runtime + 平台 API + Web 的治理浏览器文件 10 passed，含私有/共享/接管、服务账号撤权、子资源拒绝与浏览器身份失效。旧版用户创建两步 E2E 与当前一次提交页面不符，已按现行流程修正并在全文件复跑通过。文件正向操作、业务 run/HITL 与官方全入口动态差分仍缺。
+
+**2026-09-25 事件保留候选复核：** 独立 PG17 双库和候选双 wheel 联调中，平台超级管理员创建项目后 Graph 搜索曾返回 403：网关把项目角色优先签入委托，Runtime 的全局目录搜索只接受平台 operator/superadmin。平台网关现优先签发已有平台级角色，普通项目角色仍不升权；`test_runtime_gateway_http_matrix.py` 整文件 3 tests 通过，错误级 Ruff 通过。隔离 HTTP 重测 `/api/langgraph/graphs/search` 200（4 图）、Thread 创建 200；本地启动脚本也补齐 `PLATFORM_THREAD_AUTHORIZATION_URL`，避免创建 Thread 时 500。平台 Web/业务 Run/HITL 尚未因此验收。
+
+**2026-09-25 官方差分与平台 schema 复核：** 隔离 API/worker 与官方 `langgraph dev` 0.13.0 对同一 identity-only Auth fixture 的 Thread 过滤/拒绝、`runs/wait`、HITL 和 SSE 错误事件差分通过；这不是全入口矩阵，V-A01/V-A04 仍未勾选。现有平台 2142 的 Thread search/count/create 返回 500；平台日志确认 `thread_access.provisioning_status` 列缺失，创建请求尚未抵达 Runtime。平台 API 启动新增 schema 准入检查，缺少 `20260925_0005` 所需列时明确拒绝启动；临时 SQLite 旧 schema 回归 3 passed，Alembic 空库升级/回退 1 passed。现有平台数据库未迁移。
+
+**2026-09-25 本机迁移后：** 上段 500 属迁移前状态。本机平台库现为 `20260925_0005`，Runtime 库为 `008_remove_business_scope`；8123 `/ready` 与 2142 `/_system/health` 健康。旧 Thread ACL 与 run submission ledger 已协调清理，后续新建 Thread 仍需经平台 ACL 正向联测。官方全入口矩阵和业务 run/HITL 尚未完成。
+
+partial：A02/A03/A04/A05/A06 有阶段实现，A01 官方全入口 Auth 差分和 Final 尚未完成；已完成的 Thread HTTP 链路不能代替所有资源与 SSE 拒绝路径，仍禁止生产切换。

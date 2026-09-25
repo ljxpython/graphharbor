@@ -626,6 +626,78 @@ class RunRepository:
         await session.flush()
         return rows
 
+    async def prune_expired_events(
+        self,
+        session: Any,
+        *,
+        retention_seconds: int,
+        batch_size: int = 1000,
+        now: datetime | None = None,
+    ) -> int:
+        """Delete one bounded batch from an old terminal run and retain replay watermarks."""
+        if retention_seconds <= 0 or batch_size <= 0:
+            return 0
+        cutoff = (now or datetime.now(UTC)) - timedelta(seconds=retention_seconds)
+        expired = exists(
+            select(1).where(
+                RuntimeEventRow.run_id == RunRow.run_id,
+                RuntimeEventRow.created_at < cutoff,
+                RuntimeEventRow.terminal.is_(False),
+            )
+        )
+        run = await session.scalar(
+            select(RunRow)
+            .where(
+                RunRow.status.in_([status.value for status in RunStatus if is_terminal(status)]),
+                RunRow.updated_at < cutoff,
+                expired,
+            )
+            .order_by(RunRow.updated_at, RunRow.run_id)
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        )
+        if run is None:
+            return 0
+        event_ids = list(
+            (
+                await session.scalars(
+                    select(RuntimeEventRow.event_id)
+                    .where(
+                        RuntimeEventRow.run_id == run.run_id,
+                        RuntimeEventRow.created_at < cutoff,
+                        RuntimeEventRow.terminal.is_(False),
+                    )
+                    .order_by(RuntimeEventRow.sequence)
+                    .limit(batch_size)
+                )
+            ).all()
+        )
+        if not event_ids:
+            return 0
+        deleted_sequences = list(
+            (
+                await session.scalars(
+                    delete(RuntimeEventRow)
+                    .where(RuntimeEventRow.event_id.in_(event_ids))
+                    .returning(RuntimeEventRow.sequence)
+                )
+            ).all()
+        )
+        if not deleted_sequences:
+            return 0
+        watermark = max(deleted_sequences)
+        run.event_pruned_through = max(run.event_pruned_through, watermark)
+        if run.thread_id is not None:
+            await session.execute(
+                update(ThreadRow)
+                .where(ThreadRow.thread_id == run.thread_id)
+                .values(
+                    event_pruned_through=func.greatest(ThreadRow.event_pruned_through, watermark)
+                )
+            )
+        await session.flush()
+        return len(deleted_sequences)
+
     async def requeue_expired(self, session: Any, *, now: datetime | None = None) -> int:
         now = now or datetime.now(UTC)
         self.last_requeued_events = []

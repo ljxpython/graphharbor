@@ -228,8 +228,8 @@ async def test_core_rest_contract_covers_resources_and_errors(tmp_path: Path) ->
         assert (
             await client.post("/threads/prune", json={"thread_ids": [thread_id, copied_thread_id]})
         ).status_code == 200
-        assert (await client.delete(f"/threads/{copied_thread_id}")).status_code == 204
-        assert (await client.delete(f"/threads/{thread_id}")).status_code == 204
+        assert (await client.delete(f"/threads/{copied_thread_id}")).status_code == 404
+        assert (await client.delete(f"/threads/{thread_id}")).status_code == 404
         assert (await client.delete(f"/assistants/{assistant_id}")).status_code == 204
 
         metrics = await client.get("/metrics")

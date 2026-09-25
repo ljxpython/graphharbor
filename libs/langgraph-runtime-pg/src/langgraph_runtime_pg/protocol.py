@@ -96,7 +96,7 @@ def capability_document() -> dict[str, Any]:
         "implementation_profile": "core-resource-foundation",
         "run_statuses": sorted(PUBLIC_RUN_STATUSES),
         "capabilities": [item.as_dict() for item in CORE_CAPABILITIES],
-        "authentication": {"production": "platform-api-delegation-jwt"},
+        "authentication": {"production": "application-auth"},
     }
 
 

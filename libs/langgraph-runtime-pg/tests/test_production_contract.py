@@ -1086,6 +1086,19 @@ def test_runtime_context_does_not_reuse_external_jwt_issuer_and_audience(monkeyp
     assert restored["auth_user"] == context["auth_user"]
 
 
+def test_runtime_context_never_falls_back_to_external_jwt_secret(monkeypatch) -> None:
+    from langgraph_runtime_pg.auth import RuntimeContextError, sign_runtime_context
+
+    monkeypatch.delenv("GRAPHHARBOR_RUNTIME_CONTEXT_SECRET", raising=False)
+    monkeypatch.setenv("GRAPHHARBOR_JWT_SHARED_SECRET", "external-jwt-secret")
+    with pytest.raises(RuntimeContextError, match="signing secret is not configured"):
+        sign_runtime_context(
+            {"auth_user": {"identity": "alice"}, "permissions": []},
+            run_id="run-1",
+            thread_id=None,
+        )
+
+
 def test_schema_models_include_durable_ownership_and_events() -> None:
     from langgraph_runtime_pg.models import RunLeaseRow, RunRow, RuntimeEventRow, RuntimeSchemaRow
 
@@ -1105,11 +1118,11 @@ async def test_migration_is_repeatable_and_schema_head_is_recorded(pg_runtime) -
     from langgraph_runtime_pg.database import connect, get_database_uri
     from langgraph_runtime_pg.migrate import upgrade_head
 
-    assert upgrade_head(get_database_uri()) == "008_remove_business_scope"
-    assert upgrade_head(get_database_uri()) == "008_remove_business_scope"
+    assert upgrade_head(get_database_uri()) == "009_event_retention_watermarks"
+    assert upgrade_head(get_database_uri()) == "009_event_retention_watermarks"
     async with connect() as conn:
         revision = await conn.session.scalar(text("SELECT version_num FROM alembic_version"))
-    assert revision == "008_remove_business_scope"
+    assert revision == "009_event_retention_watermarks"
 
 
 @pytest.mark.asyncio
@@ -1310,7 +1323,9 @@ async def test_production_auth_rejects_missing_management_and_scope_override(
     @auth.authenticate
     async def authenticate(authorization: str | None):
         if not authorization or not authorization.startswith("Bearer "):
-            raise ValueError("missing authorization header")
+            raise Auth.exceptions.HTTPException(
+                status_code=401, detail="missing authorization header"
+            )
         claims = jwt.decode(
             authorization.removeprefix("Bearer "),
             secret,
@@ -1968,6 +1983,7 @@ async def test_success_commit_failure_never_publishes_completed(pg_runtime, monk
     async with connect() as conn:
         row = await conn.session.get(RunRow, run_id)
         assert row is not None and row.status == "pending"
+
         events = (
             await conn.session.scalars(
                 select(RuntimeEventRow).where(RuntimeEventRow.run_id == run_id)
@@ -2239,6 +2255,18 @@ async def test_worker_kill_is_recovered_by_lease_reaper(pg_runtime, monkeypatch)
     async with connect() as conn:
         row = await conn.session.get(RunRow, run_id)
         assert row is not None and row.status == "pending"
+        row.next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+        await conn.session.flush()
+
+    async def complete_invoke(*_args, **_kwargs):
+        return SimpleNamespace(value={"recovered": True}, interrupts=[])
+
+    monkeypatch.setattr("langgraph_runtime_pg.production_worker.invoke_graph", complete_invoke)
+    recovery = ProductionWorker(SimpleNamespace(open=_open_fake_graph), owner="recovery-worker")
+    assert await recovery.run_once()
+    async with connect() as conn:
+        row = await conn.session.get(RunRow, run_id)
+        assert row is not None and row.status == "success"
 
 
 @pytest.mark.asyncio
@@ -2492,6 +2520,7 @@ async def test_owned_server_run_sse_replays_durable_events(pg_runtime, monkeypat
         run.status = RunStatus.SUCCESS.value
         run.reason = RunReason.COMPLETED.value
         run.event_seq = 5
+        run.event_pruned_through = 3
         conn.session.add(
             RuntimeEventRow(
                 run_id=run.run_id,

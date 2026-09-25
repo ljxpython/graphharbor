@@ -18,6 +18,7 @@ from starlette.responses import JSONResponse, Response
 from langgraph_runtime_pg.auth import (
     in_principal_scope,
     principal_from_scope,
+    scoped_idempotency_key,
     sign_runtime_context,
 )
 from langgraph_runtime_pg.authorization import authorize, metadata_predicate
@@ -797,7 +798,7 @@ async def threads_update(request: Request) -> JSONResponse | Response:
 async def threads_delete(request: Request) -> JSONResponse | Response:
     row, principal, thread_id = await _get_thread(request, action="delete")
     if row is None or thread_id is None:
-        return _no_content()
+        return _error("thread not found", 404)
     async with connect() as conn:
         stored = await conn.session.get(ThreadRow, thread_id)
         if stored is not None and in_principal_scope(stored, principal):
@@ -1233,7 +1234,7 @@ async def runs_create(
         if trusted_context is not None:
             run_payload["runtime_context"] = trusted_context
         raw_idempotency_key = request.headers.get("idempotency-key") or payload.get("idempotency_key")
-        idempotency_key = principal.idempotency_key(str(raw_idempotency_key)) if principal and raw_idempotency_key else raw_idempotency_key
+        idempotency_key = scoped_idempotency_key(principal, raw_idempotency_key)
         try:
             run = await RunRepository().create(
                 conn.session,
@@ -1534,7 +1535,7 @@ async def runs_cancel_many(request: Request) -> JSONResponse:
     return JSONResponse({})
 
 
-async def _wait_for_run(thread_id: UUID | None, run_id: UUID, principal: Any) -> dict[str, Any]:
+async def _wait_for_run(thread_id: UUID | None, run_id: UUID, principal: Any) -> Any:
     deadline = asyncio.get_running_loop().time() + float(
         __import__("os").environ.get("GRAPHHARBOR_RUN_WAIT_TIMEOUT", "60")
     )
@@ -1544,10 +1545,20 @@ async def _wait_for_run(thread_id: UUID | None, run_id: UUID, principal: Any) ->
             if row is None or not in_principal_scope(row, principal):
                 return {"detail": "run not found"}
             if is_terminal(row.status):
-                if thread_id is not None:
-                    thread = await conn.session.get(ThreadRow, thread_id)
-                    return _thread(thread) if thread is not None else _run(row)
-                return _run(row)
+                event = await conn.session.scalar(
+                    select(RuntimeEventRow).where(
+                        RuntimeEventRow.run_id == run_id, RuntimeEventRow.terminal.is_(True)
+                    )
+                )
+                if event is not None:
+                    output = event.payload.get("output")
+                    interrupts = event.payload.get("interrupts") or []
+                    if interrupts and isinstance(output, dict):
+                        return {**output, "__interrupt__": [
+                            {"value": item["value"], "id": item["id"]} for item in interrupts
+                        ]}
+                    return output
+                return None
         await asyncio.sleep(0.1)
     return {"detail": "run wait timed out", "run_id": str(run_id)}
 
@@ -1728,7 +1739,7 @@ async def cron_update(request: Request) -> JSONResponse:
             )
         if isinstance(payload.get("metadata"), dict):
             row.metadata_ = {**row.metadata_, **payload["metadata"]}
-        row.payload = {**row.payload, **payload}
+        row.payload = {**row.payload, **{key: value for key, value in payload.items() if key != "cron_id"}}
         row.updated_at = datetime.now(UTC)
         await conn.session.flush()
     return JSONResponse(_cron(row))

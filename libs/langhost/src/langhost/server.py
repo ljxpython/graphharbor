@@ -26,6 +26,7 @@ from langgraph_runtime_pg.auth import (
     PrincipalMiddleware,
     in_principal_scope,
     principal_from_scope,
+    scoped_idempotency_key,
 )
 from langgraph_runtime_pg.checkpoint import get_checkpointer
 from langgraph_runtime_pg.database import connect, pool_stats
@@ -553,7 +554,7 @@ async def _run_create(request: Request) -> JSONResponse:
             if thread is None or not in_principal_scope(thread, principal):
                 return JSONResponse({"detail": "thread not found"}, status_code=404)
         raw_idempotency_key = request.headers.get("idempotency-key") or payload.get("idempotency_key")
-        idempotency_key = principal.idempotency_key(str(raw_idempotency_key)) if principal and raw_idempotency_key else raw_idempotency_key
+        idempotency_key = scoped_idempotency_key(principal, raw_idempotency_key)
         run = await RunRepository().create(
             conn.session,
             assistant_id=assistant.assistant_id,
@@ -678,7 +679,9 @@ def create_app(
                 app.state.graph_registry.attach_checkpointer(get_checkpointer())
             mcp_server = None
             if mcp_enabled:
-                mcp_server, mcp_holder["app"] = create_mcp_transport(app.state.graph_registry)
+                mcp_server, mcp_holder["app"] = create_mcp_transport(
+                    app.state.graph_registry, auth_handler
+                )
                 mcp_holder["server"] = mcp_server
             async with (
                 mcp_server.session_manager.run() if mcp_server is not None else _empty_context()

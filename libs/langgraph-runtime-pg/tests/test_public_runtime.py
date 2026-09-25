@@ -499,10 +499,7 @@ def test_thread_config_carries_agent_server_runtime_identity() -> None:
         assistant_id="assistant-1",
         graph_id="assistant",
         runtime_context={
-            "user_id": "user-1",
-            "tenant_id": "tenant-1",
-            "project_id": "project-1",
-            "role": "operator",
+            "auth_user": {"identity": "user-1", "team": "team-1"},
             "permissions": ["runs:write"],
         },
     )
@@ -510,6 +507,7 @@ def test_thread_config_carries_agent_server_runtime_identity() -> None:
     runtime = config["configurable"]["__pregel_runtime"]
     assert runtime.server_info.graph_id == "assistant"
     assert runtime.server_info.user["identity"] == "user-1"
+    assert runtime.server_info.user["team"] == "team-1"
 
 
 @pytest.mark.asyncio
@@ -539,7 +537,7 @@ async def test_executor_passes_context_to_nodes_and_resume(streaming: bool) -> N
     config = thread_config(
         "context-thread",
         context={"increment": 4, "tools": []},
-        runtime_context={"user_id": "context-user"},
+        runtime_context={"auth_user": {"identity": "context-user"}},
     )
     events = []
 

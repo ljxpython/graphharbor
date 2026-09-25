@@ -97,3 +97,56 @@ def test_transport_helper_is_importable_without_server_lifespan() -> None:
     server, _ = create_mcp_transport(_Registry())
     tools = asyncio.run(server.list_tools())
     assert json.loads(json.dumps(tools[0].inputSchema))["required"] == ["input"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_denial_prevents_graph_execution() -> None:
+    from types import SimpleNamespace
+
+    from langgraph_sdk import Auth
+    from starlette.exceptions import HTTPException
+
+    from langgraph_runtime_pg.auth import Principal
+    from langhost.mcp_transport import _tool_for_graph
+
+    auth = Auth()
+
+    @auth.on.threads.create_run
+    async def deny(ctx, value):
+        return False
+
+    class Registry(_Registry):
+        def get(self, graph_id):
+            raise AssertionError("denied MCP call opened a graph")
+
+    request = SimpleNamespace(scope={"principal": Principal.from_auth_user({"identity": "alice"})})
+    ctx = SimpleNamespace(request_context=SimpleNamespace(request=request))
+    with pytest.raises(HTTPException) as exc:
+        await _tool_for_graph("basic", Registry(), auth)(ctx, input={"value": 1})
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_rejects_unverifiable_filter_and_missing_identity() -> None:
+    from types import SimpleNamespace
+
+    from langgraph_sdk import Auth
+    from starlette.exceptions import HTTPException
+
+    from langgraph_runtime_pg.auth import Principal
+    from langhost.mcp_transport import _tool_for_graph
+
+    auth = Auth()
+
+    @auth.on.threads.create_run
+    async def filtered(ctx, value):
+        return {"owner": ctx.user.identity}
+
+    request = SimpleNamespace(scope={"principal": Principal.from_auth_user({"identity": "alice"})})
+    ctx = SimpleNamespace(request_context=SimpleNamespace(request=request))
+    with pytest.raises(HTTPException) as exc:
+        await _tool_for_graph("basic", _Registry(), auth)(ctx, input={"value": 1})
+    assert exc.value.status_code == 403
+    with pytest.raises(HTTPException) as exc:
+        await _tool_for_graph("basic", _Registry(), auth)(SimpleNamespace(request_context=None), input={})
+    assert exc.value.status_code == 401

@@ -101,6 +101,9 @@ class ThreadRow(Base):
     event_seq: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default=text("0")
     )
+    event_pruned_through: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
     metadata_: Mapped[dict] = mapped_column(
         "metadata", JSONB, nullable=False, server_default=_JSONB_EMPTY
     )
@@ -162,6 +165,9 @@ class RunRow(Base):
     )
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     event_seq: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    event_pruned_through: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default=text("0")
     )
     metadata_: Mapped[dict] = mapped_column(

@@ -36,7 +36,7 @@ GraphHarbor 核心发行包不提供 DeepAgent 工作目录、业务 skills 路�
 |---|---|---|---|---|
 | C01 | 两仓 workspace imports、示例、test_deepagent_workspace.py、平台 workspace tests | 消费者清单和安全覆盖差异；平台无需搬工作区 | V-C01、V-C02 | 阶段完成：两仓可控源码无 GraphHarbor workspace import；平台保留其 workspace 实现，定向安全测试通过 |
 | C02 | P workspace/deepagent.py、scoped.py、resource_bindings.py、相关 tests | 缺失安全覆盖补齐；可信 metadata 约束明确 | V-C02—C04 | 部分完成：thread workspace 隔离、资源绑定、文件浏览、HTTP、zip、terminal 定向测试共 54 passed；Showcase/DearFlow 完整浏览器工作流与 restart/HITL/fork 联合恢复仍待验 |
-| C03 | G deepagent_workspace.py、pyproject 打包、专属测试/文档、迁移说明 | 发行包无业务 workspace 实现，平台正常使用 | V-C01、V-C05 | 源码和专属测试已移除；2026-09-25 使用 `uv build --all-packages --out-dir /tmp/graphharbor-boundary-build-20260925` 成功构建两包 wheel/sdist；runtime wheel/sdist 均不含 workspace 模块。干净安装与平台候选 wheel 启动待验 |
+| C03 | G deepagent_workspace.py、pyproject 打包、专属测试/文档、迁移说明 | 发行包无业务 workspace 实现，平台正常使用 | V-C01、V-C05 | 候选 wheel/sdist 构建并在临时目录安装；平台三份真实配置各加载 65 条路由，workspace 定向 23 passed。完整浏览器文件链路仍待验 |
 
 ## 验证要求与记录
 
@@ -44,7 +44,7 @@ GraphHarbor 核心发行包不提供 DeepAgent 工作目录、业务 skills 路�
 - [ ] V-C02：路径穿越、绝对路径、symlink 逃逸、非法组件、skills 来源、已有文件读写；跨 tenant/project/thread 均隔离。
 - [ ] V-C03：伪造 __graphharbor_thread_metadata/runtime_resource_bindings 无效；可信历史绑定可在 restart、HITL、fork 后按原策略解析。
 - [ ] V-C04：Showcase 与 DearFlow 文件树、创建、预览、下载、zip、terminal、skills、fork/workspace 重连走既有授权；旧路径可读，不发生文件迁移。
-- [ ] V-C05：wheel/sdist 成员检查通过，两包构建成功；干净 wheel 安装/import 和平台从候选 wheel 启动并通过文件链路仍未运行。
+- [ ] V-C05：wheel/sdist 成员与干净安装/import、平台从候选 wheel 启动通过；浏览器文件链路仍未运行。
 
 复用 G test_deepagent_workspace.py 中安全案例；P test_thread_workspace_isolation.py、test_workspace_http.py、test_workspace_zip.py、runtime/test_resource_bindings.py、services/test_workspace_policy.py、test_terminal_http.py 与平台网关 workspace/files tests。Final 加一条真实浏览器创建文件→预览→下载验收，不要求真实模型作为路径安全基线。
 
@@ -54,4 +54,10 @@ GraphHarbor 核心发行包不提供 DeepAgent 工作目录、业务 skills 路�
 
 ## 状态
 
-partial：C01 阶段完成，C03 源码与构建/成员检查完成；C02 平台全业务文件链路及 C03 干净安装/候选包集成未完成。不能替代 01/04 的安全与迁移准入。
+**2026-09-25 候选包复核：** `uv build --all-packages --out-dir /tmp/graphharbor-boundary-candidate-20260925` 构建双 wheel/sdist；`uv pip install --target /tmp/graphharbor-boundary-candidate-install-20260925 --no-deps` 后，平台 `.venv` 通过 `PYTHONPATH` 从候选包导入、加载真实 `langgraph.json`。`deepagent_workspace` 不可导入，`ThreadRow` 无业务 scope 列；平台 workspace 六组定向用例 23 passed；Web session/workspace/files/preview 六组 Vitest 31 passed。浏览器创建/下载、真实文件恢复仍未运行。
+
+**2026-09-25 最终候选复核：** 双 wheel/sdist 安装在 `/tmp/graphharbor-boundary-final-install-20260925`；成员无 DeepAgent workspace、备份源码或平台模块。平台三份配置各加载 65 条路由，候选 Runtime 从安装包在临时端口启动并完成 Thread HTTP 链路；文件浏览器链路未运行。
+
+**2026-09-25 本机候选启动：** 最新双 wheel 已安装到平台 Runtime 虚拟环境，平台本机栈健康。平台 `uv.lock` 仍锁旧 PyPI wheel，候选启动需要 `UV_NO_SYNC=1`；这不是可重复安装的正式交付。文件浏览器正向操作与 workspace 恢复仍未验证。
+
+partial：C01 阶段完成，C03 候选包安装/平台加载通过；C02 平台浏览器文件链路和恢复场景未完成。不能替代 01/04 的安全与迁移准入。

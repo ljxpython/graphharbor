@@ -13,6 +13,7 @@ from sqlalchemy import select
 from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 
+from langgraph_runtime_pg.auth import principal_from_scope, scoped_idempotency_key
 from langgraph_runtime_pg.database import connect
 from langgraph_runtime_pg.metrics import inc as metric_inc
 from langgraph_runtime_pg.models import RunRow, RuntimeEventRow, ThreadRow
@@ -64,8 +65,11 @@ async def _run_by_idempotency(key: str, request: Request) -> RunRow | None:
     from langhost.core_api import _authorized_run
 
     thread_id = UUID(str(request.path_params["thread_id"]))
+    scoped_key = scoped_idempotency_key(principal_from_scope(request.scope), key)
+    if scoped_key is None:
+        return None
     async with connect() as conn:
-        query = select(RunRow).where(RunRow.idempotency_key == key, RunRow.thread_id == thread_id)
+        query = select(RunRow).where(RunRow.idempotency_key == scoped_key, RunRow.thread_id == thread_id)
         row = (await conn.session.execute(query)).scalar_one_or_none()
         return await _authorized_run(request, conn.session, row.run_id, "update") if row is not None else None
 
@@ -227,15 +231,20 @@ def _wire_from_row(row: RuntimeEventRow) -> dict[str, Any]:
     )
 
 
-async def _load_protocol_events(thread_id: UUID, since: int) -> list[dict[str, Any]]:
+async def _load_protocol_events(thread_id: UUID, since: int) -> tuple[int, list[dict[str, Any]]]:
     async with connect() as conn:
+        thread = await conn.session.scalar(
+            select(ThreadRow).where(ThreadRow.thread_id == thread_id).with_for_update(read=True)
+        )
+        if thread is None:
+            return 0, []
         query = (
             select(RuntimeEventRow)
             .where(RuntimeEventRow.thread_id == thread_id, RuntimeEventRow.sequence > since)
             .order_by(RuntimeEventRow.sequence)
         )
         rows = (await conn.session.execute(query)).scalars().all()
-    return [_wire_from_row(row) for row in rows]
+    return thread.event_pruned_through, [_wire_from_row(row) for row in rows]
 
 
 def _wire_matches(wire: dict[str, Any], body: dict[str, Any]) -> bool:
@@ -276,17 +285,28 @@ async def protocol_event_stream(request: Request) -> JSONResponse | StreamingRes
     heartbeat = max(float(os.environ.get("GRAPHHARBOR_PROTOCOL_HEARTBEAT_SECONDS", "15")), 0.1)
     timeout = max(float(os.environ.get("GRAPHHARBOR_PROTOCOL_TIMEOUT_SECONDS", "3600")), heartbeat)
     manager = get_stream_manager()
+    queue = await manager.add_thread_stream(thread_id)
+    try:
+        watermark, replay = await _load_protocol_events(thread_id, since)
+    except Exception:
+        await manager.remove_thread_stream(thread_id, queue)
+        raise
+    if since and since < watermark:
+        await manager.remove_thread_stream(thread_id, queue)
+        return JSONResponse(
+            {"code": "cursor_expired", "detail": "cursor_expired", "recovery": "thread_snapshot"},
+            status_code=410,
+        )
 
     async def stream() -> AsyncIterator[str]:
         metric_inc("graphharbor_protocol_connections_opened_total")
         if since:
             metric_inc("graphharbor_protocol_replays_total")
-        queue = await manager.add_thread_stream(thread_id)
         seen: set[int] = set()
         try:
             if await _thread(request, thread_id) is None:
                 return
-            for wire in await _load_protocol_events(thread_id, since):
+            for wire in replay:
                 if await _thread(request, thread_id) is None:
                     return
                 seq = wire.get("seq")

@@ -9,12 +9,14 @@ import math
 import os
 import signal
 import socket
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 import structlog
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 
@@ -33,7 +35,7 @@ from langgraph_runtime_pg.graph_executor import (
     thread_config,
 )
 from langgraph_runtime_pg.graph_registry import GraphRegistry
-from langgraph_runtime_pg.metrics import inc as metric_inc
+from langgraph_runtime_pg.metrics import inc as metric_inc, set_gauge as metric_set_gauge
 from langgraph_runtime_pg.models import AssistantRow, RunRow, ThreadRow
 from langgraph_runtime_pg.production import configure_structured_logging
 from langgraph_runtime_pg.protocol import (
@@ -334,7 +336,9 @@ class ProductionWorker:
                     if not await self.repository.renew(conn.session, run_id, self.owner):
                         cancel_event.set()
                         return
-                await set_run_heartbeat(run_id)
+                # PostgreSQL lease is authoritative; Redis heartbeat is advisory.
+                with contextlib.suppress(RedisError, OSError):
+                    await set_run_heartbeat(run_id)
                 if await self._cancel_requested(run_id, thread_id):
                     cancel_event.set()
                     return
@@ -535,7 +539,8 @@ class ProductionWorker:
         )
         execution: asyncio.Task[Any] | None = None
         cancellation: asyncio.Task[Any] | None = None
-        await set_run_heartbeat(run_id)
+        with contextlib.suppress(RedisError, OSError):
+            await set_run_heartbeat(run_id)
         try:
             await self._publish_event(
                 run_id,
@@ -567,7 +572,7 @@ class ProductionWorker:
                 )
 
             config = thread_config(
-                str(thread_id) if thread_id else None,
+                str(thread_id or run_id),
                 assistant_id=str(run.assistant_id),
                 graph_id=str(graph_id),
                 configurable=configurable,
@@ -842,7 +847,8 @@ class ProductionWorker:
             heartbeat.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat
-            await clear_run_heartbeat(run_id)
+            with contextlib.suppress(RedisError, OSError):
+                await clear_run_heartbeat(run_id)
             await complete_rollbacks(owner=self.owner, run_id=run_id)
         return True
 
@@ -893,6 +899,32 @@ class ProductionWorker:
                 await self.reap_once()
             except Exception:
                 logger.exception("lease reaper failed")
+            try:
+                retention_seconds = int(
+                    os.environ.get("GRAPHHARBOR_EVENT_RETENTION_SECONDS", "86400")
+                )
+                if retention_seconds > 0:
+                    batch_size = max(
+                        int(os.environ.get("GRAPHHARBOR_EVENT_PRUNE_BATCH_SIZE", "1000")), 1
+                    )
+                    started = time.perf_counter()
+                    for _ in range(20):
+                        async with connect() as conn:
+                            deleted = await self.repository.prune_expired_events(
+                                conn.session,
+                                retention_seconds=retention_seconds,
+                                batch_size=batch_size,
+                            )
+                        if deleted:
+                            metric_inc("graphharbor_runtime_events_pruned_total", deleted)
+                        if deleted < batch_size:
+                            break
+                    metric_set_gauge(
+                        "graphharbor_runtime_event_prune_duration_ms",
+                        round((time.perf_counter() - started) * 1000),
+                    )
+            except Exception:
+                logger.exception("event retention maintenance failed")
 
 
 async def run_worker(config_path: Path, *, n_jobs_per_worker: int = 1) -> None:
