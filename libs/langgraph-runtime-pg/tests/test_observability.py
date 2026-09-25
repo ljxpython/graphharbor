@@ -37,7 +37,10 @@ def test_build_trace_metadata_redacts_sensitive_payload() -> None:
     assert trace["thread_id"] == "thread-1"
     assert trace["assistant_id"] == "assistant-1"
     assert trace["graph_id"] == "assistant"
-    assert trace["model_id"] == "model-a"
+    assert "model_id" not in trace
+    assert "tenant_id" not in trace
+    assert "project_id" not in trace
+    assert "user_id" not in trace
     assert trace["request_id"] == "request-1"
     assert trace["platform_trace_id"] == "platform-trace-1"
     assert trace["event"] == "lifecycle"
@@ -149,8 +152,6 @@ async def test_worker_publish_event_forwards_trace_context(monkeypatch) -> None:
     assert captured["trace_context"] == {
         "assistant_id": "assistant-1",
         "graph_id": "assistant",
-        "model_id": "model-a",
-        "user_id": "user-1",
         "request_id": "request-1",
         "platform_trace_id": "platform-trace-1",
     }
@@ -172,6 +173,7 @@ async def test_worker_run_forwards_trace_context_to_graph_events(monkeypatch) ->
         tenant_id="tenant-1",
         project_id="project-1",
         status="running",
+        retry_count=0,
         kwargs={"input": {"value": 1}, "runtime_context_token": "signed"},
         metadata_={},
     )
@@ -233,6 +235,7 @@ async def test_worker_run_forwards_trace_context_to_graph_events(monkeypatch) ->
     monkeypatch.setattr(worker_module, "dequeue_run_hint", no_op)
     monkeypatch.setattr(worker_module, "set_run_heartbeat", no_op)
     monkeypatch.setattr(worker_module, "clear_run_heartbeat", no_op)
+    monkeypatch.setattr(worker_module, "complete_rollbacks", no_op)
     monkeypatch.setattr(worker_module, "bg_job_heartbeat_secs", lambda: 1.0)
     monkeypatch.setattr(
         worker_module,
@@ -243,6 +246,7 @@ async def test_worker_run_forwards_trace_context_to_graph_events(monkeypatch) ->
 
     worker = ProductionWorker(SimpleNamespace(open=open_graph), owner="worker-a")
     worker.repository = Repository()
+    monkeypatch.setattr(worker, "_cancel_requested", no_op)
 
     async def publish(
         _run_id: UUID,
@@ -264,9 +268,6 @@ async def test_worker_run_forwards_trace_context_to_graph_events(monkeypatch) ->
             "assistant_id": str(assistant_id),
             "assistant_version": "1",
             "graph_id": "assistant",
-            "tenant_id": "tenant-1",
-            "project_id": "project-1",
-            "user_id": "user-1",
             "request_id": "request-1",
             "platform_trace_id": "platform-trace-1",
         }

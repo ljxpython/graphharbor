@@ -1,5 +1,7 @@
 # GraphHarbor 业务边界分离
 
+> 2026-09-25 复核：本目录保留早期阶段记录，不能作为“业务边界已全部解耦”的依据。剩余工作及当前实施方案由 [跨仓库边界解耦计划](../20260925-runtime-business-boundary-decoupling/README.md) 承接；旧 04 的新增 dispatch 方案不再采用，复用平台已有 runtime_gateway。
+
 ## 项目概述
 - **时间：** 2026-09-09 至 2026-09-16
 - **目标：** 将 graphharbor 从"通用协议层+硬编码 platform-api 业务适配"混合状态，拆分为纯通用 LangGraph Agent Server + 独立业务适配层，借鉴 open-swe 的 dispatch.py 设计在上层统一封装 agent 调用

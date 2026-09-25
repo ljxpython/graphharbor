@@ -499,96 +499,12 @@ async def _assistant_delete(request: Request) -> JSONResponse | Response:
 
 
 async def _assistants(request: Request) -> JSONResponse:
-    principal = _principal(request)
-    async with connect() as conn:
-        if request.method == "POST":
-            payload = await request.json()
-            assistant_id = (
-                UUID(str(payload.get("assistant_id")))
-                if payload.get("assistant_id")
-                else UUID(int=0)
-            )
-            if assistant_id.int == 0:
-                from uuid import uuid4
-
-                assistant_id = uuid4()
-            if error := scope_override_error(payload, principal):
-                return JSONResponse({"detail": error}, status_code=403)
-            graph_id = str(payload.get("graph_id") or "")
-            registry = getattr(request.app.state, "graph_registry", None)
-            if registry is not None:
-                try:
-                    registry.get(graph_id)
-                except KeyError:
-                    return JSONResponse({"detail": "graph not found"}, status_code=404)
-            row = AssistantRow(
-                assistant_id=assistant_id,
-                tenant_id=principal.tenant_id if principal else payload.get("tenant_id"),
-                project_id=principal.project_id if principal else payload.get("project_id"),
-                graph_id=graph_id,
-                name=str(payload.get("name") or "Untitled"),
-                description=payload.get("description"),
-                config=payload.get("config") or {},
-                context=payload.get("context") or {},
-                metadata_=payload.get("metadata") or {},
-                version=int(payload.get("version", 1)),
-            )
-            conn.session.add(row)
-            conn.session.add(
-                AssistantVersionRow(
-                    assistant_id=assistant_id,
-                    version=row.version,
-                    graph_id=row.graph_id,
-                    config=row.config,
-                    context=row.context,
-                    metadata_=row.metadata_,
-                    name=row.name,
-                    description=row.description,
-                )
-            )
-            await conn.session.flush()
-            return JSONResponse(_assistant_payload(row), status_code=201)
-
-        query = _scope_query(
-            select(AssistantRow).order_by(AssistantRow.created_at.desc()), AssistantRow, principal
-        )
-        rows = (await conn.session.execute(query)).scalars().all()
-        return JSONResponse([_assistant_payload(row) for row in rows])
-
+    request._json = dict(request.query_params)
+    return await assistants_search(request)
 
 async def _threads(request: Request) -> JSONResponse:
-    principal = _principal(request)
-    async with connect() as conn:
-        if request.method == "POST":
-            payload = await request.json()
-            from uuid import uuid4
-
-            thread_id = UUID(str(payload["thread_id"])) if payload.get("thread_id") else uuid4()
-            if error := scope_override_error(payload, principal):
-                return JSONResponse({"detail": error}, status_code=403)
-            row = ThreadRow(
-                thread_id=thread_id,
-                tenant_id=principal.tenant_id if principal else payload.get("tenant_id"),
-                project_id=principal.project_id if principal else payload.get("project_id"),
-                graph_id=payload.get("graph_id") or (payload.get("metadata") or {}).get("graph_id"),
-                status="idle",
-                metadata_=payload.get("metadata") or {},
-                config=payload.get("config") or {},
-                interrupts={},
-            )
-            conn.session.add(row)
-            await conn.session.flush()
-            return JSONResponse(_thread_payload(row), status_code=201)
-
-        query = select(ThreadRow).order_by(ThreadRow.created_at.desc())
-        if principal:
-            query = query.where(
-                ThreadRow.tenant_id == principal.tenant_id,
-                ThreadRow.project_id == principal.project_id,
-            )
-        rows = (await conn.session.execute(query)).scalars().all()
-        return JSONResponse([_thread_payload(row) for row in rows])
-
+    request._json = dict(request.query_params)
+    return await threads_search(request)
 
 async def _assistant_get(request: Request) -> JSONResponse:
     principal = _principal(request)

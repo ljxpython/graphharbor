@@ -5,10 +5,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, cast
 
+from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from langgraph_runtime_pg.auth import principal_from_scope
+from langgraph_runtime_pg.authorization import authorize
 
 
 def _store():
@@ -32,17 +34,24 @@ def _namespace_error(namespace: Sequence[str]) -> Response | None:
 def _namespace(request: Request, value: Any) -> tuple[str, ...] | None:
     if not isinstance(value, list) or not all(isinstance(label, str) for label in value):
         return None
-    namespace = tuple(value)
-    principal = principal_from_scope(request.scope)
-    if principal is None:
-        return namespace
-    return ("__graphharbor__", principal.tenant_id, principal.project_id, *namespace)
+    return tuple(value)
 
 
 def _public_namespace(request: Request, value: Sequence[str]) -> list[str]:
+    return list(value)
+
+
+async def _authorize_store(request: Request, action: str, value: dict[str, Any]) -> dict[str, Any]:
     principal = principal_from_scope(request.scope)
-    hidden = 3 if principal is not None else 0
-    return list(value[hidden:])
+    await authorize(getattr(request.app.state, "auth_handler", None),
+                    principal.auth_user if principal else None, "store", action, value)
+    namespace = value.get("namespace")
+    if namespace is not None and (
+        not isinstance(namespace, (list, tuple))
+        or any(not isinstance(label, str) or not label or "." in label for label in namespace)
+    ):
+        raise HTTPException(500, "Auth handler produced an invalid Store namespace")
+    return value
 
 
 def _item(request: Request, value: Any) -> dict[str, Any]:
@@ -84,7 +93,9 @@ async def store_put(request: Request) -> Response:
     ttl = payload.get("ttl")
     if ttl is not None and (isinstance(ttl, bool) or not isinstance(ttl, (int, float))):
         return JSONResponse({"detail": "ttl must be a number or null"}, status_code=422)
-    await _store().aput(namespace, payload["key"], payload["value"], index=index, ttl=ttl)
+    authorized = await _authorize_store(request, "put", {**payload, "namespace": namespace})
+    await _store().aput(tuple(authorized["namespace"]), authorized["key"], authorized["value"],
+                       index=authorized.get("index"), ttl=authorized.get("ttl"))
     return Response(status_code=204)
 
 
@@ -99,8 +110,9 @@ async def store_get(request: Request) -> JSONResponse | Response:
     if not key:
         return JSONResponse({"error": "Key is required"}, status_code=400)
     refresh = request.query_params.get("refresh_ttl")
+    authorized = await _authorize_store(request, "get", {"namespace": namespace, "key": key})
     item = await _store().aget(
-        namespace, key, refresh_ttl=refresh.lower() == "true" if refresh else None
+        tuple(authorized["namespace"]), authorized["key"], refresh_ttl=refresh.lower() == "true" if refresh else None
     )
     return JSONResponse(None if item is None else _item(request, item))
 
@@ -116,7 +128,8 @@ async def store_delete(request: Request) -> JSONResponse | Response:
         return error
     if not isinstance(payload["key"], str):
         return JSONResponse({"detail": "key must be a string"}, status_code=422)
-    await _store().adelete(namespace, payload["key"])
+    authorized = await _authorize_store(request, "delete", {**payload, "namespace": namespace})
+    await _store().adelete(tuple(authorized["namespace"]), authorized["key"])
     return Response(status_code=204)
 
 
@@ -142,13 +155,16 @@ async def store_search(request: Request) -> JSONResponse | Response:
         or not isinstance(offset, int)
     ):
         return JSONResponse({"detail": "limit and offset must be integers"}, status_code=422)
+    authorized = await _authorize_store(request, "search", {
+        **payload, "namespace": namespace, "limit": limit, "offset": offset,
+    })
     items = await _store().asearch(
-        namespace,
-        filter=payload.get("filter"),
-        limit=limit,
-        offset=offset,
-        query=payload.get("query"),
-        refresh_ttl=payload.get("refresh_ttl"),
+        tuple(authorized["namespace"]),
+        filter=authorized.get("filter"),
+        limit=authorized["limit"],
+        offset=authorized["offset"],
+        query=authorized.get("query"),
+        refresh_ttl=authorized.get("refresh_ttl"),
     )
     return JSONResponse({"items": [_item(request, item) for item in items]})
 
@@ -171,13 +187,16 @@ async def store_list_namespaces(request: Request) -> JSONResponse | Response:
         return error
     if suffix and (error := _namespace_error(suffix)):
         return error
-    scoped_prefix = _namespace(request, prefix) if prefix is not None else _namespace(request, [])
+    authorized = await _authorize_store(request, "list_namespaces", {
+        **payload, "namespace": tuple(prefix) if prefix is not None else None,
+        "suffix": tuple(suffix) if suffix is not None else None,
+    })
     namespaces = await _store().alist_namespaces(
-        prefix=scoped_prefix,
-        suffix=tuple(suffix) if suffix is not None else None,
-        max_depth=payload.get("max_depth"),
-        limit=payload.get("limit", 100),
-        offset=payload.get("offset", 0),
+        prefix=authorized.get("namespace"),
+        suffix=authorized.get("suffix"),
+        max_depth=authorized.get("max_depth"),
+        limit=authorized.get("limit", 100),
+        offset=authorized.get("offset", 0),
     )
     return JSONResponse({"namespaces": [_public_namespace(request, item) for item in namespaces]})
 

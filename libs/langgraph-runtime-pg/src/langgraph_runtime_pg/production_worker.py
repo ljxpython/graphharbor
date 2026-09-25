@@ -209,6 +209,19 @@ class ProductionWorker:
         *,
         trace_context: dict[str, Any] | None = None,
     ) -> None:
+        if trace_context:
+            trace_context = {
+                key: value
+                for key, value in trace_context.items()
+                if key
+                not in {
+                    "model_id",
+                    "tenant_id",
+                    "project_id",
+                    "user_id",
+                    "tool_names",
+                }
+            }
         durable_events = []
         async with connect() as conn:
             if len(events) > 1 and all(_is_message_delta(event) for event in events):
@@ -451,9 +464,6 @@ class ProductionWorker:
                                 runtime_context_token,
                                 run_id=str(run.run_id),
                                 thread_id=str(thread_id) if thread_id else None,
-                                tenant_id=run.tenant_id or (thread.tenant_id if thread else None),
-                                project_id=run.project_id
-                                or (thread.project_id if thread else None),
                             )
                         except RuntimeContextError as exc:
                             runtime_context_error = exc
@@ -463,14 +473,7 @@ class ProductionWorker:
                         )
                     else:
                         runtime_context = {
-                            "user_id": "anonymous",
-                            "tenant_id": run.tenant_id
-                            or (thread.tenant_id if thread else None)
-                            or "__anonymous__",
-                            "project_id": run.project_id
-                            or (thread.project_id if thread else None)
-                            or "__acceptance__",
-                            "role": "anonymous",
+                            "auth_user": {"identity": "anonymous"},
                             "permissions": [],
                         }
                     metadata: dict[str, Any] = {}
@@ -507,16 +510,6 @@ class ProductionWorker:
                         "assistant_id": str(run.assistant_id),
                         "assistant_version": str(assistant.version),
                         "graph_id": str(graph_id),
-                        "model_id": str(configurable.get("model_id") or ""),
-                        "tenant_id": str(runtime_context.get("tenant_id") or "")
-                        if runtime_context
-                        else None,
-                        "project_id": str(runtime_context.get("project_id") or "")
-                        if runtime_context
-                        else None,
-                        "user_id": str(runtime_context.get("user_id") or "")
-                        if runtime_context
-                        else None,
                         "request_id": (
                             str(runtime_context.get("request_id") or "")
                             if runtime_context

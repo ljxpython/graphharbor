@@ -14,11 +14,7 @@ _DEFAULT_TRACE_CONTEXT_KEYS = (
     "assistant_id",
     "assistant_version",
     "deployment_version",
-    "tenant_id",
-    "project_id",
-    "user_id",
     "graph_id",
-    "model_id",
     "request_id",
     "platform_trace_id",
 )
@@ -95,9 +91,6 @@ def build_trace_metadata(
             value = context.get(key)
             if value is not None and value != "":
                 trace[key] = str(value)
-        tool_names = context.get("tool_names")
-        if tool_names:
-            trace["tool_names"] = summarize_value(tool_names)
     if event:
         trace["event"] = str(event.get("event") or event.get("method") or "custom")
         namespace = event.get("namespace")

@@ -814,11 +814,9 @@ def test_delegation_policy_is_bound_to_principal_and_runtime_context(monkeypatch
 
     monkeypatch.setenv("GRAPHHARBOR_RUNTIME_CONTEXT_SECRET", "runtime-secret")
     context = {
-        "user_id": "user-1",
-        "tenant_id": "tenant-1",
-        "project_id": "project-1",
-        "role": "operator",
+        "auth_user": {"identity": "user-1", "custom": {"team": "alpha"}},
         "permissions": ["runs:write"],
+        "accepted_at": int(now.timestamp()),
         "request_id": "request-1",
         "platform_trace_id": "platform-trace-1",
     }
@@ -832,8 +830,6 @@ def test_delegation_policy_is_bound_to_principal_and_runtime_context(monkeypatch
         signed,
         run_id="run-1",
         thread_id="thread-1",
-        tenant_id="tenant-1",
-        project_id="project-1",
     )
     assert restored_context == context
     assert restored_policy == principal.policy
@@ -853,10 +849,7 @@ def test_runtime_context_rejects_unknown_nested_and_top_level_claims(monkeypatch
 
     monkeypatch.setenv("GRAPHHARBOR_RUNTIME_CONTEXT_SECRET", "runtime-secret")
     context = {
-        "user_id": "user-1",
-        "tenant_id": "tenant-1",
-        "project_id": "project-1",
-        "role": "operator",
+        "auth_user": {"identity": "user-1"},
         "permissions": [],
     }
     with pytest.raises(RuntimeContextError, match="unknown fields"):
@@ -875,8 +868,6 @@ def test_runtime_context_rejects_unknown_nested_and_top_level_claims(monkeypatch
             f"{encoded}.{signature}",
             run_id="run-1",
             thread_id="thread-1",
-            tenant_id="tenant-1",
-            project_id="project-1",
         )
 
 
@@ -896,11 +887,9 @@ def test_api_principal_producer_preserves_correlation(monkeypatch) -> None:
         }
     )
 
-    assert _runtime_context({}, principal) == {
-        "user_id": "user-1",
-        "tenant_id": "tenant-1",
-        "project_id": "project-1",
-        "role": "operator",
+    runtime_context = _runtime_context({}, principal)
+    assert runtime_context == {
+        "accepted_at": runtime_context["accepted_at"],
         "permissions": ["runs:write"],
         "auth_user": principal.auth_user,
         "request_id": "request-1",
@@ -926,10 +915,6 @@ def test_custom_auth_user_is_preserved_in_signed_worker_context(monkeypatch) -> 
     }
     principal = Principal.from_auth_user(user)
     context = {
-        "user_id": principal.subject,
-        "tenant_id": principal.tenant_id,
-        "project_id": principal.project_id,
-        "role": "operator",
         "permissions": ["runs:write", "threads:read"],
         "auth_user": principal.auth_user,
     }
@@ -939,13 +924,11 @@ def test_custom_auth_user_is_preserved_in_signed_worker_context(monkeypatch) -> 
         token,
         run_id="run-1",
         thread_id="thread-1",
-        tenant_id="tenant-1",
-        project_id="project-1",
     )
     config = thread_config("thread-1", runtime_context=restored)
 
     assert config["configurable"]["langgraph_auth_user"] == user
-    assert "auth_user" not in config["configurable"]["__graphharbor_runtime_context"]
+    assert "__graphharbor_runtime_context" not in config["configurable"]
 
 
 @pytest.mark.skip(
@@ -992,39 +975,28 @@ def test_runtime_context_is_signed_to_one_run_and_scope(monkeypatch) -> None:
 
     monkeypatch.setenv("GRAPHHARBOR_RUNTIME_CONTEXT_SECRET", "runtime-secret")
     context = {
-        "user_id": "user-1",
-        "tenant_id": "tenant-1",
-        "project_id": "project-1",
-        "role": "operator",
+        "auth_user": {"identity": "user-1"},
         "permissions": ["runs:write"],
     }
     token = sign_runtime_context(context, run_id="run-1", thread_id="thread-1")
-    assert (
-        verify_runtime_context(
-            token,
-            run_id="run-1",
-            thread_id="thread-1",
-            tenant_id="tenant-1",
-            project_id="project-1",
-        )
-        == context
-    )
+    restored = verify_runtime_context(token, run_id="run-1", thread_id="thread-1")
+    assert restored["auth_user"] == context["auth_user"]
+    assert restored["permissions"] == context["permissions"]
+    assert isinstance(restored["accepted_at"], int)
 
     with pytest.raises(RuntimeContextError, match="does not match"):
         verify_runtime_context(
             token,
             run_id="run-2",
             thread_id="thread-1",
-            tenant_id="tenant-1",
-            project_id="project-1",
         )
+    with pytest.raises(RuntimeContextError, match="does not match"):
+        verify_runtime_context(token, run_id="run-1", thread_id="thread-2")
     with pytest.raises(RuntimeContextError, match="signature"):
         verify_runtime_context(
             f"{token[:-1]}x",
             run_id="run-1",
             thread_id="thread-1",
-            tenant_id="tenant-1",
-            project_id="project-1",
         )
 
 
@@ -1039,23 +1011,12 @@ def test_runtime_context_requires_matching_issuer_and_audience(monkeypatch) -> N
     monkeypatch.setenv("GRAPHHARBOR_RUNTIME_CONTEXT_ISSUER", "https://platform.example")
     monkeypatch.setenv("GRAPHHARBOR_RUNTIME_CONTEXT_AUDIENCE", "graphharbor-worker")
     context = {
-        "user_id": "user-1",
-        "tenant_id": "tenant-1",
-        "project_id": "project-1",
-        "role": "operator",
+        "auth_user": {"identity": "user-1"},
         "permissions": [],
     }
     token = sign_runtime_context(context, run_id="run-1", thread_id="thread-1")
-    assert (
-        verify_runtime_context(
-            token,
-            run_id="run-1",
-            thread_id="thread-1",
-            tenant_id="tenant-1",
-            project_id="project-1",
-        )
-        == context
-    )
+    restored = verify_runtime_context(token, run_id="run-1", thread_id="thread-1")
+    assert restored["auth_user"] == context["auth_user"]
 
     monkeypatch.setenv("GRAPHHARBOR_RUNTIME_CONTEXT_AUDIENCE", "wrong-audience")
     with pytest.raises(RuntimeContextError, match="issuer or audience"):
@@ -1063,8 +1024,6 @@ def test_runtime_context_requires_matching_issuer_and_audience(monkeypatch) -> N
             token,
             run_id="run-1",
             thread_id="thread-1",
-            tenant_id="tenant-1",
-            project_id="project-1",
         )
 
 
@@ -1078,26 +1037,15 @@ def test_runtime_context_does_not_reuse_external_jwt_issuer_and_audience(monkeyp
     monkeypatch.setenv("GRAPHHARBOR_JWT_ISSUER", "external-jwt-issuer")
     monkeypatch.setenv("GRAPHHARBOR_JWT_AUDIENCE", "external-jwt-audience")
     context = {
-        "user_id": "user-1",
-        "tenant_id": "tenant-1",
-        "project_id": "project-1",
-        "role": "operator",
+        "auth_user": {"identity": "user-1"},
         "permissions": [],
     }
     token = sign_runtime_context(context, run_id="run-1", thread_id="thread-1")
 
     monkeypatch.delenv("GRAPHHARBOR_JWT_ISSUER")
     monkeypatch.delenv("GRAPHHARBOR_JWT_AUDIENCE")
-    assert (
-        verify_runtime_context(
-            token,
-            run_id="run-1",
-            thread_id="thread-1",
-            tenant_id="tenant-1",
-            project_id="project-1",
-        )
-        == context
-    )
+    restored = verify_runtime_context(token, run_id="run-1", thread_id="thread-1")
+    assert restored["auth_user"] == context["auth_user"]
 
 
 def test_schema_models_include_durable_ownership_and_events() -> None:

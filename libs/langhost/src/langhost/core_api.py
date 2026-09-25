@@ -21,6 +21,7 @@ from langgraph_runtime_pg.auth import (
     scope_override_error,
     sign_runtime_context,
 )
+from langgraph_runtime_pg.authorization import authorize, metadata_predicate
 from langgraph_runtime_pg.checkpoint import (
     copy_thread_checkpoints,
     delete_thread_checkpoints,
@@ -87,6 +88,48 @@ def _plain(value: Any) -> Any:
 
 def _principal(request: Request) -> Any:
     return principal_from_scope(request.scope)
+
+
+async def _authorize(
+    request: Request, resource: str, action: str, value: dict[str, Any]
+) -> dict[str, Any]:
+    principal = _principal(request)
+    return await authorize(
+        getattr(request.app.state, "auth_handler", None),
+        principal.auth_user if principal is not None else None,
+        resource,
+        action,
+        value,
+    )
+
+
+async def _authorized_resource(
+    request: Request, session: Any, model: Any, resource: str,
+    resource_id: UUID, action: str = "read", value: dict[str, Any] | None = None,
+) -> Any:
+    event_value = value if value is not None else {}
+    id_field = {"assistants": "assistant_id", "threads": "thread_id", "crons": "cron_id"}[resource]
+    event_value[id_field] = resource_id
+    filters = await _authorize(request, resource, action, event_value)
+    return await session.scalar(select(model).where(
+        getattr(model, id_field) == resource_id, metadata_predicate(model.metadata_, filters)
+    ))
+
+
+async def _authorized_run(
+    request: Request, session: Any, run_id: UUID, action: str = "read",
+    value: dict[str, Any] | None = None,
+) -> RunRow | None:
+    row = await session.get(RunRow, run_id)
+    if row is None:
+        return None
+    event_value = dict(value or {})
+    event_value.update(thread_id=row.thread_id, run_id=run_id)
+    filters = await _authorize(request, "threads", action, event_value)
+    model = ThreadRow if row.thread_id is not None else RunRow
+    identity = ThreadRow.thread_id == row.thread_id if row.thread_id is not None else RunRow.run_id == run_id
+    allowed = await session.scalar(select(model).where(identity, metadata_predicate(model.metadata_, filters)))
+    return row if allowed is not None and in_principal_scope(row, _principal(request)) else None
 
 
 def _error(detail: str, status: int = 422) -> JSONResponse:
@@ -156,21 +199,15 @@ def _scope(query: Any, model: Any, principal: Any) -> Any:
 
 
 def _runtime_context(payload: dict[str, Any], principal: Any) -> dict[str, Any] | None:
-    """Persist trusted Agent Server identity for the async worker."""
+    """Persist the authenticated user as an opaque identity for the async worker."""
     del payload
     if principal is None:
         return None
-    roles = sorted(principal.roles)
-    scopes = sorted(principal.scopes)
     context = {
-        "user_id": principal.subject,
-        "tenant_id": principal.tenant_id,
-        "project_id": principal.project_id,
-        "role": roles[0] if roles else "user",
-        "permissions": scopes,
+        "accepted_at": int(datetime.now(UTC).timestamp()),
+        "permissions": sorted(principal.scopes),
+        "auth_user": dict(principal.auth_user or {"identity": principal.subject}),
     }
-    if principal.auth_user is not None:
-        context["auth_user"] = dict(principal.auth_user)
     for field in ("request_id", "platform_trace_id"):
         value = getattr(principal, field, None)
         if value is not None:
@@ -270,6 +307,7 @@ def _cron(row: CronRow) -> dict[str, Any]:
 async def assistants_search(request: Request) -> JSONResponse:
     principal = _principal(request)
     payload = await request.json()
+    filters = await _authorize(request, "assistants", "search", payload)
     try:
         limit, offset = _pagination(request, payload)
     except ValueError as exc:
@@ -277,6 +315,7 @@ async def assistants_search(request: Request) -> JSONResponse:
     query = _scope(
         select(AssistantRow).order_by(AssistantRow.created_at.desc()), AssistantRow, principal
     )
+    query = query.where(metadata_predicate(AssistantRow.metadata_, filters))
     query = _metadata_filter(query, AssistantRow, payload.get("metadata"))
     registry = getattr(request.app.state, "graph_registry", None)
     if registry is not None:
@@ -301,7 +340,9 @@ async def assistants_search(request: Request) -> JSONResponse:
 async def assistants_count(request: Request) -> JSONResponse:
     principal = _principal(request)
     payload = await request.json()
+    filters = await _authorize(request, "assistants", "search", payload)
     query = _scope(select(func.count()).select_from(AssistantRow), AssistantRow, principal)
+    query = query.where(metadata_predicate(AssistantRow.metadata_, filters))
     query = _metadata_filter(query, AssistantRow, payload.get("metadata"))
     registry = getattr(request.app.state, "graph_registry", None)
     if registry is not None:
@@ -335,10 +376,13 @@ async def assistants_create(request: Request) -> JSONResponse:
         except KeyError:
             return _error("graph not found", 404)
     assistant_id = UUID(str(payload["assistant_id"])) if payload.get("assistant_id") else uuid4()
+    payload["assistant_id"] = assistant_id
+    await _authorize(request, "assistants", "create", payload)
     async with connect() as conn:
         existing = await conn.session.get(AssistantRow, assistant_id)
         if existing is not None:
-            if payload.get("if_exists") == "do_nothing" and in_principal_scope(existing, principal):
+            authorized = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id)
+            if payload.get("if_exists") == "do_nothing" and authorized is not None and in_principal_scope(existing, principal):
                 return JSONResponse(_assistant(existing))
             return _error("assistant already exists", 409)
         row = AssistantRow(
@@ -381,7 +425,7 @@ async def assistants_get(request: Request) -> JSONResponse:
     except ValueError:
         return _error("assistant not found", 404)
     async with connect() as conn:
-        row = await conn.session.get(AssistantRow, assistant_id)
+        row = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id, "read")
         if row is None or not _assistant_readable(row, principal):
             return _error("assistant not found", 404)
     return JSONResponse(_assistant(row))
@@ -394,7 +438,7 @@ async def assistants_graph(request: Request) -> JSONResponse:
     except ValueError:
         return _error("assistant not found", 404)
     async with connect() as conn:
-        row = await conn.session.get(AssistantRow, assistant_id)
+        row = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id, "read")
     registry = getattr(request.app.state, "graph_registry", None)
     if row is None or not _assistant_readable(row, principal) or registry is None:
         return _error("assistant not found", 404)
@@ -454,6 +498,10 @@ async def assistants_schemas(request: Request) -> JSONResponse:
     if registry is None:
         return _error("assistant not found", 404)
     graph_id = request.path_params["assistant_id"]
+    async with connect() as conn:
+        authorized = await _resolve_assistant(request, conn.session, graph_id, principal)
+    if authorized is None:
+        return _error("assistant not found", 404)
     if graph_id not in registry.ids():
         try:
             assistant_id = UUID(graph_id)
@@ -495,7 +543,7 @@ async def assistants_subgraphs(request: Request) -> JSONResponse:
     except ValueError:
         return _error("assistant not found", 404)
     async with connect() as conn:
-        row = await conn.session.get(AssistantRow, assistant_id)
+        row = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id)
     registry = getattr(request.app.state, "graph_registry", None)
     if row is None or not _assistant_readable(row, principal) or registry is None:
         return _error("assistant not found", 404)
@@ -527,7 +575,7 @@ async def assistants_update(request: Request) -> JSONResponse:
     if error := scope_override_error(payload, principal):
         return _error(error, 403)
     async with connect() as conn:
-        row = await conn.session.get(AssistantRow, assistant_id)
+        row = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id, "update", payload)
         if row is None or not in_principal_scope(row, principal):
             return _error("assistant not found", 404)
         for field in ("graph_id", "name", "description", "config", "context"):
@@ -560,7 +608,7 @@ async def assistants_delete(request: Request) -> JSONResponse | Response:
     except ValueError:
         return _no_content()
     async with connect() as conn:
-        row = await conn.session.get(AssistantRow, assistant_id)
+        row = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id, "delete")
         if row is None or not in_principal_scope(row, principal):
             return _no_content()
         await conn.session.delete(row)
@@ -580,7 +628,7 @@ async def assistants_versions(request: Request) -> JSONResponse:
     except ValueError as exc:
         return _error(str(exc))
     async with connect() as conn:
-        assistant = await conn.session.get(AssistantRow, assistant_id)
+        assistant = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id, "read")
         if assistant is None or not in_principal_scope(assistant, principal):
             return _error("assistant not found", 404)
         query = (
@@ -621,7 +669,7 @@ async def assistants_latest(request: Request) -> JSONResponse:
     except (TypeError, ValueError):
         return _error("version must be an integer")
     async with connect() as conn:
-        row = await conn.session.get(AssistantRow, assistant_id)
+        row = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id, "update", payload)
         version_row = await conn.session.get(AssistantVersionRow, (assistant_id, version))
         if row is None or version_row is None or not in_principal_scope(row, principal):
             return _error("assistant not found", 404)
@@ -645,12 +693,18 @@ async def threads_create(request: Request) -> JSONResponse:
     if error := scope_override_error(payload, principal):
         return _error(error, 403)
     thread_id = UUID(str(payload["thread_id"])) if payload.get("thread_id") else uuid4()
+    payload["thread_id"] = thread_id
+    filters = await _authorize(request, "threads", "create", payload)
     metadata = dict(payload.get("metadata") or {})
     graph_id = payload.get("graph_id") or metadata.get("graph_id")
     async with connect() as conn:
         existing = await conn.session.get(ThreadRow, thread_id)
         if existing is not None:
-            if payload.get("if_exists") == "do_nothing" and in_principal_scope(existing, principal):
+            allowed = await conn.session.scalar(select(ThreadRow.thread_id).where(
+                ThreadRow.thread_id == thread_id,
+                metadata_predicate(ThreadRow.metadata_, filters),
+            ))
+            if payload.get("if_exists") == "do_nothing" and allowed and in_principal_scope(existing, principal):
                 return JSONResponse(_thread(existing))
             return _error("thread already exists", 409)
         row = ThreadRow(
@@ -672,15 +726,17 @@ async def threads_create(request: Request) -> JSONResponse:
 async def threads_search(request: Request) -> JSONResponse:
     principal = _principal(request)
     payload = await request.json()
+    filters = await _authorize(request, "threads", "search", payload)
     try:
         limit, offset = _pagination(request, payload)
     except ValueError as exc:
         return _error(str(exc))
     query = _scope(select(ThreadRow).order_by(ThreadRow.updated_at.desc()), ThreadRow, principal)
+    query = query.where(metadata_predicate(ThreadRow.metadata_, filters))
     query = _metadata_filter(query, ThreadRow, payload.get("metadata"))
     if payload.get("status"):
         query = query.where(ThreadRow.status == str(payload["status"]))
-    if payload.get("ids"):
+    if payload.get("ids") is not None:
         try:
             ids = [UUID(str(item)) for item in payload["ids"]]
         except (TypeError, ValueError):
@@ -696,7 +752,14 @@ async def threads_search(request: Request) -> JSONResponse:
 async def threads_count(request: Request) -> JSONResponse:
     principal = _principal(request)
     payload = await request.json()
+    filters = await _authorize(request, "threads", "search", payload)
     query = _scope(select(func.count()).select_from(ThreadRow), ThreadRow, principal)
+    query = query.where(metadata_predicate(ThreadRow.metadata_, filters))
+    if payload.get("ids") is not None:
+        try:
+            query = query.where(ThreadRow.thread_id.in_([UUID(str(item)) for item in payload["ids"]]))
+        except (TypeError, ValueError):
+            return _error("ids must contain UUIDs")
     query = _metadata_filter(query, ThreadRow, payload.get("metadata"))
     if payload.get("status"):
         query = query.where(ThreadRow.status == str(payload["status"]))
@@ -707,14 +770,22 @@ async def threads_count(request: Request) -> JSONResponse:
     return JSONResponse(count)
 
 
-async def _get_thread(request: Request) -> tuple[ThreadRow | None, Any, UUID | None]:
+async def _get_thread(
+    request: Request, *, action: str = "read", value: dict[str, Any] | None = None
+) -> tuple[ThreadRow | None, Any, UUID | None]:
     principal = _principal(request)
     try:
         thread_id = UUID(request.path_params["thread_id"])
     except (KeyError, ValueError):
         return None, principal, None
+    event_value = value if value is not None else {}
+    event_value["thread_id"] = thread_id
+    filters = await _authorize(request, "threads", action, event_value)
     async with connect() as conn:
-        row = await conn.session.get(ThreadRow, thread_id)
+        row = await conn.session.scalar(select(ThreadRow).where(
+            ThreadRow.thread_id == thread_id,
+            metadata_predicate(ThreadRow.metadata_, filters),
+        ))
     return (
         (row if row is not None and in_principal_scope(row, principal) else None),
         principal,
@@ -728,10 +799,10 @@ async def threads_get(request: Request) -> JSONResponse:
 
 
 async def threads_update(request: Request) -> JSONResponse | Response:
-    row, principal, _ = await _get_thread(request)
+    payload = await request.json()
+    row, principal, _ = await _get_thread(request, action="update", value=payload)
     if row is None:
         return _error("thread not found", 404)
-    payload = await request.json()
     if error := scope_override_error(payload, principal):
         return _error(error, 403)
     if not isinstance(payload.get("metadata"), dict):
@@ -750,7 +821,7 @@ async def threads_update(request: Request) -> JSONResponse | Response:
 
 
 async def threads_delete(request: Request) -> JSONResponse | Response:
-    row, principal, thread_id = await _get_thread(request)
+    row, principal, thread_id = await _get_thread(request, action="delete")
     if row is None or thread_id is None:
         return _no_content()
     async with connect() as conn:
@@ -840,6 +911,20 @@ async def threads_state(request: Request) -> JSONResponse:
     if row is None or thread_id is None:
         return _error("thread not found", 404)
     checkpoint_id = request.path_params.get("checkpoint_id")
+    if not checkpoint_id and request.method == "POST":
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                cp_data = body.get("checkpoint")
+                if isinstance(cp_data, dict):
+                    checkpoint_id = cp_data.get("checkpoint_id")
+                elif isinstance(cp_data, str):
+                    checkpoint_id = cp_data
+                if not checkpoint_id:
+                    checkpoint_id = body.get("checkpoint_id")
+        except Exception:
+            pass
+
     registry = getattr(request.app.state, "graph_registry", None)
     graph_id = row.graph_id or row.metadata_.get("graph_id")
     if registry is not None and graph_id and str(graph_id) in registry.ids():
@@ -926,10 +1011,10 @@ async def threads_history(request: Request) -> JSONResponse:
 
 
 async def threads_update_state(request: Request) -> JSONResponse | Response:
-    row, principal, thread_id = await _get_thread(request)
+    payload = await request.json()
+    row, principal, thread_id = await _get_thread(request, action="update", value=payload)
     if row is None or thread_id is None:
         return _error("thread not found", 404)
-    payload = await request.json()
     if request.method == "PATCH":
         metadata = payload.get("metadata")
         if not isinstance(metadata, dict):
@@ -975,6 +1060,8 @@ async def threads_copy(request: Request) -> JSONResponse:
     if row is None or thread_id is None:
         return _error("thread not found", 404)
     target_id = uuid4()
+    target = {"thread_id": target_id, "metadata": dict(row.metadata_)}
+    await _authorize(request, "threads", "create", target)
     async with connect() as conn:
         copied = ThreadRow(
             thread_id=target_id,
@@ -982,7 +1069,7 @@ async def threads_copy(request: Request) -> JSONResponse:
             project_id=row.project_id,
             graph_id=row.graph_id,
             status=row.status,
-            metadata_=dict(row.metadata_),
+            metadata_=target["metadata"],
             config=dict(row.config),
             values_=row.values_,
             interrupts=dict(row.interrupts),
@@ -1014,11 +1101,19 @@ async def threads_prune(request: Request) -> JSONResponse:
         thread_ids = list(dict.fromkeys(UUID(str(item)) for item in payload["thread_ids"]))
     except (TypeError, ValueError):
         return _error("thread_ids must contain UUIDs")
+    predicates = []
+    action = "delete" if strategy == "delete" else "update"
+    for thread_id in thread_ids:
+        filters = await _authorize(request, "threads", action, {"thread_id": thread_id})
+        predicates.append(and_(ThreadRow.thread_id == thread_id,
+                               metadata_predicate(ThreadRow.metadata_, filters)))
     deleted = 0
     async with connect() as conn:
         query = _scope(
             select(ThreadRow).where(ThreadRow.thread_id.in_(thread_ids)), ThreadRow, principal
         )
+        if predicates:
+            query = query.where(or_(*predicates))
         rows = (
             (await conn.session.execute(query.order_by(ThreadRow.thread_id).with_for_update()))
             .scalars()
@@ -1058,7 +1153,8 @@ async def _resolve_assistant(
         query = query.where(AssistantRow.assistant_id == assistant_id)
     else:
         query = query.where(AssistantRow.graph_id == assistant_value)
-    query = _scope(query, AssistantRow, principal)
+    filters = await _authorize(request, "assistants", "read", {"assistant_id": assistant_id})
+    query = _scope(query, AssistantRow, principal).where(metadata_predicate(AssistantRow.metadata_, filters))
     row = (await session.execute(query.limit(1))).scalar_one_or_none()
     return row
 
@@ -1074,12 +1170,14 @@ async def _thread_for_run(
         return None
     thread = await session.get(ThreadRow, thread_id)
     if thread is None and create:
+        value = {"thread_id": thread_id, "metadata": {}}
+        await _authorize(request, "threads", "create", value)
         thread = ThreadRow(
             thread_id=thread_id,
             tenant_id=principal.tenant_id if principal else None,
             project_id=principal.project_id if principal else None,
             status="idle",
-            metadata_={},
+            metadata_=value["metadata"],
             config={},
             interrupts={},
         )
@@ -1103,6 +1201,10 @@ async def runs_create(
     assistant_value = str(payload.get("assistant_id") or "")
     if not assistant_value:
         return _error("assistant_id is required")
+    authorization_value = {**payload, "thread_id": UUID(thread_value) if thread_value else None,
+                           "assistant_id": assistant_value, "kwargs": payload}
+    filters = await _authorize(request, "threads", "create_run", authorization_value)
+    payload["metadata"] = authorization_value.get("metadata", {})
     async with connect() as conn:
         thread = await _thread_for_run(
             request,
@@ -1113,6 +1215,13 @@ async def runs_create(
         )
         if thread_value is not None and thread is None:
             return _error("thread not found", 404)
+        if thread is not None:
+            allowed = await conn.session.scalar(select(ThreadRow.thread_id).where(
+                ThreadRow.thread_id == thread.thread_id,
+                metadata_predicate(ThreadRow.metadata_, filters),
+            ))
+            if allowed is None:
+                return _error("thread not found", 404)
         assistant = await _resolve_assistant(request, conn.session, assistant_value, principal)
         if assistant is None:
             return _error("assistant not found", 404)
@@ -1208,6 +1317,9 @@ async def runs_list(request: Request) -> JSONResponse:
         limit, offset = _pagination(request)
     except ValueError as exc:
         return _error(str(exc))
+    thread, _, _ = await _get_thread(request, action="search")
+    if thread is None:
+        return _error("thread not found", 404)
     query = _scope(
         select(RunRow).where(RunRow.thread_id == thread_id).order_by(RunRow.created_at.desc()),
         RunRow,
@@ -1228,7 +1340,7 @@ async def runs_get(request: Request) -> JSONResponse:
     except ValueError:
         return _error("run not found", 404)
     async with connect() as conn:
-        row = await conn.session.get(RunRow, run_id)
+        row = await _authorized_run(request, conn.session, run_id, "read")
         if row is None or row.thread_id != thread_id or not in_principal_scope(row, principal):
             return _error("run not found", 404)
     return JSONResponse(_run(row))
@@ -1242,7 +1354,7 @@ async def runs_delete(request: Request) -> JSONResponse | Response:
     except ValueError:
         return _no_content()
     async with connect() as conn:
-        row = await conn.session.get(RunRow, run_id)
+        row = await _authorized_run(request, conn.session, run_id, "delete")
         if row is not None and row.thread_id == thread_id and in_principal_scope(row, principal):
             await conn.session.delete(row)
             await conn.session.flush()
@@ -1378,7 +1490,7 @@ async def runs_cancel(request: Request) -> JSONResponse:
     except ValueError:
         return _error("run not found", 404)
     async with connect() as conn:
-        row = await conn.session.get(RunRow, run_id)
+        row = await _authorized_run(request, conn.session, run_id, "update", {"action": action})
         if row is None or row.thread_id != thread_id or not in_principal_scope(row, principal):
             return _error("run not found", 404)
         try:
@@ -1447,7 +1559,9 @@ async def runs_cancel_many(request: Request) -> JSONResponse:
         )
         try:
             for row in rows:
-                await _cancel_row(request, conn, row, action)
+                authorized = await _authorized_run(request, conn.session, row.run_id, "update", {"action": action})
+                if authorized is not None:
+                    await _cancel_row(request, conn, row, action)
         except CheckpointConflict as exc:
             await conn.session.rollback()
             return _error(str(exc), 409)
@@ -1502,6 +1616,10 @@ async def runs_join(request: Request) -> JSONResponse:
         run_id = UUID(request.path_params["run_id"])
     except ValueError:
         return _error("run not found", 404)
+    async with connect() as conn:
+        row = await _authorized_run(request, conn.session, run_id)
+        if row is None or row.thread_id != thread_id:
+            return _error("run not found", 404)
     return JSONResponse(await _wait_for_run(thread_id, run_id, principal))
 
 
@@ -1525,6 +1643,7 @@ async def runs_batch(request: Request) -> JSONResponse:
 async def crons_search(request: Request) -> JSONResponse:
     principal = _principal(request)
     payload = await request.json()
+    filters = await _authorize(request, "crons", "search", payload)
     try:
         limit, offset = _pagination(request, payload)
     except ValueError as exc:
@@ -1542,6 +1661,7 @@ async def crons_search(request: Request) -> JSONResponse:
             return _error("thread_id must be a UUID")
     if payload.get("enabled") is not None:
         query = query.where(CronRow.enabled == bool(payload["enabled"]))
+    query = query.where(metadata_predicate(CronRow.metadata_, filters))
     query = _metadata_filter(query, CronRow, payload.get("metadata"))
     async with connect() as conn:
         rows = (await conn.session.execute(query.limit(limit).offset(offset))).scalars().all()
@@ -1551,6 +1671,7 @@ async def crons_search(request: Request) -> JSONResponse:
 async def crons_count(request: Request) -> JSONResponse:
     principal = _principal(request)
     payload = await request.json()
+    filters = await _authorize(request, "crons", "search", payload)
     query = _scope(select(func.count()).select_from(CronRow), CronRow, principal)
     if payload.get("assistant_id"):
         try:
@@ -1562,6 +1683,7 @@ async def crons_count(request: Request) -> JSONResponse:
             query = query.where(CronRow.thread_id == UUID(str(payload["thread_id"])))
         except ValueError:
             return _error("thread_id must be a UUID")
+    query = query.where(metadata_predicate(CronRow.metadata_, filters))
     query = _metadata_filter(query, CronRow, payload.get("metadata"))
     async with connect() as conn:
         count = int(await conn.session.scalar(query) or 0)
@@ -1573,6 +1695,8 @@ async def cron_create(request: Request, *, thread_value: str | None = None) -> J
     payload = await request.json()
     if not payload.get("schedule") or not payload.get("assistant_id"):
         return _error("schedule and assistant_id are required")
+    payload["thread_id"] = thread_value
+    await _authorize(request, "crons", "create", payload)
     async with connect() as conn:
         assistant = await _resolve_assistant(
             request, conn.session, str(payload["assistant_id"]), principal
@@ -1627,7 +1751,7 @@ async def cron_update(request: Request) -> JSONResponse:
         return _error("cron not found", 404)
     payload = await request.json()
     async with connect() as conn:
-        row = await conn.session.get(CronRow, cron_id)
+        row = await _authorized_resource(request, conn.session, CronRow, "crons", cron_id, "update", payload)
         if row is None or not in_principal_scope(row, principal):
             return _error("cron not found", 404)
         for field in ("schedule", "timezone", "on_run_completed", "enabled"):
@@ -1654,7 +1778,7 @@ async def cron_get(request: Request) -> JSONResponse:
     except ValueError:
         return _error("cron not found", 404)
     async with connect() as conn:
-        row = await conn.session.get(CronRow, cron_id)
+        row = await _authorized_resource(request, conn.session, CronRow, "crons", cron_id, "read")
         if row is None or not in_principal_scope(row, principal):
             return _error("cron not found", 404)
     return JSONResponse(_cron(row))
@@ -1667,7 +1791,7 @@ async def cron_delete(request: Request) -> JSONResponse | Response:
     except ValueError:
         return _no_content()
     async with connect() as conn:
-        row = await conn.session.get(CronRow, cron_id)
+        row = await _authorized_resource(request, conn.session, CronRow, "crons", cron_id, "delete")
         if row is not None and in_principal_scope(row, principal):
             await conn.session.delete(row)
             await conn.session.flush()

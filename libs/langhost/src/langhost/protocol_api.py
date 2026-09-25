@@ -13,7 +13,6 @@ from sqlalchemy import select
 from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 
-from langgraph_runtime_pg.auth import in_principal_scope, principal_from_scope
 from langgraph_runtime_pg.database import connect
 from langgraph_runtime_pg.metrics import inc as metric_inc
 from langgraph_runtime_pg.models import RunRow, RuntimeEventRow, ThreadRow
@@ -40,15 +39,16 @@ def _command_id(body: dict[str, Any]) -> Any:
     return body.get("id")
 
 
-async def _thread(request: Request, thread_id: UUID) -> ThreadRow | None:
-    principal = principal_from_scope(request.scope)
-    async with connect() as conn:
-        row = await conn.session.get(ThreadRow, thread_id)
-    return row if row is not None and in_principal_scope(row, principal) else None
+async def _thread(request: Request, thread_id: UUID, action: str = "read") -> ThreadRow | None:
+    from langhost.core_api import _get_thread
+
+    row, _, actual_id = await _get_thread(request, action=action)
+    return row if actual_id == thread_id else None
 
 
 async def _latest_run(thread_id: UUID, request: Request) -> RunRow | None:
-    principal = principal_from_scope(request.scope)
+    from langhost.core_api import _authorized_run
+
     async with connect() as conn:
         query = (
             select(RunRow)
@@ -57,15 +57,17 @@ async def _latest_run(thread_id: UUID, request: Request) -> RunRow | None:
             .limit(1)
         )
         row = (await conn.session.execute(query)).scalar_one_or_none()
-    return row if row is not None and in_principal_scope(row, principal) else None
+        return await _authorized_run(request, conn.session, row.run_id, "update") if row is not None else None
 
 
 async def _run_by_idempotency(key: str, request: Request) -> RunRow | None:
-    principal = principal_from_scope(request.scope)
+    from langhost.core_api import _authorized_run
+
+    thread_id = UUID(str(request.path_params["thread_id"]))
     async with connect() as conn:
-        query = select(RunRow).where(RunRow.idempotency_key == key)
+        query = select(RunRow).where(RunRow.idempotency_key == key, RunRow.thread_id == thread_id)
         row = (await conn.session.execute(query)).scalar_one_or_none()
-    return row if row is not None and in_principal_scope(row, principal) else None
+        return await _authorized_run(request, conn.session, row.run_id, "update") if row is not None else None
 
 
 async def protocol_commands(request: Request) -> JSONResponse:
@@ -138,7 +140,7 @@ async def protocol_commands(request: Request) -> JSONResponse:
                     "meta": {"applied_through_seq": 0},
                 }
             )
-        thread = await _thread(request, thread_id)
+        thread = await _thread(request, thread_id, "update")
         interrupt = thread.interrupts.get(interrupt_id) if thread is not None else None
         if interrupt is None:
             return _error(command_id, "no_such_interrupt", "interrupt does not exist")
@@ -168,9 +170,7 @@ async def protocol_commands(request: Request) -> JSONResponse:
         # independently; the idempotency lookup above handles duplicate resumes.
         async with connect() as conn:
             persisted = await conn.session.get(ThreadRow, thread_id)
-            if persisted is not None and in_principal_scope(
-                persisted, principal_from_scope(request.scope)
-            ):
+            if persisted is not None and await _thread(request, thread_id, "update") is not None:
                 persisted.interrupts = {
                     key: value for key, value in persisted.interrupts.items() if key != interrupt_id
                 }
@@ -284,7 +284,11 @@ async def protocol_event_stream(request: Request) -> JSONResponse | StreamingRes
         queue = await manager.add_thread_stream(thread_id)
         seen: set[int] = set()
         try:
+            if await _thread(request, thread_id) is None:
+                return
             for wire in await _load_protocol_events(thread_id, since):
+                if await _thread(request, thread_id) is None:
+                    return
                 seq = wire.get("seq")
                 if isinstance(seq, int) and seq not in seen and _wire_matches(wire, body):
                     seen.add(seq)
@@ -297,8 +301,12 @@ async def protocol_event_stream(request: Request) -> JSONResponse | StreamingRes
                 except TimeoutError:
                     if await request.is_disconnected():
                         return
+                    if await _thread(request, thread_id) is None:
+                        return
                     yield ": heartbeat\n\n"
                     continue
+                if await _thread(request, thread_id) is None:
+                    return
                 try:
                     wire = json.loads(message.data)
                 except (TypeError, ValueError, json.JSONDecodeError):

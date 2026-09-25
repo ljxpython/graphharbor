@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict, is_dataclass
 from typing import Any
@@ -39,11 +40,9 @@ def _runtime_context(principal: Principal | None) -> dict[str, Any] | None:
     if principal is None:
         return None
     context: dict[str, Any] = {
-        "user_id": principal.subject,
-        "tenant_id": principal.tenant_id,
-        "project_id": principal.project_id,
-        "role": next(iter(principal.roles), "user"),
+        "accepted_at": int(time.time()),
         "permissions": sorted(principal.scopes),
+        "auth_user": dict(principal.auth_user or {"identity": principal.subject}),
     }
     for field in ("request_id", "platform_trace_id"):
         value = getattr(principal, field, None)

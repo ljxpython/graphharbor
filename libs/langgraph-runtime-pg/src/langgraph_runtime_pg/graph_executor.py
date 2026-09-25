@@ -64,7 +64,6 @@ def thread_config(
     tags: list[str] | tuple[str, ...] | None = None,
     context: Any = None,
     runtime_context: Mapping[str, Any] | None = None,
-    runtime_policy: Mapping[str, Any] | None = None,
 ) -> RunnableConfig:
     config: RunnableConfig = {"configurable": dict(configurable or {})}
     if thread_id:
@@ -76,26 +75,8 @@ def thread_config(
     if context is not None:
         cast(dict[str, Any], config)["context"] = context
     if runtime_context:
-        config["configurable"]["__graphharbor_runtime_context"] = {
-            key: value for key, value in runtime_context.items() if key != "auth_user"
-        }
         raw_auth_user = runtime_context.get("auth_user")
-        user = (
-            dict(raw_auth_user)
-            if isinstance(raw_auth_user, Mapping)
-            else {
-                "identity": str(runtime_context.get("user_id") or "").strip(),
-                "tenant_id": str(runtime_context.get("tenant_id") or "").strip(),
-                "project_id": str(runtime_context.get("project_id") or "").strip(),
-                "role": str(runtime_context.get("role") or "").strip(),
-                "permissions": [
-                    str(item).strip()
-                    for item in (runtime_context.get("permissions") or [])
-                    if str(item).strip()
-                ],
-                "is_authenticated": True,
-            }
-        )
+        user = dict(raw_auth_user) if isinstance(raw_auth_user, Mapping) else {}
         if user.get("identity"):
             config["configurable"]["langgraph_auth_user"] = user
             config["configurable"]["__pregel_runtime"] = Runtime(
@@ -105,8 +86,6 @@ def thread_config(
                     user=cast(Any, user),
                 )
             )
-    if runtime_policy:
-        config["configurable"]["__graphharbor_runtime_policy"] = dict(runtime_policy)
     return config
 
 

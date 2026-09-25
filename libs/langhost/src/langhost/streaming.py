@@ -14,10 +14,9 @@ from sqlalchemy import func, select
 from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 
-from langgraph_runtime_pg.auth import in_principal_scope, principal_from_scope
 from langgraph_runtime_pg.database import connect
 from langgraph_runtime_pg.metrics import inc as metric_inc
-from langgraph_runtime_pg.models import RunRow, RuntimeEventRow, ThreadRow
+from langgraph_runtime_pg.models import RunRow, RuntimeEventRow
 from langgraph_runtime_pg.protocol import RunStatus, project_v3_event
 from langgraph_runtime_pg.redis_stream import Message, get_stream_manager
 
@@ -120,30 +119,20 @@ def _thread_cursor(value: str | None) -> int | JSONResponse:
     return int(value.partition("-")[0])
 
 
-async def _thread_events(thread_id: UUID, after: int, principal: Any) -> list[RuntimeEventRow]:
+async def _thread_events(thread_id: UUID, after: int) -> list[RuntimeEventRow]:
     query = (
         select(RuntimeEventRow)
         .where(RuntimeEventRow.thread_id == thread_id, RuntimeEventRow.sequence > after)
         .order_by(RuntimeEventRow.sequence)
     )
-    if principal is not None:
-        query = query.join(ThreadRow, ThreadRow.thread_id == RuntimeEventRow.thread_id).where(
-            ThreadRow.tenant_id == principal.tenant_id,
-            ThreadRow.project_id == principal.project_id,
-        )
     async with connect() as conn:
         return list((await conn.session.execute(query)).scalars())
 
 
-async def _thread_event_sequence(thread_id: UUID, principal: Any) -> int:
+async def _thread_event_sequence(thread_id: UUID) -> int:
     query = select(func.coalesce(func.max(RuntimeEventRow.sequence), 0)).where(
         RuntimeEventRow.thread_id == thread_id
     )
-    if principal is not None:
-        query = query.join(ThreadRow, ThreadRow.thread_id == RuntimeEventRow.thread_id).where(
-            ThreadRow.tenant_id == principal.tenant_id,
-            ThreadRow.project_id == principal.project_id,
-        )
     async with connect() as conn:
         return int(await conn.session.scalar(query) or 0)
 
@@ -181,6 +170,8 @@ async def _thread_frame(row: RuntimeEventRow, modes: set[str]) -> tuple[str, Any
 
 
 async def thread_stream(request: Request) -> JSONResponse | StreamingResponse:
+    from langhost.core_api import _get_thread
+
     try:
         thread_id = UUID(str(request.path_params["thread_id"]))
     except (KeyError, TypeError, ValueError):
@@ -192,7 +183,9 @@ async def thread_stream(request: Request) -> JSONResponse | StreamingResponse:
     if isinstance(cursor, JSONResponse):
         return cursor
     cursor_value = int(cursor)
-    principal = principal_from_scope(request.scope)
+    thread, _, _ = await _get_thread(request)
+    if thread is None:
+        return JSONResponse({"detail": "thread not found"}, status_code=404)
     heartbeat = max(float(os.environ.get("GRAPHHARBOR_THREAD_STREAM_HEARTBEAT_SECONDS", "15")), 0.1)
     manager = get_stream_manager()
 
@@ -201,9 +194,13 @@ async def thread_stream(request: Request) -> JSONResponse | StreamingResponse:
         queue = await manager.add_thread_stream(thread_id)
         try:
             if cursor_value < 0:
-                cursor_value = await _thread_event_sequence(thread_id, principal)
+                cursor_value = await _thread_event_sequence(thread_id)
             while True:
-                for row in await _thread_events(thread_id, cursor_value, principal):
+                if (await _get_thread(request))[0] is None:
+                    return
+                for row in await _thread_events(thread_id, cursor_value):
+                    if (await _get_thread(request))[0] is None:
+                        return
                     cursor_value = row.sequence
                     frame = await _thread_frame(row, modes)
                     if frame is not None:
@@ -304,12 +301,11 @@ async def _minimum_run_event_sequence(run_id: UUID) -> int | None:
     return None if value is None else int(value)
 
 
-async def _run_snapshot(run_id: UUID, principal: Any) -> RunRow | None:
+async def _run_snapshot(request: Request, run_id: UUID) -> RunRow | None:
+    from langhost.core_api import _authorized_run
+
     async with connect() as conn:
-        row = await conn.session.get(RunRow, run_id)
-    if row is None or not in_principal_scope(row, principal):
-        return None
-    return row
+        return await _authorized_run(request, conn.session, run_id)
 
 
 async def _run_sse(
@@ -321,7 +317,14 @@ async def _run_sse(
     include_location: bool,
     version: str = "v2",
 ) -> StreamingResponse:
-    principal = principal_from_scope(request.scope)
+    from starlette.exceptions import HTTPException
+
+    from langhost.core_api import _authorized_run
+
+    async with connect() as conn:
+        authorized = await _authorized_run(request, conn.session, run_id)
+        if authorized is None or authorized.thread_id != thread_id:
+            raise HTTPException(404, "run not found")
     modes = _stream_modes(payload)
     stream_subgraphs = bool(payload.get("stream_subgraphs", False))
     try:
@@ -340,7 +343,7 @@ async def _run_sse(
         queue = await manager.add_queue(run_id, thread_id, replay=True)
         seen: set[int] = set()
         try:
-            snapshot = await _run_snapshot(run_id, principal)
+            snapshot = await _run_snapshot(request, run_id)
             if snapshot is None:
                 yield _sse("error", {"detail": "run not found"})
                 return
@@ -374,9 +377,11 @@ async def _run_sse(
                 yield _sse(name, data, event_id=sequence if resumable else None)
 
             for envelope in await _load_events(run_id, after=cursor):
+                if await _run_snapshot(request, run_id) is None:
+                    return
                 async for frame in emit_envelope(envelope):
                     yield frame
-            snapshot = await _run_snapshot(run_id, principal)
+            snapshot = await _run_snapshot(request, run_id)
             if snapshot is None or snapshot.status in _TERMINAL:
                 return
 
@@ -385,13 +390,14 @@ async def _run_sse(
                 try:
                     message = await asyncio.wait_for(queue.get(), timeout=heartbeat)
                 except TimeoutError:
-                    yield ": heartbeat\n\n"
-                    snapshot = await _run_snapshot(run_id, principal)
+                    snapshot = await _run_snapshot(request, run_id)
                     if snapshot is None:
-                        yield _sse("error", {"detail": "run not found"})
                         return
+                    yield ": heartbeat\n\n"
                     if snapshot.status in _TERMINAL:
                         for envelope in await _load_events(run_id, after=max(seen or {cursor})):
+                            if await _run_snapshot(request, run_id) is None:
+                                return
                             async for frame in emit_envelope(envelope):
                                 yield frame
                         return
@@ -399,6 +405,8 @@ async def _run_sse(
                 live_envelope = _message_envelope(message)
                 if live_envelope is None:
                     continue
+                if await _run_snapshot(request, run_id) is None:
+                    return
                 async for frame in emit_envelope(live_envelope):
                     yield frame
                 event = live_envelope.get("event")
@@ -465,8 +473,7 @@ async def runs_stream_existing(request: Request) -> JSONResponse | StreamingResp
         thread_id = UUID(str(thread_value)) if thread_value else None
     except (KeyError, TypeError, ValueError):
         return JSONResponse({"detail": "run not found"}, status_code=404)
-    principal = principal_from_scope(request.scope)
-    row = await _run_snapshot(run_id, principal)
+    row = await _run_snapshot(request, run_id)
     if row is None or row.thread_id != thread_id:
         return JSONResponse({"detail": "run not found"}, status_code=404)
     return await _run_sse(

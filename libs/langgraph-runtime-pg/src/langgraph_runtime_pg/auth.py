@@ -1,4 +1,4 @@
-"""Platform delegation JWT validation and the shared request Principal."""
+"""Standard authenticated user handling and optional application scope."""
 
 from __future__ import annotations
 
@@ -31,10 +31,7 @@ class RuntimeContextError(ValueError):
 _CORRELATION_FIELDS = ("request_id", "platform_trace_id")
 _RUNTIME_CONTEXT_FIELDS = frozenset(
     {
-        "user_id",
-        "tenant_id",
-        "project_id",
-        "role",
+        "accepted_at",
         "permissions",
         "auth_user",
         *_CORRELATION_FIELDS,
@@ -120,34 +117,33 @@ def sign_runtime_context(
     *,
     run_id: str,
     thread_id: str | None,
-    ttl_seconds: int = 300,
 ) -> str:
-    """Sign the worker context so it cannot be rebuilt from run input."""
+    """Sign the accepted execution identity so it cannot be rebuilt from run input."""
     now = int(time.time())
-    if ttl_seconds < 1:
-        raise RuntimeContextError("runtime context TTL must be positive")
     if not isinstance(context, Mapping) or any(not isinstance(key, str) for key in context):
         raise RuntimeContextError("runtime context fields are invalid")
     unknown = set(context) - _RUNTIME_CONTEXT_FIELDS
     if unknown:
         raise RuntimeContextError("runtime context contains unknown fields")
+    permissions = sorted(_permission_names(context.get("permissions") or []))
+    auth_user = _auth_user_mapping(context.get("auth_user") or {})
+    if "identity" not in auth_user:
+        raise RuntimeContextError("runtime context auth_user requires identity")
+    accepted_at = context.get("accepted_at", now)
+    if isinstance(accepted_at, bool) or not isinstance(accepted_at, int) or accepted_at < 0:
+        raise RuntimeContextError("runtime context acceptance time is invalid")
     context_values: dict[str, Any] = {
-        "user_id": str(context.get("user_id") or ""),
-        "tenant_id": str(context.get("tenant_id") or ""),
-        "project_id": str(context.get("project_id") or ""),
-        "role": str(context.get("role") or ""),
-        "permissions": sorted(_permission_names(context.get("permissions") or [])),
+        "accepted_at": accepted_at,
+        "permissions": permissions,
+        "auth_user": auth_user,
     }
     for field in _CORRELATION_FIELDS:
         value = _correlation_value(context.get(field), field)
         if value is not None:
             context_values[field] = value
-    if context.get("auth_user") is not None:
-        context_values["auth_user"] = _auth_user_mapping(context["auth_user"])
     claims: dict[str, Any] = {
-        "v": 1,
-        "iat": now,
-        "exp": now + ttl_seconds,
+        "v": 2,
+        "accepted_at": accepted_at,
         "run_id": str(run_id),
         "thread_id": str(thread_id) if thread_id is not None else None,
         "context": context_values,
@@ -159,8 +155,6 @@ def sign_runtime_context(
         raise RuntimeContextError("runtime context issuer and audience are required in production")
     if issuer and audience:
         claims.update({"iss": issuer, "aud": audience})
-    if not all(context_values.get(key) for key in ("user_id", "tenant_id", "project_id", "role")):
-        raise RuntimeContextError("runtime context requires identity and scope")
     encoded = _b64_json(claims)
     signature = hmac.new(_runtime_context_secret(), encoded.encode(), hashlib.sha256).hexdigest()
     return f"{encoded}.{signature}"
@@ -171,15 +165,11 @@ def verify_runtime_context(
     *,
     run_id: str,
     thread_id: str | None,
-    tenant_id: str | None,
-    project_id: str | None,
 ) -> dict[str, Any]:
     return verify_runtime_context_envelope(
         token,
         run_id=run_id,
         thread_id=thread_id,
-        tenant_id=tenant_id,
-        project_id=project_id,
     )
 
 
@@ -188,8 +178,6 @@ def verify_runtime_context_envelope(
     *,
     run_id: str,
     thread_id: str | None,
-    tenant_id: str | None,
-    project_id: str | None,
 ) -> dict[str, Any]:
     try:
         encoded, signature = str(token).split(".", 1)
@@ -203,7 +191,7 @@ def verify_runtime_context_envelope(
     requires_standard_claims = (
         bool(issuer or audience) or os.environ.get("GRAPHHARBOR_ENV", "development") == "production"
     )
-    expected_claims = {"v", "iat", "exp", "run_id", "thread_id", "context"}
+    expected_claims = {"v", "accepted_at", "run_id", "thread_id", "context"}
     if requires_standard_claims:
         if not issuer or not audience:
             raise RuntimeContextError("runtime context issuer and audience are required")
@@ -212,30 +200,31 @@ def verify_runtime_context_envelope(
         raise RuntimeContextError("runtime context contains unknown claims")
     if requires_standard_claims and (claims.get("iss") != issuer or claims.get("aud") != audience):
         raise RuntimeContextError("runtime context issuer or audience does not match")
-    now = int(time.time())
-    if claims.get("v") != 1 or not isinstance(claims.get("exp"), int) or claims["exp"] <= now:
-        raise RuntimeContextError("runtime context is expired or unsupported")
+    accepted_at = claims.get("accepted_at")
+    if (
+        claims.get("v") != 2
+        or isinstance(accepted_at, bool)
+        or not isinstance(accepted_at, int)
+        or accepted_at < 0
+    ):
+        raise RuntimeContextError("runtime context version is unsupported")
     if claims.get("run_id") != str(run_id) or claims.get("thread_id") != (
         str(thread_id) if thread_id is not None else None
     ):
         raise RuntimeContextError("runtime context resource does not match the run")
     context = claims.get("context")
     expected_context_fields = {
-        "user_id",
-        "tenant_id",
-        "project_id",
-        "role",
+        "accepted_at",
         "permissions",
+        "auth_user",
     }
     for field in _CORRELATION_FIELDS:
         if isinstance(context, dict) and field in context:
             expected_context_fields.add(field)
-    if isinstance(context, dict) and "auth_user" in context:
-        expected_context_fields.add("auth_user")
     if not isinstance(context, dict) or set(context) != expected_context_fields:
         raise RuntimeContextError("runtime context fields are invalid")
-    if context["tenant_id"] != tenant_id or context["project_id"] != project_id:
-        raise RuntimeContextError("runtime context scope does not match the run")
+    if context["accepted_at"] != accepted_at:
+        raise RuntimeContextError("runtime context acceptance time is invalid")
     if not isinstance(context["permissions"], list) or not all(
         isinstance(item, str) for item in context["permissions"]
     ):
@@ -243,40 +232,19 @@ def verify_runtime_context_envelope(
     for field in _CORRELATION_FIELDS:
         if field in context:
             _correlation_value(context[field], field)
-    auth_user = None
-    if "auth_user" in context:
-        auth_user = _auth_user_mapping(context["auth_user"])
-        if auth_user.get("identity") != context["user_id"]:
-            raise RuntimeContextError("custom auth user identity does not match runtime context")
-        for key in ("tenant_id", "project_id", "role"):
-            if key in auth_user and auth_user[key] != context[key]:
-                raise RuntimeContextError(f"custom auth user {key} does not match runtime context")
-        if "permissions" in auth_user and _permission_names(
-            auth_user["permissions"]
-        ) != _permission_names(context["permissions"]):
-            raise RuntimeContextError("custom auth user permissions do not match runtime context")
-        for field in _CORRELATION_FIELDS:
-            if (
-                field in auth_user
-                and field in context
-                and _correlation_value(auth_user[field], field) != context[field]
-            ):
-                raise RuntimeContextError(
-                    f"custom auth user {field} does not match runtime context"
-                )
     return dict(context)
 
 
 @dataclass(frozen=True, slots=True)
 class Principal:
     subject: str
-    tenant_id: str
-    project_id: str
-    roles: frozenset[str]
-    scopes: frozenset[str]
-    credential_type: str
-    jti: str
-    claims: dict[str, Any]
+    tenant_id: str | None = None
+    project_id: str | None = None
+    roles: frozenset[str] = frozenset()
+    scopes: frozenset[str] = frozenset()
+    credential_type: str = "custom_auth"
+    jti: str = ""
+    claims: dict[str, Any] | None = None
     auth_user: dict[str, Any] | None = None
     request_id: str | None = None
     platform_trace_id: str | None = None
@@ -289,7 +257,11 @@ class Principal:
         return scope in self.scopes or "*" in self.scopes
 
     def scope_filter(self) -> dict[str, str]:
-        return {"tenant_id": self.tenant_id, "project_id": self.project_id}
+        return {
+            key: value
+            for key, value in (("tenant_id", self.tenant_id), ("project_id", self.project_id))
+            if value is not None
+        }
 
     @classmethod
     def from_claims(cls, claims: dict[str, Any]) -> Principal:
@@ -301,11 +273,11 @@ class Principal:
             return ""
 
         subject = claim_text("sub")
-        tenant_id = claim_text("tenant_id", "tenant")
-        project_id = claim_text("project_id", "project")
-        jti = claim_text("jti")
-        if not subject or not tenant_id or not project_id or not jti:
-            raise AuthenticationError("delegation JWT requires sub, tenant_id, project_id, and jti")
+        tenant_id = claim_text("tenant_id", "tenant") or None
+        project_id = claim_text("project_id", "project") or None
+        jti = claim_text("jti") or subject
+        if not subject:
+            raise AuthenticationError("authentication claims require sub")
 
         def claim_set(*names: str) -> frozenset[str]:
             for name in names:
@@ -346,8 +318,10 @@ class Principal:
         subject = str(value("identity", value("sub", "")) or "").strip()
         if not subject:
             raise AuthenticationError("custom auth user must contain identity")
-        tenant_id = str(value("tenant_id", "__default") or "__default").strip()
-        project_id = str(value("project_id", "__default") or "__default").strip()
+        tenant_raw = value("tenant_id")
+        project_raw = value("project_id")
+        tenant_id = str(tenant_raw).strip() if tenant_raw is not None and str(tenant_raw).strip() else None
+        project_id = str(project_raw).strip() if project_raw is not None and str(project_raw).strip() else None
         raw_roles = value("roles", value("role", []))
         raw_scopes = value("scopes", value("permissions", []))
 
@@ -401,9 +375,7 @@ def in_principal_scope(resource: Any, principal: Principal | None) -> bool:
     """Return whether a persisted resource belongs to the request Principal."""
     if principal is None:
         return True
-    return all(
-        getattr(resource, key, None) == value for key, value in principal.scope_filter().items()
-    )
+    return all(getattr(resource, key, None) == value for key, value in principal.scope_filter().items())
 
 
 class PrincipalMiddleware:
