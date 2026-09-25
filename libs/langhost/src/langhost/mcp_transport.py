@@ -44,7 +44,7 @@ def _runtime_context(principal: Principal | None) -> dict[str, Any] | None:
         "permissions": sorted(principal.scopes),
         "auth_user": dict(principal.auth_user or {"identity": principal.subject}),
     }
-    for field in ("request_id", "platform_trace_id"):
+    for field in ("request_id",):
         value = getattr(principal, field, None)
         if value is not None:
             context[field] = value

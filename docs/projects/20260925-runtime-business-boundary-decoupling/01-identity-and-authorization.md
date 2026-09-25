@@ -86,8 +86,8 @@ ACL 仍由 platform-api 的 thread_access.get / require_action / visible_records
 |---|---|---|---|---|
 | A01 | G server/core_api/protocol_api/streaming/mcp_transport/store_api 挂载清单；锁定官方 Auth probe | 明确每个入口的事件和边界 | V-A01、V-A02 | 进行中：核心 API 授权盘点已确认大量直接 SQL scope 尚未清除；完整路由矩阵与官方 probe 未完成 |
 | A02 | G auth.py、生产 handlers；提取可复用纯 filter 逻辑 | 新授权在完整候选版本生效；固定 scope 直接移除，联合验证后部署 | V-A01—A04 | 部分完成：REST/SSE 资源授权已接入；协议 run 查找、input.respond 与历史/实时流撤权检查改用标准授权；`test_application_authorization.py` 14 passed、1 skipped，PG 项隔离运行时跳过。大量 REST 操作仍依赖旧 scope，未满足移列条件 |
-| A03 | P auth/platform.py、runtime/auth.py、gateway presentation + application；内部授权端点 | operation/目标校验、ACL 复核、可信 metadata | V-A03—A06 | 部分完成：内部批量 ACL 端点及线程授权回查已完成；创建回查现限定为同项目、同 owner 且仍处于 pending 的预留，避免 ready 后重放创建委托；read 委托仅允许 thread 读取/搜索，未支持资源拒绝。平台 API 对应测试本次因环境缺少 pytest 未运行；`test_platform_auth.py` 23 项通过。创建对账、撤权全链路与全入口矩阵未完成 |
-| A04 | P gateway create_thread/copy/补偿与 thread_access | 创建、超时、对账不发生授权空窗 | V-A06 | 部分完成：先 ACL 预留；`thread-create` UUID 绑定且不伪造 assistant；明确 4xx 清理，5xx/504 保留 pending 预留；成功创建标记 ready。create ACL 回查现仅授权 pending owner。受限后台读取委托与对账任务尚未实现 |
+| A03 | P auth/platform.py、runtime/auth.py、gateway presentation + application；内部授权端点 | operation/目标校验、ACL 复核、可信 metadata | V-A03—A06 | 部分完成：内部批量 ACL 端点与线程回查已完成；创建回查限 pending 且 owner/project 匹配；Runtime Auth 限制委托 operation 并 fail-closed。2026-09-25 平台 ACL/runtime delegation 定向 pytest：36 passed、3 skipped、335 subtests passed；Runtime Auth：43 passed。全入口授权差分、撤权链路和 production API 直连矩阵未完成 |
+| A04 | P gateway create_thread/copy/补偿与 thread_access | 创建、超时、对账不发生授权空窗 | V-A06 | 部分完成：先 ACL 预留；`thread-create` UUID 绑定且不伪造 assistant；明确 4xx 清理，5xx/504 保留 pending 预留；用户可对账自身 pending 线程，Runtime 用受限 reconcile 委托读取并置 ready。缺少可调度的 pending 对账执行器和故障注入全链路验收 |
 | A05 | G auth.py/core_api/graph_executor/production_worker；P graph factories | v2 传递任意合法自定义 user；无业务特判 | V-A07—A08 | 部分完成：v2 accepted_at 快照、run/thread 绑定、opaque auth_user、MCP 同步；平台敏感策略与排队/重启全链路待验 |
 | A06 | 完成 04 后删除固定 Principal/scope/旧身份分支及陈旧测试假设 | 核心运行链不依赖固定身份结构 | V-A09 + Final | 待开始 |
 
@@ -110,6 +110,8 @@ ACL 仍由 platform-api 的 thread_access.get / require_action / visible_records
 **2026-09-25 授权链路续做：** GraphHarbor thread/run SSE 在首次读取及历史回放、实时发送和心跳周期复核资源授权；协议事件流同样在回放与实时阶段复核 thread 授权。协议 latest/idempotency run 查询绑定 thread 并调用 `_authorized_run`；`input.respond` 在消费中断状态前要求 update 权限。Runtime Auth 对非 thread 资源 fail-closed，仅允许委托绑定的 assistant 读取（含 GraphHarbor graph UUID），明确拒绝 cron/Store/其他资源；read 委托禁止 thread 写入与执行。验证：GraphHarbor `uv run ruff check libs/langhost/src/langhost/streaming.py libs/langhost/src/langhost/protocol_api.py` 通过，授权测试 14 passed、1 skipped；平台 Runtime Service 授权测试 23 passed；两仓 `git diff --check` 通过。未覆盖 SSE 撤权并发集成、实际 ACL 服务联合调用和 PostgreSQL 资源矩阵。核心 REST/管理接口仍有旧 SQL scope，故 SQL 列尚不能删除。
 
 **2026-09-25 创建授权收口：** 平台 `thread_access.pending_owner` 将 Runtime `create` 回查限制为仍 pending、project 与 owner 均匹配的 UUID 预留；ready ACL 不再接受创建委托重放。由于 platform-api 虚拟环境缺少 pytest，使用 `python -m unittest tests.test_thread_acl -q` 验证：15 项通过、3 项跳过；直接执行 `tests/test_runtime_thread_authorization.py` 的 3 个断言检查通过。相关文件 `compileall` 和平台 `git diff --check` 通过；平台 Ruff 未安装，未运行。Runtime Service `tests/runtime/test_platform_auth.py` 23 passed。后台只读委托和可调度对账机制仍未实现。
+
+**2026-09-25 联合定向复测：** Runtime Service `tests/runtime/test_platform_auth.py`、`test_auth.py`：43 passed；Platform API `test_thread_acl.py`、`test_runtime_gateway_http_matrix.py`、`test_runtime_delegation.py`：36 passed、3 skipped、335 subtests passed。测试使用 `apps/runtime-service/.venv` 并从 `apps/platform-api` 设置 `PYTHONPATH=src`。GraphHarbor PostgreSQL 17 隔离库 `graphharbor_boundary_pg17` 上 `test_production_contract.py`：65 passed、4 skipped；完整 REST/cron/store 路由矩阵和旧 SQL scope 尚未完成。
 
 ## 状态
 

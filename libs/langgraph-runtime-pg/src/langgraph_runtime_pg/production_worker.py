@@ -209,19 +209,6 @@ class ProductionWorker:
         *,
         trace_context: dict[str, Any] | None = None,
     ) -> None:
-        if trace_context:
-            trace_context = {
-                key: value
-                for key, value in trace_context.items()
-                if key
-                not in {
-                    "model_id",
-                    "tenant_id",
-                    "project_id",
-                    "user_id",
-                    "tool_names",
-                }
-            }
         durable_events = []
         async with connect() as conn:
             if len(events) > 1 and all(_is_message_delta(event) for event in events):
@@ -433,11 +420,6 @@ class ProductionWorker:
                         not in {
                             "thread_id",
                             "run_id",
-                            "tenant_id",
-                            "project_id",
-                            "user_id",
-                            "role",
-                            "permissions",
                             "__pregel_runtime",
                             "__graphharbor_runtime_context",
                         }
@@ -495,11 +477,6 @@ class ProductionWorker:
                             "request_id": (
                                 runtime_context.get("request_id") if runtime_context else None
                             ),
-                            "platform_trace_id": (
-                                runtime_context.get("platform_trace_id")
-                                if runtime_context
-                                else None
-                            ),
                         }
                     )
                     if thread is not None and isinstance(thread.metadata_, dict):
@@ -512,11 +489,6 @@ class ProductionWorker:
                         "graph_id": str(graph_id),
                         "request_id": (
                             str(runtime_context.get("request_id") or "")
-                            if runtime_context
-                            else None
-                        ),
-                        "platform_trace_id": (
-                            str(runtime_context.get("platform_trace_id") or "")
                             if runtime_context
                             else None
                         ),

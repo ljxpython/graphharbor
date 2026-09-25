@@ -42,7 +42,7 @@ def test_build_trace_metadata_redacts_sensitive_payload() -> None:
     assert "project_id" not in trace
     assert "user_id" not in trace
     assert trace["request_id"] == "request-1"
-    assert trace["platform_trace_id"] == "platform-trace-1"
+    assert "platform_trace_id" not in trace
     assert trace["event"] == "lifecycle"
     assert trace["reason"] == "completed"
     assert trace["namespace"]["kind"] == "list"
@@ -152,6 +152,8 @@ async def test_worker_publish_event_forwards_trace_context(monkeypatch) -> None:
     assert captured["trace_context"] == {
         "assistant_id": "assistant-1",
         "graph_id": "assistant",
+        "model_id": "model-a",
+        "user_id": "user-1",
         "request_id": "request-1",
         "platform_trace_id": "platform-trace-1",
     }
@@ -269,6 +271,5 @@ async def test_worker_run_forwards_trace_context_to_graph_events(monkeypatch) ->
             "assistant_version": "1",
             "graph_id": "assistant",
             "request_id": "request-1",
-            "platform_trace_id": "platform-trace-1",
         }
     )

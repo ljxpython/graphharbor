@@ -34,24 +34,24 @@ GraphHarbor 核心发行包不提供 DeepAgent 工作目录、业务 skills 路�
 
 | ID | 改动内容 / 代码位置 | 预期结果 | 验证项 | 状态 |
 |---|---|---|---|---|
-| C01 | 两仓 workspace imports、示例、test_deepagent_workspace.py、平台 workspace tests | 消费者清单和安全覆盖差异；平台无需搬工作区 | V-C01、V-C02 | 待开始 |
-| C02 | P workspace/deepagent.py、scoped.py、resource_bindings.py、相关 tests | 缺失安全覆盖补齐；可信 metadata 约束明确 | V-C02—C04 | 待开始 |
-| C03 | G deepagent_workspace.py、pyproject 打包、专属测试/文档、迁移说明 | 发行包无业务 workspace 实现，平台正常使用 | V-C01、V-C05 | 部分完成：源码与专属测试已移除；wheel 构建因当前环境缺少 `build` 模块待补 |
+| C01 | 两仓 workspace imports、示例、test_deepagent_workspace.py、平台 workspace tests | 消费者清单和安全覆盖差异；平台无需搬工作区 | V-C01、V-C02 | 阶段完成：两仓可控源码无 GraphHarbor workspace import；平台保留其 workspace 实现，定向安全测试通过 |
+| C02 | P workspace/deepagent.py、scoped.py、resource_bindings.py、相关 tests | 缺失安全覆盖补齐；可信 metadata 约束明确 | V-C02—C04 | 部分完成：thread workspace 隔离、资源绑定、文件浏览、HTTP、zip、terminal 定向测试共 54 passed；Showcase/DearFlow 完整浏览器工作流与 restart/HITL/fork 联合恢复仍待验 |
+| C03 | G deepagent_workspace.py、pyproject 打包、专属测试/文档、迁移说明 | 发行包无业务 workspace 实现，平台正常使用 | V-C01、V-C05 | 源码和专属测试已移除；2026-09-25 使用 `uv build --all-packages --out-dir /tmp/graphharbor-boundary-build-20260925` 成功构建两包 wheel/sdist；runtime wheel/sdist 均不含 workspace 模块。干净安装与平台候选 wheel 启动待验 |
 
 ## 验证要求与记录
 
-- [ ] V-C01：两仓源码和可控消费者无 GraphHarbor workspace import；破坏性删除与平台升级说明有记录，不保留旧模块兼容。
+- [x] V-C01：两仓源码和可控消费者无 GraphHarbor workspace import；破坏性删除与平台升级说明有记录，不保留旧模块兼容。复查 GraphHarbor `libs`/`tests` 无 workspace 导入，平台 workspace 消费留在 `runtime-service`。
 - [ ] V-C02：路径穿越、绝对路径、symlink 逃逸、非法组件、skills 来源、已有文件读写；跨 tenant/project/thread 均隔离。
 - [ ] V-C03：伪造 __graphharbor_thread_metadata/runtime_resource_bindings 无效；可信历史绑定可在 restart、HITL、fork 后按原策略解析。
 - [ ] V-C04：Showcase 与 DearFlow 文件树、创建、预览、下载、zip、terminal、skills、fork/workspace 重连走既有授权；旧路径可读，不发生文件迁移。
-- [ ] V-C05：干净 wheel 安装环境检查包成员/import；安装通用 GraphHarbor 不依赖平台或 DeepAgent workspace；平台从候选 wheel 启动并通过文件链路。
+- [ ] V-C05：wheel/sdist 成员检查通过，两包构建成功；干净 wheel 安装/import 和平台从候选 wheel 启动并通过文件链路仍未运行。
 
 复用 G test_deepagent_workspace.py 中安全案例；P test_thread_workspace_isolation.py、test_workspace_http.py、test_workspace_zip.py、runtime/test_resource_bindings.py、services/test_workspace_policy.py、test_terminal_http.py 与平台网关 workspace/files tests。Final 加一条真实浏览器创建文件→预览→下载验收，不要求真实模型作为路径安全基线。
 
 **2026-09-25 调研记录：** 平台本地 workspace 模块与 GraphHarbor 残留源文件已核对；尚未构建候选 wheel、执行文件或浏览器测试。没有移动用户 workspace。
 
-**2026-09-25 实施记录：** GraphHarbor 已删除 `deepagent_workspace.py` 及专属测试，源码无可控消费者；平台 workspace 保留。候选 wheel 尚未构建（环境缺少 `build` 模块），V-C05 未完成。
+**2026-09-25 实施记录：** GraphHarbor 已删除 `deepagent_workspace.py` 及专属测试，源码无可控消费者；平台 workspace 保留。Runtime Service workspace 定向测试 54 passed。两包 wheel/sdist 在临时目录构建成功；`graphharbor_runtime` wheel 与 sdist 成员均不含 `deepagent_workspace.py`。尚未在干净环境安装 wheel，未运行浏览器链路。
 
 ## 状态
 
-规划完成，待人工评审；可独立实施验收，但不能替代 01/04 的安全与迁移准入。
+partial：C01 阶段完成，C03 源码与构建/成员检查完成；C02 平台全业务文件链路及 C03 干净安装/候选包集成未完成。不能替代 01/04 的安全与迁移准入。

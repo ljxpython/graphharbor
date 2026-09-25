@@ -267,6 +267,51 @@ async def test_worker_event_batch_fanout_follows_commit(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_worker_preserves_application_configurable_fields(pg_runtime, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.models import AssistantRow, RunRow, ThreadRow
+    from langgraph_runtime_pg.production_worker import ProductionWorker
+
+    assistant_id, thread_id, run_id = uuid4(), uuid4(), uuid4()
+    async with connect() as conn:
+        conn.session.add(AssistantRow(
+            assistant_id=assistant_id, graph_id="assistant", name="config-test",
+            config={}, context={}, metadata_={},
+        ))
+        conn.session.add(ThreadRow(
+            thread_id=thread_id, status="idle", metadata_={}, config={}, interrupts={},
+        ))
+        conn.session.add(RunRow(
+            run_id=run_id, assistant_id=assistant_id, thread_id=thread_id,
+            status="pending", metadata_={}, kwargs={
+                "input": {}, "config": {"configurable": {
+                    "tenant_id": "custom-tenant", "project_id": "custom-project",
+                    "user_id": "custom-user", "role": "custom-role",
+                    "permissions": ["custom:read"],
+                }},
+            },
+        ))
+
+    seen = {}
+
+    async def fake_invoke(*_args, **kwargs):
+        seen.update(kwargs["config"]["configurable"])
+        return SimpleNamespace(value={"ok": True}, interrupts=())
+
+    monkeypatch.setattr("langgraph_runtime_pg.production_worker.invoke_graph", fake_invoke)
+    assert await ProductionWorker(SimpleNamespace(open=_open_fake_graph), owner="config-test").run_once()
+    assert {key: seen[key] for key in (
+        "tenant_id", "project_id", "user_id", "role", "permissions"
+    )} == {
+        "tenant_id": "custom-tenant", "project_id": "custom-project",
+        "user_id": "custom-user", "role": "custom-role",
+        "permissions": ["custom:read"],
+    }
+
+
+@pytest.mark.asyncio
 async def test_four_worker_slots_execute_distinct_threads_together(pg_runtime, monkeypatch) -> None:
     from types import SimpleNamespace
 
@@ -818,7 +863,6 @@ def test_delegation_policy_is_bound_to_principal_and_runtime_context(monkeypatch
         "permissions": ["runs:write"],
         "accepted_at": int(now.timestamp()),
         "request_id": "request-1",
-        "platform_trace_id": "platform-trace-1",
     }
     signed = sign_runtime_context(
         context,
@@ -893,7 +937,6 @@ def test_api_principal_producer_preserves_correlation(monkeypatch) -> None:
         "permissions": ["runs:write"],
         "auth_user": principal.auth_user,
         "request_id": "request-1",
-        "platform_trace_id": "platform-trace-1",
     }
 
 
@@ -1233,6 +1276,7 @@ async def test_pending_rollback_never_deletes_thread_checkpoints(
 async def test_production_auth_rejects_missing_management_and_scope_override(
     pg_runtime, monkeypatch
 ) -> None:
+    from langgraph_sdk import Auth
     from starlette.applications import Starlette
     from starlette.requests import Request
     from starlette.responses import JSONResponse
@@ -1268,7 +1312,10 @@ async def test_production_auth_rejects_missing_management_and_scope_override(
     async def principal_route(request: Request) -> JSONResponse:
         return JSONResponse({"tenant_id": request.scope["principal"].tenant_id})
 
-    def authenticate(authorization: str | None):
+    auth = Auth()
+
+    @auth.authenticate
+    async def authenticate(authorization: str | None):
         if not authorization or not authorization.startswith("Bearer "):
             raise ValueError("missing authorization header")
         claims = jwt.decode(
@@ -1285,7 +1332,7 @@ async def test_production_auth_rejects_missing_management_and_scope_override(
         }
 
     # Authentication is supplied by an application hook, never an engine JWT fallback.
-    monkeypatch.setattr("langhost.server._load_symbol", lambda *_args: authenticate)
+    monkeypatch.setattr("langhost.server._load_symbol", lambda *_args: auth)
     app = create_app(
         {"graphs": {}, "auth": {"path": "test_auth:authenticate"}},
         custom_app=Starlette(routes=[Route("/internal/principal", principal_route)]),

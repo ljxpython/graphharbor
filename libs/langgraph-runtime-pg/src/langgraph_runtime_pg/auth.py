@@ -28,7 +28,7 @@ class RuntimeContextError(ValueError):
     pass
 
 
-_CORRELATION_FIELDS = ("request_id", "platform_trace_id")
+_CORRELATION_FIELDS = ("request_id",)
 _RUNTIME_CONTEXT_FIELDS = frozenset(
     {
         "accepted_at",
@@ -247,7 +247,6 @@ class Principal:
     claims: dict[str, Any] | None = None
     auth_user: dict[str, Any] | None = None
     request_id: str | None = None
-    platform_trace_id: str | None = None
 
     @property
     def sub(self) -> str:
@@ -289,7 +288,6 @@ class Principal:
             return frozenset()
 
         request_id = _correlation_value(claims.get("request_id"), "request_id")
-        platform_trace_id = _correlation_value(claims.get("platform_trace_id"), "platform_trace_id")
         return cls(
             subject=subject,
             tenant_id=tenant_id,
@@ -300,7 +298,6 @@ class Principal:
             jti=jti,
             claims=dict(claims),
             request_id=request_id,
-            platform_trace_id=platform_trace_id,
         )
 
     @classmethod
@@ -350,9 +347,6 @@ class Principal:
             claims=dict(auth_user),
             auth_user=auth_user,
             request_id=_correlation_value(auth_user.get("request_id"), "request_id"),
-            platform_trace_id=_correlation_value(
-                auth_user.get("platform_trace_id"), "platform_trace_id"
-            ),
         )
 
 

@@ -16,7 +16,6 @@ _DEFAULT_TRACE_CONTEXT_KEYS = (
     "deployment_version",
     "graph_id",
     "request_id",
-    "platform_trace_id",
 )
 
 _SUMMARY_KEYS = ("data", "input", "output", "error", "interrupts", "content", "prompt", "response")
