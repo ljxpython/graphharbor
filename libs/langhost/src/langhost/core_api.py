@@ -18,7 +18,6 @@ from starlette.responses import JSONResponse, Response
 from langgraph_runtime_pg.auth import (
     in_principal_scope,
     principal_from_scope,
-    scope_override_error,
     sign_runtime_context,
 )
 from langgraph_runtime_pg.authorization import authorize, metadata_predicate
@@ -181,20 +180,6 @@ def _no_content() -> Response:
 
 
 def _scope(query: Any, model: Any, principal: Any) -> Any:
-    if principal is not None:
-        condition = and_(
-            model.tenant_id == principal.tenant_id, model.project_id == principal.project_id
-        )
-        if model is AssistantRow:
-            condition = or_(
-                condition,
-                and_(
-                    model.tenant_id.is_(None),
-                    model.project_id.is_(None),
-                    model.metadata_["created_by"].as_string() == "system",
-                ),
-            )
-        query = query.where(condition)
     return query
 
 
@@ -364,8 +349,6 @@ async def assistants_count(request: Request) -> JSONResponse:
 async def assistants_create(request: Request) -> JSONResponse:
     principal = _principal(request)
     payload = await request.json()
-    if error := scope_override_error(payload, principal):
-        return _error(error, 403)
     graph_id = str(payload.get("graph_id") or "")
     if not graph_id:
         return _error("graph_id is required")
@@ -387,8 +370,6 @@ async def assistants_create(request: Request) -> JSONResponse:
             return _error("assistant already exists", 409)
         row = AssistantRow(
             assistant_id=assistant_id,
-            tenant_id=principal.tenant_id if principal else payload.get("tenant_id"),
-            project_id=principal.project_id if principal else payload.get("project_id"),
             graph_id=graph_id,
             name=str(payload.get("name") or "Untitled"),
             description=payload.get("description"),
@@ -484,12 +465,7 @@ async def register_default_assistants(registry: Any) -> None:
 
 
 def _assistant_readable(row: Any, principal: Any) -> bool:
-    return in_principal_scope(row, principal) or (
-        row.tenant_id is None
-        and row.project_id is None
-        and row.metadata_.get("created_by") == "system"
-        and row.assistant_id == uuid5(NAMESPACE_URL, row.graph_id)
-    )
+    return in_principal_scope(row, principal)
 
 
 async def assistants_schemas(request: Request) -> JSONResponse:
@@ -498,10 +474,16 @@ async def assistants_schemas(request: Request) -> JSONResponse:
     if registry is None:
         return _error("assistant not found", 404)
     graph_id = request.path_params["assistant_id"]
-    async with connect() as conn:
-        authorized = await _resolve_assistant(request, conn.session, graph_id, principal)
-    if authorized is None:
-        return _error("assistant not found", 404)
+    if graph_id not in registry.ids():
+        try:
+            UUID(graph_id)
+        except ValueError:
+            return _error("assistant not found", 404)
+    if not (principal is None and getattr(request.app.state, "auth_handler", None) is None and graph_id in registry.ids()):
+        async with connect() as conn:
+            authorized = await _resolve_assistant(request, conn.session, graph_id, principal)
+        if authorized is None:
+            return _error("assistant not found", 404)
     if graph_id not in registry.ids():
         try:
             assistant_id = UUID(graph_id)
@@ -572,8 +554,6 @@ async def assistants_update(request: Request) -> JSONResponse:
     except ValueError:
         return _error("assistant not found", 404)
     payload = await request.json()
-    if error := scope_override_error(payload, principal):
-        return _error(error, 403)
     async with connect() as conn:
         row = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id, "update", payload)
         if row is None or not in_principal_scope(row, principal):
@@ -690,8 +670,6 @@ async def threads_create(request: Request) -> JSONResponse:
     payload = await _thread_create_payload(request)
     if isinstance(payload, JSONResponse):
         return payload
-    if error := scope_override_error(payload, principal):
-        return _error(error, 403)
     thread_id = UUID(str(payload["thread_id"])) if payload.get("thread_id") else uuid4()
     payload["thread_id"] = thread_id
     filters = await _authorize(request, "threads", "create", payload)
@@ -709,8 +687,6 @@ async def threads_create(request: Request) -> JSONResponse:
             return _error("thread already exists", 409)
         row = ThreadRow(
             thread_id=thread_id,
-            tenant_id=principal.tenant_id if principal else payload.get("tenant_id"),
-            project_id=principal.project_id if principal else payload.get("project_id"),
             graph_id=str(graph_id) if graph_id else None,
             status="idle",
             metadata_=metadata,
@@ -803,8 +779,6 @@ async def threads_update(request: Request) -> JSONResponse | Response:
     row, principal, _ = await _get_thread(request, action="update", value=payload)
     if row is None:
         return _error("thread not found", 404)
-    if error := scope_override_error(payload, principal):
-        return _error(error, 403)
     if not isinstance(payload.get("metadata"), dict):
         return _error("metadata must be an object")
     async with connect() as conn:
@@ -1065,8 +1039,6 @@ async def threads_copy(request: Request) -> JSONResponse:
     async with connect() as conn:
         copied = ThreadRow(
             thread_id=target_id,
-            tenant_id=row.tenant_id,
-            project_id=row.project_id,
             graph_id=row.graph_id,
             status=row.status,
             metadata_=target["metadata"],
@@ -1174,8 +1146,6 @@ async def _thread_for_run(
         await _authorize(request, "threads", "create", value)
         thread = ThreadRow(
             thread_id=thread_id,
-            tenant_id=principal.tenant_id if principal else None,
-            project_id=principal.project_id if principal else None,
             status="idle",
             metadata_=value["metadata"],
             config={},
@@ -1196,8 +1166,6 @@ async def runs_create(
     payload = payload if payload is not None else await request.json()
     if payload.get("input") is not None and payload.get("command") is not None:
         return _error("input and command cannot be combined")
-    if error := scope_override_error(payload, principal):
-        return _error(error, 403)
     assistant_value = str(payload.get("assistant_id") or "")
     if not assistant_value:
         return _error("assistant_id is required")
@@ -1206,6 +1174,9 @@ async def runs_create(
     filters = await _authorize(request, "threads", "create_run", authorization_value)
     payload["metadata"] = authorization_value.get("metadata", {})
     async with connect() as conn:
+        assistant = await _resolve_assistant(request, conn.session, assistant_value, principal)
+        if assistant is None:
+            return _error("assistant not found", 404)
         thread = await _thread_for_run(
             request,
             conn.session,
@@ -1222,9 +1193,6 @@ async def runs_create(
             ))
             if allowed is None:
                 return _error("thread not found", 404)
-        assistant = await _resolve_assistant(request, conn.session, assistant_value, principal)
-        if assistant is None:
-            return _error("assistant not found", 404)
         run_payload = dict(payload)
         run_payload.pop("runtime_context", None)
         run_payload.pop("runtime_context_token", None)
@@ -1264,7 +1232,8 @@ async def runs_create(
         trusted_context = _runtime_context(run_payload, principal)
         if trusted_context is not None:
             run_payload["runtime_context"] = trusted_context
-        idempotency_key = request.headers.get("idempotency-key") or payload.get("idempotency_key")
+        raw_idempotency_key = request.headers.get("idempotency-key") or payload.get("idempotency_key")
+        idempotency_key = principal.idempotency_key(str(raw_idempotency_key)) if principal and raw_idempotency_key else raw_idempotency_key
         try:
             run = await RunRepository().create(
                 conn.session,
@@ -1272,10 +1241,6 @@ async def runs_create(
                 thread_id=thread.thread_id if thread else None,
                 kwargs=run_payload,
                 metadata=payload.get("metadata") or {},
-                tenant_id=principal.tenant_id if principal else getattr(thread, "tenant_id", None),
-                project_id=principal.project_id
-                if principal
-                else getattr(thread, "project_id", None),
                 idempotency_key=idempotency_key,
                 multitask_strategy=str(payload.get("multitask_strategy") or "enqueue"),
             )
@@ -1714,8 +1679,6 @@ async def cron_create(request: Request, *, thread_value: str | None = None) -> J
                 return _error("end_time must be an ISO date-time")
         row = CronRow(
             cron_id=uuid4(),
-            tenant_id=principal.tenant_id if principal else None,
-            project_id=principal.project_id if principal else None,
             assistant_id=assistant.assistant_id,
             thread_id=thread.thread_id if thread else None,
             schedule=str(payload["schedule"]),

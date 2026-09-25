@@ -38,10 +38,20 @@ async def test_empty_schema_migration_is_repeatable(pg_runtime) -> None:
     try:
         isolated_uri = _schema_uri(base_uri, schema)
         migration_config = alembic_config(isolated_uri, version_table_schema=schema)
-        command.upgrade(migration_config, "006_terminal_events")
-        assert upgrade_head(isolated_uri, version_table_schema=schema) == "007_checkpoint_baselines"
-        command.downgrade(migration_config, "006_terminal_events")
-        assert upgrade_head(isolated_uri, version_table_schema=schema) == "007_checkpoint_baselines"
+        command.upgrade(migration_config, "007_checkpoint_baselines")
+        with psycopg.connect(isolated_uri) as connection:
+            connection.execute(
+                "INSERT INTO threads (thread_id, status) VALUES (%s, 'idle')", (uuid4(),)
+            )
+        with pytest.raises(RuntimeError, match="threads must be empty"):
+            command.upgrade(migration_config, "head")
+        with psycopg.connect(isolated_uri) as connection:
+            assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
+                "007_checkpoint_baselines",
+            )
+            connection.execute("DELETE FROM threads")
+        assert upgrade_head(isolated_uri, version_table_schema=schema) == "008_remove_business_scope"
+        assert upgrade_head(isolated_uri, version_table_schema=schema) == "008_remove_business_scope"
         command.check(alembic_config(isolated_uri, version_table_schema=schema))
         with psycopg.connect(isolated_uri) as connection:
             tables = {
@@ -86,8 +96,6 @@ async def _seed_repository_runs(count: int = 1):
                     thread_id=thread_id,
                     kwargs={"input": {}},
                     metadata={},
-                    tenant_id=None,
-                    project_id=None,
                 )
             )
         await session.commit()

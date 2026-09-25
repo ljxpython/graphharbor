@@ -44,8 +44,6 @@ class AssistantRow(Base):
     assistant_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    tenant_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    project_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     graph_id: Mapped[str] = mapped_column(String(256), nullable=False)
     name: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -99,8 +97,6 @@ class ThreadRow(Base):
         PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     graph_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    tenant_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    project_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="idle")
     event_seq: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default=text("0")
@@ -131,11 +127,8 @@ class RunRow(Base):
         Index("ix_runs_thread_id_created_at", "thread_id", "created_at"),
         Index("ix_runs_assistant_id_status", "assistant_id", "status"),
         Index("ix_runs_next_attempt_at", "status", "next_attempt_at"),
-        Index("ix_runs_scope_status", "tenant_id", "project_id", "status"),
         Index(
-            "uq_runs_scope_idempotency",
-            "tenant_id",
-            "project_id",
+            "uq_runs_idempotency",
             "idempotency_key",
             unique=True,
             postgresql_where=text("idempotency_key IS NOT NULL"),
@@ -151,8 +144,6 @@ class RunRow(Base):
     run_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    tenant_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    project_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     thread_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     assistant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
@@ -208,7 +199,6 @@ class CronRow(Base):
         Index("ix_crons_enabled_next_run", "enabled", "next_run_date"),
         Index("ix_crons_assistant_id", "assistant_id"),
         Index("ix_crons_thread_id", "thread_id"),
-        Index("ix_crons_scope_enabled", "tenant_id", "project_id", "enabled"),
         Index(
             "ix_crons_metadata_gin",
             "metadata",
@@ -220,8 +210,6 @@ class CronRow(Base):
     cron_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    tenant_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    project_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     assistant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     thread_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     schedule: Mapped[str] = mapped_column(String(128), nullable=False)

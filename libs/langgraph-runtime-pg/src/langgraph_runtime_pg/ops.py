@@ -2878,10 +2878,6 @@ async def _insert_run_row(
         run_id=run_id,
         thread_id=thread_id,
         assistant_id=assistant_id,
-        tenant_id=getattr(existing_thread, "tenant_id", None)
-        or getattr(assistant, "tenant_id", None),
-        project_id=getattr(existing_thread, "project_id", None)
-        or getattr(assistant, "project_id", None),
         metadata_=merged_metadata,
         status=effective_status,
         reason=None,
@@ -2932,7 +2928,7 @@ def _build_run_configurable(
         "graph_id": assistant.graph_id,
         "assistant_id": str(assistant_id),
     }
-    for protected in ("user_id", "tenant_id", "project_id", "role", "permissions"):
+    for protected in ("user_id", "role", "permissions"):
         resolved.pop(protected, None)
     if user_id is not None:
         resolved["user_id"] = str(user_id)

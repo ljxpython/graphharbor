@@ -64,8 +64,6 @@ class RunRepository:
         thread_id: UUID | None,
         kwargs: dict[str, Any],
         metadata: dict[str, Any] | None,
-        tenant_id: str | None,
-        project_id: str | None,
         idempotency_key: str | None = None,
         multitask_strategy: str | None = None,
     ) -> RunRow:
@@ -79,8 +77,6 @@ class RunRepository:
         if idempotency_key:
             existing = await session.scalar(
                 select(RunRow).where(
-                    RunRow.tenant_id == tenant_id,
-                    RunRow.project_id == project_id,
                     RunRow.idempotency_key == idempotency_key,
                 )
             )
@@ -102,8 +98,6 @@ class RunRepository:
         run = RunRow(
             assistant_id=assistant_id,
             thread_id=thread_id,
-            tenant_id=tenant_id,
-            project_id=project_id,
             status=RunStatus.PENDING.value,
             metadata_=dict(metadata or {}),
             kwargs=dict(kwargs),
@@ -122,8 +116,6 @@ class RunRepository:
                 raise
             existing = await session.scalar(
                 select(RunRow).where(
-                    RunRow.tenant_id == tenant_id,
-                    RunRow.project_id == project_id,
                     RunRow.idempotency_key == idempotency_key,
                 )
             )

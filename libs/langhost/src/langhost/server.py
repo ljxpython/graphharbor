@@ -26,7 +26,6 @@ from langgraph_runtime_pg.auth import (
     PrincipalMiddleware,
     in_principal_scope,
     principal_from_scope,
-    scope_override_error,
 )
 from langgraph_runtime_pg.checkpoint import get_checkpointer
 from langgraph_runtime_pg.database import connect, pool_stats
@@ -377,11 +376,6 @@ async def _capability_unavailable(request: Request) -> JSONResponse:
 
 
 def _scope_query(query: Any, model: Any, principal: Any) -> Any:
-    if principal is not None:
-        query = query.where(
-            model.tenant_id == principal.tenant_id,
-            model.project_id == principal.project_id,
-        )
     return query
 
 
@@ -444,8 +438,6 @@ async def _assistant_update(request: Request) -> JSONResponse:
     except ValueError:
         return JSONResponse({"detail": "assistant not found"}, status_code=404)
     payload = await request.json()
-    if error := scope_override_error(payload, principal):
-        return JSONResponse({"detail": error}, status_code=403)
     async with connect() as conn:
         query = _scope_query(
             select(AssistantRow).where(AssistantRow.assistant_id == assistant_id),
@@ -507,18 +499,12 @@ async def _threads(request: Request) -> JSONResponse:
     return await threads_search(request)
 
 async def _assistant_get(request: Request) -> JSONResponse:
-    principal = _principal(request)
     try:
         assistant_id = UUID(request.path_params["assistant_id"])
     except ValueError:
         return JSONResponse({"detail": "assistant not found"}, status_code=404)
     async with connect() as conn:
         query = select(AssistantRow).where(AssistantRow.assistant_id == assistant_id)
-        if principal:
-            query = query.where(
-                AssistantRow.tenant_id == principal.tenant_id,
-                AssistantRow.project_id == principal.project_id,
-            )
         row = (await conn.session.execute(query)).scalar_one_or_none()
         if row is None:
             return JSONResponse({"detail": "assistant not found"}, status_code=404)
@@ -546,11 +532,6 @@ async def _resolve_assistant(
         query = select(AssistantRow).where(AssistantRow.assistant_id == assistant_id)
     except ValueError:
         query = select(AssistantRow).where(AssistantRow.graph_id == assistant_value)
-    if principal:
-        query = query.where(
-            AssistantRow.tenant_id == principal.tenant_id,
-            AssistantRow.project_id == principal.project_id,
-        )
     return (await session.execute(query.limit(1))).scalar_one_or_none()
 
 
@@ -571,17 +552,14 @@ async def _run_create(request: Request) -> JSONResponse:
             thread = await conn.session.get(ThreadRow, thread_id)
             if thread is None or not in_principal_scope(thread, principal):
                 return JSONResponse({"detail": "thread not found"}, status_code=404)
-        idempotency_key = request.headers.get("idempotency-key") or payload.get("idempotency_key")
-        if error := scope_override_error(payload, principal):
-            return JSONResponse({"detail": error}, status_code=403)
+        raw_idempotency_key = request.headers.get("idempotency-key") or payload.get("idempotency_key")
+        idempotency_key = principal.idempotency_key(str(raw_idempotency_key)) if principal and raw_idempotency_key else raw_idempotency_key
         run = await RunRepository().create(
             conn.session,
             assistant_id=assistant.assistant_id,
             thread_id=thread_id,
             kwargs=payload,
             metadata=payload.get("metadata") or {},
-            tenant_id=principal.tenant_id if principal else getattr(thread, "tenant_id", None),
-            project_id=principal.project_id if principal else getattr(thread, "project_id", None),
             idempotency_key=idempotency_key,
         )
         await conn.session.refresh(run)
@@ -601,17 +579,11 @@ async def _run_get(request: Request) -> JSONResponse:
 
 
 async def _run_list(request: Request) -> JSONResponse:
-    principal = _principal(request)
     thread_id = UUID(request.path_params["thread_id"])
     async with connect() as conn:
         query = (
             select(RunRow).where(RunRow.thread_id == thread_id).order_by(RunRow.created_at.desc())
         )
-        if principal:
-            query = query.where(
-                RunRow.tenant_id == principal.tenant_id,
-                RunRow.project_id == principal.project_id,
-            )
         rows = (await conn.session.execute(query)).scalars().all()
         return JSONResponse([_run_payload(row) for row in rows])
 

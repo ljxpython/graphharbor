@@ -11,6 +11,7 @@ import os
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Any
 
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -238,8 +239,6 @@ def verify_runtime_context_envelope(
 @dataclass(frozen=True, slots=True)
 class Principal:
     subject: str
-    tenant_id: str | None = None
-    project_id: str | None = None
     roles: frozenset[str] = frozenset()
     scopes: frozenset[str] = frozenset()
     credential_type: str = "custom_auth"
@@ -255,12 +254,11 @@ class Principal:
     def can(self, scope: str) -> bool:
         return scope in self.scopes or "*" in self.scopes
 
-    def scope_filter(self) -> dict[str, str]:
-        return {
-            key: value
-            for key, value in (("tenant_id", self.tenant_id), ("project_id", self.project_id))
-            if value is not None
-        }
+    def idempotency_key(self, key: str | None) -> str | None:
+        """Bind client retry keys to the authenticated generic identity."""
+        if not key:
+            return None
+        return sha256(f"{self.subject}\0{key}".encode()).hexdigest()
 
     @classmethod
     def from_claims(cls, claims: dict[str, Any]) -> Principal:
@@ -272,8 +270,6 @@ class Principal:
             return ""
 
         subject = claim_text("sub")
-        tenant_id = claim_text("tenant_id", "tenant") or None
-        project_id = claim_text("project_id", "project") or None
         jti = claim_text("jti") or subject
         if not subject:
             raise AuthenticationError("authentication claims require sub")
@@ -290,8 +286,6 @@ class Principal:
         request_id = _correlation_value(claims.get("request_id"), "request_id")
         return cls(
             subject=subject,
-            tenant_id=tenant_id,
-            project_id=project_id,
             roles=claim_set("roles", "role"),
             scopes=claim_set("scope", "scopes"),
             credential_type="delegation",
@@ -315,10 +309,6 @@ class Principal:
         subject = str(value("identity", value("sub", "")) or "").strip()
         if not subject:
             raise AuthenticationError("custom auth user must contain identity")
-        tenant_raw = value("tenant_id")
-        project_raw = value("project_id")
-        tenant_id = str(tenant_raw).strip() if tenant_raw is not None and str(tenant_raw).strip() else None
-        project_id = str(project_raw).strip() if project_raw is not None and str(project_raw).strip() else None
         raw_roles = value("roles", value("role", []))
         raw_scopes = value("scopes", value("permissions", []))
 
@@ -338,8 +328,6 @@ class Principal:
             raise AuthenticationError(str(exc)) from exc
         return cls(
             subject=subject,
-            tenant_id=tenant_id,
-            project_id=project_id,
             roles=normalize(raw_roles),
             scopes=normalize(raw_scopes),
             credential_type=str(value("credential_type", "custom_auth")),
@@ -355,21 +343,10 @@ def principal_from_scope(scope: Scope) -> Principal | None:
     return value if isinstance(value, Principal) else None
 
 
-def scope_override_error(payload: dict[str, Any], principal: Principal | None) -> str | None:
-    """Reject tenant/project values supplied by a client when a Principal exists."""
-    if principal is None:
-        return None
-    for claim, expected in principal.scope_filter().items():
-        if claim in payload and payload[claim] != expected:
-            return f"{claim} is owned by the authenticated Principal"
-    return None
-
-
 def in_principal_scope(resource: Any, principal: Principal | None) -> bool:
     """Return whether a persisted resource belongs to the request Principal."""
-    if principal is None:
-        return True
-    return all(getattr(resource, key, None) == value for key, value in principal.scope_filter().items())
+    del resource, principal
+    return True
 
 
 class PrincipalMiddleware:

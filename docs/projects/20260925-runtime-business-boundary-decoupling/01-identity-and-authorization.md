@@ -84,12 +84,12 @@ ACL 仍由 platform-api 的 thread_access.get / require_action / visible_records
 
 | ID | 改动内容 / 代码位置 | 预期结果 | 验证项 | 状态 |
 |---|---|---|---|---|
-| A01 | G server/core_api/protocol_api/streaming/mcp_transport/store_api 挂载清单；锁定官方 Auth probe | 明确每个入口的事件和边界 | V-A01、V-A02 | 进行中：核心 API 授权盘点已确认大量直接 SQL scope 尚未清除；完整路由矩阵与官方 probe 未完成 |
-| A02 | G auth.py、生产 handlers；提取可复用纯 filter 逻辑 | 新授权在完整候选版本生效；固定 scope 直接移除，联合验证后部署 | V-A01—A04 | 部分完成：REST/SSE 资源授权已接入；协议 run 查找、input.respond 与历史/实时流撤权检查改用标准授权；`test_application_authorization.py` 14 passed、1 skipped，PG 项隔离运行时跳过。大量 REST 操作仍依赖旧 scope，未满足移列条件 |
+| A01 | G server/core_api/protocol_api/streaming/mcp_transport/store_api 挂载清单；锁定官方 Auth probe | 明确每个入口的事件和边界 | V-A01、V-A02 | 进行中：主路由与 SQL scope 已盘点；完整路由矩阵、官方 probe 未完成 |
+| A02 | G auth.py、生产 handlers；提取可复用纯 filter 逻辑 | 新授权在完整候选版本生效；固定 scope 直接移除，联合验证后部署 | V-A01—A04 | 部分完成：REST/SSE Auth filter 与撤权检查已接入；Principal 与 ORM 固定 scope 已移除。cron/MCP/Store/协议全入口拒绝副作用差分仍待验，禁止发布 |
 | A03 | P auth/platform.py、runtime/auth.py、gateway presentation + application；内部授权端点 | operation/目标校验、ACL 复核、可信 metadata | V-A03—A06 | 部分完成：内部批量 ACL 端点与线程回查已完成；创建回查限 pending 且 owner/project 匹配；Runtime Auth 限制委托 operation 并 fail-closed。2026-09-25 平台 ACL/runtime delegation 定向 pytest：36 passed、3 skipped、335 subtests passed；Runtime Auth：43 passed。全入口授权差分、撤权链路和 production API 直连矩阵未完成 |
 | A04 | P gateway create_thread/copy/补偿与 thread_access | 创建、超时、对账不发生授权空窗 | V-A06 | 部分完成：先 ACL 预留；`thread-create` UUID 绑定且不伪造 assistant；明确 4xx 清理，5xx/504 保留 pending 预留；用户可对账自身 pending 线程，Runtime 用受限 reconcile 委托读取并置 ready。探测 404 时 504 错误扩展现在返回 UUID 与 reconcile 路径；平台服务层 22 项通过、3 项跳过。其他故障注入和完整联合验收未完成 |
 | A05 | G auth.py/core_api/graph_executor/production_worker；P graph factories | v2 传递任意合法自定义 user；无业务特判 | V-A07—A08 | 部分完成：v2 accepted_at 快照、run/thread 绑定、opaque auth_user、MCP 同步；平台敏感策略与排队/重启全链路待验 |
-| A06 | 完成 04 后删除固定 Principal/scope/旧身份分支及陈旧测试假设 | 核心运行链不依赖固定身份结构 | V-A09 + Final | 待开始 |
+| A06 | 完成 04 后删除固定 Principal/scope/旧身份分支及陈旧测试假设 | 核心运行链不依赖固定身份结构 | V-A09 + Final | 部分完成：固定 Principal 字段、SQL 列与查询已删除；旧 helper 和测试仍需收口，Final 未完成 |
 
 ## 验证要求与记录
 
@@ -117,4 +117,4 @@ ACL 仍由 platform-api 的 thread_access.get / require_action / visible_records
 
 ## 状态
 
-partial：A02/A03/A04/A05 有阶段实现，A01/A06、PostgreSQL 联合验证和 Final 尚未完成；不能删除旧 SQL 隔离列或切换生产。
+partial：A02/A03/A04/A05/A06 有阶段实现，A01、完整 PostgreSQL 跨用户验证和 Final 尚未完成；候选代码虽移除旧 SQL 列，仍禁止生产切换。

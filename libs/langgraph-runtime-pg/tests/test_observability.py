@@ -172,8 +172,6 @@ async def test_worker_run_forwards_trace_context_to_graph_events(monkeypatch) ->
         run_id=run_id,
         thread_id=None,
         assistant_id=assistant_id,
-        tenant_id="tenant-1",
-        project_id="project-1",
         status="running",
         retry_count=0,
         kwargs={"input": {"value": 1}, "runtime_context_token": "signed"},

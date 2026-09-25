@@ -10,6 +10,59 @@ from langgraph_runtime_pg.authorization import authorize, metadata_predicate
 
 
 @pytest.mark.asyncio
+async def test_denied_assistant_does_not_create_implicit_thread(monkeypatch):
+    import os
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    import httpx
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from langgraph_runtime_pg.models import ThreadRow
+    from langhost import core_api, server
+
+    uri = os.environ.get("BOUNDARY_TEST_DATABASE_URI")
+    if not uri:
+        pytest.skip("Set BOUNDARY_TEST_DATABASE_URI to an isolated migrated PostgreSQL database")
+    engine = create_async_engine(uri)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    @asynccontextmanager
+    async def connect():
+        async with factory.begin() as session:
+            yield SimpleNamespace(session=session)
+
+    auth = Auth()
+
+    @auth.authenticate
+    async def authenticate():
+        return {"identity": "alice"}
+
+    @auth.on.assistants.read
+    async def deny_assistant(ctx, value):
+        return False
+
+    monkeypatch.setattr(core_api, "connect", connect)
+    monkeypatch.setattr(server, "_load_symbol", lambda *args: auth)
+    app = server.create_app({"graphs": {}, "auth": {"path": "fixture:auth"}})
+    thread_id = uuid4()
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                f"/threads/{thread_id}/runs",
+                json={"assistant_id": str(uuid4()), "if_not_exists": "create"},
+            )
+        assert response.status_code == 403
+        async with factory() as session:
+            assert await session.get(ThreadRow, thread_id) is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_store_authorization_owns_namespace_without_builtin_scope(monkeypatch):
     from types import SimpleNamespace
 

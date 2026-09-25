@@ -6,12 +6,13 @@ from unittest.mock import AsyncMock, Mock
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
+from langgraph_sdk import Auth
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from langgraph_runtime_pg.auth import PrincipalMiddleware
+from langgraph_runtime_pg.auth import Principal, PrincipalMiddleware
 from langgraph_runtime_pg.graph_registry import GraphRegistry
 from langhost import core_api
 
@@ -80,27 +81,34 @@ def test_discovery_requires_authentication(discovery_app):
         assert client.get("/assistants/agent/schemas").status_code == 401
 
 
-def test_assistant_uuid_schema_respects_project_scope(discovery_app, monkeypatch):
+def test_assistant_uuid_schema_respects_auth_callback(discovery_app, monkeypatch):
     assistant_id = uuid4()
-    row = SimpleNamespace(graph_id="agent", tenant_id="tenant", project_id="project-a")
+    row = SimpleNamespace(graph_id="agent")
+
+    async def execute(query):
+        return SimpleNamespace(scalar_one_or_none=lambda: row)
 
     async def get(model, key):
-        assert key == assistant_id
         return row
 
     @asynccontextmanager
     async def connect():
-        yield SimpleNamespace(session=SimpleNamespace(get=get))
+        yield SimpleNamespace(session=SimpleNamespace(get=get, execute=execute))
 
     monkeypatch.setattr(core_api, "connect", connect)
-    principal = SimpleNamespace(
-        scope_filter=lambda: {"tenant_id": "tenant", "project_id": "project-a"}
-    )
+    auth = Auth()
+
+    @auth.on.assistants
+    async def authorize(ctx, value):
+        return ctx.user.identity == "alice"
+
+    discovery_app.state.auth_handler = auth
+    principal = Principal.from_auth_user({"identity": "alice"})
     monkeypatch.setattr(core_api, "_principal", lambda request: principal)
     with TestClient(discovery_app) as client:
         assert client.get(f"/assistants/{assistant_id}/schemas").status_code == 200
-        principal.scope_filter = lambda: {"tenant_id": "tenant", "project_id": "project-b"}
-        assert client.get(f"/assistants/{assistant_id}/schemas").status_code == 404
+        principal = Principal.from_auth_user({"identity": "bob"})
+        assert client.get(f"/assistants/{assistant_id}/schemas").status_code == 403
 
 
 @pytest.mark.asyncio
@@ -129,8 +137,6 @@ async def test_defaults_registered_with_official_identity_and_searchable(
         assistant_id=uuid5(NAMESPACE_URL, "agent"),
         graph_id="agent",
         name="agent",
-        tenant_id=None,
-        project_id=None,
         metadata_={"created_by": "system"},
         config={},
         context={},
@@ -143,14 +149,7 @@ async def test_defaults_registered_with_official_identity_and_searchable(
     session.execute.return_value = SimpleNamespace(
         scalars=lambda: SimpleNamespace(all=lambda: [row])
     )
-    principal = SimpleNamespace(
-        tenant_id="tenant",
-        project_id="project",
-        scope_filter=lambda: {
-            "tenant_id": "tenant",
-            "project_id": "project",
-        },
-    )
+    principal = Principal.from_auth_user({"identity": "user"})
     monkeypatch.setattr(core_api, "_principal", lambda request: principal)
     assert core_api._assistant_readable(row, principal)
     with TestClient(discovery_app) as client:
@@ -163,7 +162,7 @@ async def test_defaults_registered_with_official_identity_and_searchable(
         assert client.post("/assistants/search", json={"limit": 0}).status_code == 422
     query = session.execute.await_args_list[0].args[0]
     sql = str(query)
-    assert "tenant_id IS NULL" in sql and "project_id IS NULL" in sql
+    assert "tenant_id" not in sql and "project_id" not in sql
     assert "LIMIT" in sql and "OFFSET" in sql
     session.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: row)
     resolved = await core_api._resolve_assistant(

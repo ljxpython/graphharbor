@@ -73,7 +73,7 @@ def test_run_state_rejects_cancelled_status_and_invalid_success_reason() -> None
     )
 
 
-def test_run_configurable_does_not_accept_client_identity_overrides() -> None:
+def test_run_configurable_preserves_application_fields_and_trusts_user_identity() -> None:
     from types import SimpleNamespace
 
     from langgraph_runtime_pg.ops import _build_run_configurable
@@ -98,7 +98,7 @@ def test_run_configurable_does_not_accept_client_identity_overrides() -> None:
     )
 
     assert result["user_id"] == "trusted-user"
-    assert "tenant_id" not in result
+    assert result["tenant_id"] == "client-tenant"
     assert "project_id" not in result
     assert "role" not in result
     assert "permissions" not in result
@@ -347,8 +347,6 @@ async def test_four_worker_slots_execute_distinct_threads_together(pg_runtime, m
                 thread_id=thread_id,
                 kwargs={"input": {}},
                 metadata={},
-                tenant_id=None,
-                project_id=None,
             )
 
     active = 0
@@ -409,8 +407,6 @@ async def test_multi_slot_shutdown_requeues_all_inflight_runs(pg_runtime, monkey
                 thread_id=thread_id,
                 kwargs={"input": {}},
                 metadata={},
-                tenant_id=None,
-                project_id=None,
             )
 
     started = asyncio.Event()
@@ -476,8 +472,6 @@ async def test_worker_preserves_v3_message_deltas_before_terminal(pg_runtime, mo
             thread_id=thread_id,
             kwargs={"input": {}},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         run_id = run.run_id
 
@@ -643,8 +637,6 @@ async def test_worker_requeues_and_refreshes_checkpointer_after_postgres_restart
             thread_id=thread_id,
             kwargs={"input": {}},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         run_id = run.run_id
 
@@ -758,7 +750,7 @@ def test_run_sse_v3_preserves_every_standard_stream_channel() -> None:
 
 @pytest.mark.skip(reason="DelegationJWTValidator moved to ai-agent-platform business layer")
 def test_delegation_principal_and_hs256_validation() -> None:
-    from langgraph_runtime_pg.auth import DelegationJWTValidator
+    from langgraph_runtime_pg.auth import DelegationJWTValidator, Principal
 
     now = datetime.now(UTC)
     token = jwt.encode(
@@ -783,8 +775,11 @@ def test_delegation_principal_and_hs256_validation() -> None:
         shared_secret="secret-secret-secret-secret-secret",
         algorithms=("HS256",),
     ).validate(token)
-    assert principal.scope_filter() == {"tenant_id": "tenant-1", "project_id": "project-1"}
     assert principal.can("threads:read")
+    assert principal.idempotency_key("retry-1") == principal.idempotency_key("retry-1")
+    assert principal.idempotency_key("retry-1") != Principal.from_claims(
+        {"sub": "user-2"}
+    ).idempotency_key("retry-1")
 
 
 @pytest.mark.skip(reason="RuntimePolicy moved to ai-agent-platform business layer")
@@ -1110,11 +1105,11 @@ async def test_migration_is_repeatable_and_schema_head_is_recorded(pg_runtime) -
     from langgraph_runtime_pg.database import connect, get_database_uri
     from langgraph_runtime_pg.migrate import upgrade_head
 
-    assert upgrade_head(get_database_uri()) == "007_checkpoint_baselines"
-    assert upgrade_head(get_database_uri()) == "007_checkpoint_baselines"
+    assert upgrade_head(get_database_uri()) == "008_remove_business_scope"
+    assert upgrade_head(get_database_uri()) == "008_remove_business_scope"
     async with connect() as conn:
         revision = await conn.session.scalar(text("SELECT version_num FROM alembic_version"))
-    assert revision == "007_checkpoint_baselines"
+    assert revision == "008_remove_business_scope"
 
 
 @pytest.mark.asyncio
@@ -1154,8 +1149,6 @@ async def test_record_event_repairs_stale_sequence_counters(pg_runtime, stale_cu
             thread_id=thread_id,
             kwargs={},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         conn.session.add(
             RuntimeEventRow(
@@ -1310,7 +1303,7 @@ async def test_production_auth_rejects_missing_management_and_scope_override(
     )
 
     async def principal_route(request: Request) -> JSONResponse:
-        return JSONResponse({"tenant_id": request.scope["principal"].tenant_id})
+        return JSONResponse({"identity": request.scope["principal"].subject})
 
     auth = Auth()
 
@@ -1341,11 +1334,6 @@ async def test_production_auth_rejects_missing_management_and_scope_override(
         missing = await client.get("/threads")
         management = await client.get(
             "/threads", headers={"x-graphharbor-management-key": "management-only"}
-        )
-        override = await client.post(
-            "/threads",
-            headers={"authorization": f"Bearer {token}"},
-            json={"tenant_id": "other-tenant", "project_id": "project-1"},
         )
         created = await client.post(
             "/threads",
@@ -1379,10 +1367,9 @@ async def test_production_auth_rejects_missing_management_and_scope_override(
         )
     assert missing.status_code == 401
     assert management.status_code == 403
-    assert override.status_code == 403
     assert created.status_code == 200
-    assert custom.status_code == 200 and custom.json() == {"tenant_id": "tenant-1"}
-    assert hidden.status_code == 404
+    assert custom.status_code == 200 and custom.json() == {"identity": "user-1"}
+    assert hidden.status_code == 200
 
 
 def test_production_custom_auth_does_not_require_builtin_jwt_config(monkeypatch) -> None:
@@ -1458,8 +1445,6 @@ async def test_run_repository_claim_renew_and_terminal_transition(pg_runtime) ->
             thread_id=None,
             kwargs={"input": {}},
             metadata={},
-            tenant_id="tenant-1",
-            project_id="project-1",
             idempotency_key="repo-run-1",
         )
         run_id = run.run_id
@@ -1521,8 +1506,6 @@ async def test_run_repository_requeues_claim_for_graceful_shutdown(pg_runtime) -
             thread_id=thread_id,
             kwargs={"input": {}},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         run_id = run.run_id
 
@@ -1567,8 +1550,6 @@ async def test_run_repository_does_not_claim_two_runs_on_one_thread(pg_runtime) 
             thread_id=thread_id,
             kwargs={"input": {"value": 1}},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         second = await repo.create(
             conn.session,
@@ -1576,8 +1557,6 @@ async def test_run_repository_does_not_claim_two_runs_on_one_thread(pg_runtime) 
             thread_id=thread_id,
             kwargs={"input": {"value": 2}},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
 
     async with connect() as conn:
@@ -1625,8 +1604,6 @@ async def test_run_repository_retries_with_backoff_and_reclaims_expired_lease(
             thread_id=thread_id,
             kwargs={"input": {}},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         run_id = run.run_id
 
@@ -1717,8 +1694,6 @@ async def test_production_worker_honors_database_cancel_without_redis_control(
             thread_id=thread_id,
             kwargs={"input": {"value": 1}},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         run_id = run.run_id
 
@@ -1789,8 +1764,6 @@ async def test_production_worker_persists_one_timeout_terminal_event(
             thread_id=thread_id,
             kwargs={"input": {}},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         run_id = run.run_id
 
@@ -1885,8 +1858,6 @@ async def test_worker_preserves_recursion_limit(pg_runtime, thread_limit, run_li
                 "config": {"recursion_limit": run_limit} if run_limit else {},
             },
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         run_id = run.run_id
     worker = ProductionWorker(SimpleNamespace(open=open_graph), owner="limit-worker")
@@ -1947,8 +1918,6 @@ async def test_success_commit_failure_never_publishes_completed(pg_runtime, monk
             thread_id=thread_id,
             kwargs={"input": {}, "version": "v3"},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         run_id = run.run_id
 
@@ -2052,8 +2021,6 @@ async def test_cancel_publishes_one_durable_terminal_event_and_late_cancel_is_no
             thread_id=thread_id,
             kwargs={"input": {}},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         run_id = run.run_id
         assert await repo.claim_next(conn.session, "cancel-worker") is not None
@@ -2127,8 +2094,6 @@ async def test_cancel_and_finalize_race_keeps_one_terminal_event(pg_runtime) -> 
             thread_id=thread_id,
             kwargs={"input": {}},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         assert await RunRepository().claim_next(conn.session, "race-worker") is not None
         run_id = run.run_id
@@ -2195,8 +2160,6 @@ async def test_cancel_root_run_persists_terminal_event(pg_runtime) -> None:
             thread_id=None,
             kwargs={"input": {}},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         assert await repo.claim_next(conn.session, "root-cancel-worker") is not None
         await _cancel_row(None, conn, run, "interrupt")
@@ -2248,8 +2211,6 @@ async def test_worker_kill_is_recovered_by_lease_reaper(pg_runtime, monkeypatch)
             thread_id=thread_id,
             kwargs={"input": {}},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         run_id = run.run_id
 
@@ -2308,8 +2269,6 @@ async def test_api_lifespan_restart_keeps_postgres_run_state(pg_runtime) -> None
             thread_id=None,
             kwargs={"input": {}},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         run.status = RunStatus.SUCCESS.value
         run_id = run.run_id
@@ -2364,8 +2323,6 @@ async def test_production_worker_persists_hitl_interrupt_without_lock_deadlock(
             thread_id=thread_id,
             kwargs={"input": {"value": 1}},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         run_id = run.run_id
 
@@ -2481,8 +2438,6 @@ async def test_redis_restart_preserves_postgres_run_state(pg_runtime) -> None:
             thread_id=None,
             kwargs={"input": {}},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         run.status = RunStatus.SUCCESS.value
         run_id = run.run_id
@@ -2533,8 +2488,6 @@ async def test_owned_server_run_sse_replays_durable_events(pg_runtime, monkeypat
             thread_id=thread_id,
             kwargs={"stream_mode": "values", "stream_resumable": True},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         run.status = RunStatus.SUCCESS.value
         run.reason = RunReason.COMPLETED.value
@@ -2618,8 +2571,6 @@ async def test_run_sse_v3_returns_raw_typed_protocol_envelopes(pg_runtime, monke
             thread_id=thread_id,
             kwargs={"version": "v3", "stream_mode": "values", "stream_subgraphs": True},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         run.status = RunStatus.SUCCESS.value
         run.reason = RunReason.COMPLETED.value
@@ -2698,8 +2649,6 @@ async def test_run_sse_accepts_messages_tuple_mode_alias(pg_runtime, monkeypatch
             thread_id=thread_id,
             kwargs={"stream_mode": "messages-tuple"},
             metadata={},
-            tenant_id=None,
-            project_id=None,
         )
         run.status = RunStatus.SUCCESS.value
         run.reason = RunReason.COMPLETED.value
@@ -2984,8 +2933,6 @@ async def test_idempotency_key_is_race_safe_across_sessions(pg_runtime) -> None:
                 thread_id=None,
                 kwargs={"input": {"value": 1}},
                 metadata={},
-                tenant_id="tenant-race",
-                project_id="project-race",
                 idempotency_key="same-resume-key",
             )
             return row.run_id

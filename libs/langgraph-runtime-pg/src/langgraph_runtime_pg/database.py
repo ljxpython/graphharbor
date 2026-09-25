@@ -175,8 +175,6 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 _ASSISTANT_KEYS = [
     "assistant_id",
-    "tenant_id",
-    "project_id",
     "graph_id",
     "name",
     "description",
@@ -203,8 +201,6 @@ _ASSISTANT_VERSION_KEYS = [
 _THREAD_KEYS = [
     "thread_id",
     "graph_id",
-    "tenant_id",
-    "project_id",
     "status",
     "event_seq",
     "metadata",
@@ -219,8 +215,6 @@ _THREAD_KEYS = [
 
 _RUN_KEYS = [
     "run_id",
-    "tenant_id",
-    "project_id",
     "thread_id",
     "assistant_id",
     "status",

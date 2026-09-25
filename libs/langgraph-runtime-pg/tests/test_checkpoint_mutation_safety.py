@@ -116,6 +116,8 @@ async def test_rollback_restores_history_and_rejects_late_writer(pg_runtime):
 
 
 async def test_prune_authorized_ids_and_input_validation(pg_runtime):
+    from langgraph_sdk import Auth
+
     from langgraph_runtime_pg.checkpoint import get_checkpointer
     from langgraph_runtime_pg.database import connect
     from langgraph_runtime_pg.models import ThreadRow
@@ -124,19 +126,28 @@ async def test_prune_authorized_ids_and_input_validation(pg_runtime):
     ids = [uuid4(), uuid4()]
     async with connect() as conn:
         for index, tid in enumerate(ids):
-            conn.session.add(ThreadRow(thread_id=tid, tenant_id=str(index), project_id="p"))
+            conn.session.add(ThreadRow(thread_id=tid, metadata_={"owner": str(index)}))
     graph = graph_fixture(get_checkpointer())
     for tid in ids:
         await graph.ainvoke({"value": 1}, {"configurable": {"thread_id": str(tid)}})
     other_before = await snapshot(ids[1])
     own_before = await snapshot(ids[0])
 
-    async def auth():
-        return {"identity": "a", "tenant_id": "0", "project_id": "p"}
+    auth = Auth()
+
+    @auth.authenticate
+    async def authenticate():
+        return {"identity": "0"}
+
+    @auth.on.threads
+    async def authorize(ctx, value):
+        del value
+        return {"owner": ctx.user.identity}
 
     app = create_app({"graphs": {}})
-    # Set the same real middleware auth handler used by create_app.
+    # Use the same SDK Auth callback dispatch as production resource handlers.
     app.user_middleware[0].kwargs["auth_handler"] = auth
+    app.state.auth_handler = auth
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         for body in (
             [],

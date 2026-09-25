@@ -85,8 +85,8 @@ TTL、调度、后台清理等系统动作不冒充 end-user 请求，但必须�
 | ID | 改动内容 / 代码位置 | 预期结果 | 验证项 | 状态 |
 |---|---|---|---|---|
 | D01 | 两仓版本、实际消费者、G models/run_store/Store/签名历史只读盘点；官方 probe | 数据/依赖/差异清单，确认幂等及 namespace 契约 | V-D01 | 待开始 |
-| D02 | P 迁移脚本 + G 可扩展 schema/metadata 查询 | 离线可恢复转换、冲突拒绝、数据一致 | V-D02 | 待开始 |
-| D03 | G run_store/models/migrations；P 既有稳定 key 接入测试 | 通用幂等域、无 NULL 穿透和跨域命中 | V-D03 | 待开始 |
+| D02 | P 迁移脚本 + G 可扩展 schema/metadata 查询 | 离线可恢复转换、冲突拒绝、数据一致 | V-D02 | 部分完成：G `008_remove_business_scope` 删除四表旧列及索引；PG17 空隔离库已升级。旧 head 非空迁移、冲突/恢复及平台清理演练未完成 |
+| D03 | G run_store/models/migrations；P 既有稳定 key 接入测试 | 通用幂等域、无 NULL 穿透和跨域命中 | V-D03 | 部分完成：唯一索引改全局 key，API 用标准 Auth identity 域化；PG17 并发提交 1 passed。跨 identity/项目/响应丢失与平台联合验收未完成 |
 | D04 | G store_api；P 实际 Store 消费者和 auth | namespace 授权及旧数据可读，无物理搬迁 | V-D04 | 待开始 |
 | D05 | API/worker 格式版本切换、排队/恢复清点、候选包联调 | 维护窗口一次切换，无旧格式运行分支，故障恢复可操作 | V-D05 | 待开始 |
 | D06 | 完整联合验收、发行说明、旧列/业务分支清理、能力文档更新 | 全部 Final 门禁通过后才能 done | V-D06—D08 | 待开始 |
@@ -119,4 +119,4 @@ TTL、调度、后台清理等系统动作不冒充 end-user 请求，但必须�
 
 ## 状态
 
-规划完成，待人工评审；所有实施任务待开始。最终只有四个专题及本节 Final 全部满足，才能标 done；存在未验链路标 partial，外部阻塞有证据才标 blocked，批准推迟项标 deferred。生产发布不在本轮执行范围。
+partial：D02/D03 有核心阶段实现；D01 数据盘点、旧 head 非空迁移、Store、worker 恢复与 Final V-D06—D08 未完成。不得据此切换生产。
