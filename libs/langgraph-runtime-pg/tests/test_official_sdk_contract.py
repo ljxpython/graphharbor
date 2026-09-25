@@ -198,6 +198,8 @@ async def test_thread_stream_projects_durable_events_and_resumes(pg_runtime, mon
     monkeypatch.setattr("langhost.streaming.get_stream_manager", lambda: FakeManager())
 
     def request(last_event_id: str) -> Request:
+        from types import SimpleNamespace
+
         return Request(
             {
                 "type": "http",
@@ -206,6 +208,7 @@ async def test_thread_stream_projects_durable_events_and_resumes(pg_runtime, mon
                 "query_string": b"stream_modes=run_modes",
                 "headers": [(b"last-event-id", last_event_id.encode())],
                 "path_params": {"thread_id": str(thread_id)},
+                "app": SimpleNamespace(state=SimpleNamespace(auth_handler=None)),
             }
         )
 
@@ -445,6 +448,7 @@ async def test_official_python_sdk_runs_stream_v2_and_replay(tmp_path: Path, mon
                 **row.kwargs,
                 "stream_mode": ["values", "updates"],
                 "stream_subgraphs": True,
+                "stream_resumable": True,
             }
             for sequence, event in enumerate(events, start=1):
                 event_row = RuntimeEventRow(

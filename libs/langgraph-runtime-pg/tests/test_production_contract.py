@@ -276,23 +276,46 @@ async def test_worker_preserves_application_configurable_fields(pg_runtime, monk
 
     assistant_id, thread_id, run_id = uuid4(), uuid4(), uuid4()
     async with connect() as conn:
-        conn.session.add(AssistantRow(
-            assistant_id=assistant_id, graph_id="assistant", name="config-test",
-            config={}, context={}, metadata_={},
-        ))
-        conn.session.add(ThreadRow(
-            thread_id=thread_id, status="idle", metadata_={}, config={}, interrupts={},
-        ))
-        conn.session.add(RunRow(
-            run_id=run_id, assistant_id=assistant_id, thread_id=thread_id,
-            status="pending", metadata_={}, kwargs={
-                "input": {}, "config": {"configurable": {
-                    "tenant_id": "custom-tenant", "project_id": "custom-project",
-                    "user_id": "custom-user", "role": "custom-role",
-                    "permissions": ["custom:read"],
-                }},
-            },
-        ))
+        conn.session.add(
+            AssistantRow(
+                assistant_id=assistant_id,
+                graph_id="assistant",
+                name="config-test",
+                config={},
+                context={},
+                metadata_={},
+            )
+        )
+        conn.session.add(
+            ThreadRow(
+                thread_id=thread_id,
+                status="idle",
+                metadata_={},
+                config={},
+                interrupts={},
+            )
+        )
+        conn.session.add(
+            RunRow(
+                run_id=run_id,
+                assistant_id=assistant_id,
+                thread_id=thread_id,
+                status="pending",
+                metadata_={},
+                kwargs={
+                    "input": {},
+                    "config": {
+                        "configurable": {
+                            "tenant_id": "custom-tenant",
+                            "project_id": "custom-project",
+                            "user_id": "custom-user",
+                            "role": "custom-role",
+                            "permissions": ["custom:read"],
+                        }
+                    },
+                },
+            )
+        )
 
     seen = {}
 
@@ -301,12 +324,16 @@ async def test_worker_preserves_application_configurable_fields(pg_runtime, monk
         return SimpleNamespace(value={"ok": True}, interrupts=())
 
     monkeypatch.setattr("langgraph_runtime_pg.production_worker.invoke_graph", fake_invoke)
-    assert await ProductionWorker(SimpleNamespace(open=_open_fake_graph), owner="config-test").run_once()
-    assert {key: seen[key] for key in (
-        "tenant_id", "project_id", "user_id", "role", "permissions"
-    )} == {
-        "tenant_id": "custom-tenant", "project_id": "custom-project",
-        "user_id": "custom-user", "role": "custom-role",
+    assert await ProductionWorker(
+        SimpleNamespace(open=_open_fake_graph), owner="config-test"
+    ).run_once()
+    assert {
+        key: seen[key] for key in ("tenant_id", "project_id", "user_id", "role", "permissions")
+    } == {
+        "tenant_id": "custom-tenant",
+        "project_id": "custom-project",
+        "user_id": "custom-user",
+        "role": "custom-role",
         "permissions": ["custom:read"],
     }
 
@@ -1208,7 +1235,7 @@ async def test_owned_server_core_resource_flow(pg_runtime) -> None:
             headers={"idempotency-key": "run-1"},
             json={"assistant_id": assistant_id, "input": {"messages": []}},
         )
-        assert run_response.status_code == 201, run_response.text
+        assert run_response.status_code == 200, run_response.text
         run_id = run_response.json()["run_id"]
         assert run_response.json()["status"] == "pending"
 
@@ -1217,7 +1244,7 @@ async def test_owned_server_core_resource_flow(pg_runtime) -> None:
             headers={"idempotency-key": "run-1"},
             json={"assistant_id": assistant_id, "input": {"messages": ["ignored"]}},
         )
-        assert duplicate.status_code == 201
+        assert duplicate.status_code == 200
         assert duplicate.json()["run_id"] == run_id
 
         rejected = await client.post(
@@ -1246,9 +1273,7 @@ async def test_owned_server_core_resource_flow(pg_runtime) -> None:
 
 
 @pytest.mark.asyncio
-async def test_pending_rollback_never_deletes_thread_checkpoints(
-    pg_runtime, monkeypatch
-) -> None:
+async def test_pending_rollback_never_deletes_thread_checkpoints(pg_runtime, monkeypatch) -> None:
     from langhost.server import create_app
 
     cleanup = []
@@ -2598,7 +2623,12 @@ async def test_run_sse_v3_returns_raw_typed_protocol_envelopes(pg_runtime, monke
             conn.session,
             assistant_id=assistant_id,
             thread_id=thread_id,
-            kwargs={"version": "v3", "stream_mode": "values", "stream_subgraphs": True},
+            kwargs={
+                "version": "v3",
+                "stream_mode": "values",
+                "stream_subgraphs": True,
+                "stream_resumable": True,
+            },
             metadata={},
         )
         run.status = RunStatus.SUCCESS.value
@@ -2676,7 +2706,7 @@ async def test_run_sse_accepts_messages_tuple_mode_alias(pg_runtime, monkeypatch
             conn.session,
             assistant_id=assistant_id,
             thread_id=thread_id,
-            kwargs={"stream_mode": "messages-tuple"},
+            kwargs={"stream_mode": "messages-tuple", "stream_resumable": True},
             metadata={},
         )
         run.status = RunStatus.SUCCESS.value
@@ -2804,6 +2834,11 @@ async def test_protocol_commands_and_thread_event_stream(pg_runtime, monkeypatch
         assert command.status_code == 200, command.text
         run_id = UUID(command.json()["result"]["run_id"])
         async with connect() as conn:
+            from langgraph_runtime_pg.models import RunRow
+
+            run = await conn.session.get(RunRow, run_id)
+            assert run is not None
+            run.kwargs = {**run.kwargs, "stream_resumable": True}
             thread = await conn.session.get(ThreadRow, thread_id)
             assert thread is not None
             thread.interrupts = {"interrupt-1": {"id": "interrupt-1", "value": {"ok": True}}}

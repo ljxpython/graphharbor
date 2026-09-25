@@ -43,8 +43,13 @@ def _public_namespace(request: Request, value: Sequence[str]) -> list[str]:
 
 async def _authorize_store(request: Request, action: str, value: dict[str, Any]) -> dict[str, Any]:
     principal = principal_from_scope(request.scope)
-    await authorize(getattr(request.app.state, "auth_handler", None),
-                    principal.auth_user if principal else None, "store", action, value)
+    await authorize(
+        getattr(request.app.state, "auth_handler", None),
+        principal.auth_user if principal else None,
+        "store",
+        action,
+        value,
+    )
     namespace = value.get("namespace")
     if namespace is not None and (
         not isinstance(namespace, (list, tuple))
@@ -94,8 +99,13 @@ async def store_put(request: Request) -> Response:
     if ttl is not None and (isinstance(ttl, bool) or not isinstance(ttl, (int, float))):
         return JSONResponse({"detail": "ttl must be a number or null"}, status_code=422)
     authorized = await _authorize_store(request, "put", {**payload, "namespace": namespace})
-    await _store().aput(tuple(authorized["namespace"]), authorized["key"], authorized["value"],
-                       index=authorized.get("index"), ttl=authorized.get("ttl"))
+    await _store().aput(
+        tuple(authorized["namespace"]),
+        authorized["key"],
+        authorized["value"],
+        index=authorized.get("index"),
+        ttl=authorized.get("ttl"),
+    )
     return Response(status_code=204)
 
 
@@ -112,7 +122,9 @@ async def store_get(request: Request) -> JSONResponse | Response:
     refresh = request.query_params.get("refresh_ttl")
     authorized = await _authorize_store(request, "get", {"namespace": namespace, "key": key})
     item = await _store().aget(
-        tuple(authorized["namespace"]), authorized["key"], refresh_ttl=refresh.lower() == "true" if refresh else None
+        tuple(authorized["namespace"]),
+        authorized["key"],
+        refresh_ttl=refresh.lower() == "true" if refresh else None,
     )
     return JSONResponse(None if item is None else _item(request, item))
 
@@ -155,9 +167,16 @@ async def store_search(request: Request) -> JSONResponse | Response:
         or not isinstance(offset, int)
     ):
         return JSONResponse({"detail": "limit and offset must be integers"}, status_code=422)
-    authorized = await _authorize_store(request, "search", {
-        **payload, "namespace": namespace, "limit": limit, "offset": offset,
-    })
+    authorized = await _authorize_store(
+        request,
+        "search",
+        {
+            **payload,
+            "namespace": namespace,
+            "limit": limit,
+            "offset": offset,
+        },
+    )
     items = await _store().asearch(
         tuple(authorized["namespace"]),
         filter=authorized.get("filter"),
@@ -187,10 +206,15 @@ async def store_list_namespaces(request: Request) -> JSONResponse | Response:
         return error
     if suffix and (error := _namespace_error(suffix)):
         return error
-    authorized = await _authorize_store(request, "list_namespaces", {
-        **payload, "namespace": tuple(prefix) if prefix is not None else None,
-        "suffix": tuple(suffix) if suffix is not None else None,
-    })
+    authorized = await _authorize_store(
+        request,
+        "list_namespaces",
+        {
+            **payload,
+            "namespace": tuple(prefix) if prefix is not None else None,
+            "suffix": tuple(suffix) if suffix is not None else None,
+        },
+    )
     namespaces = await _store().alist_namespaces(
         prefix=authorized.get("namespace"),
         suffix=authorized.get("suffix"),

@@ -17,6 +17,24 @@ from starlette.exceptions import HTTPException
 from starlette.requests import Request
 
 
+def test_v2_failure_event_is_emitted_independent_of_stream_mode() -> None:
+    from langhost.streaming import _event_frame
+
+    frame = _event_frame(
+        {
+            "seq": 7,
+            "event": {
+                "event": "lifecycle",
+                "status": "error",
+                "error": {"type": "ValueError", "message": "fixture failure"},
+            },
+        },
+        modes={"values"},
+        stream_subgraphs=False,
+    )
+    assert frame == ("error", {"error": "ValueError", "message": "fixture failure"}, 7)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("batches,last_batch", [(2, 500), (20, 1000)])
 async def test_reaper_drains_bounded_event_batches_per_tick(
@@ -76,9 +94,7 @@ async def test_redis_fanout_failure_preserves_postgres_replay(monkeypatch) -> No
     try:
         async with connect() as conn:
             conn.session.add(AssistantRow(assistant_id=assistant_id, graph_id="retention-test"))
-            conn.session.add(
-                ThreadRow(thread_id=thread_id, metadata_={}, config={}, interrupts={})
-            )
+            conn.session.add(ThreadRow(thread_id=thread_id, metadata_={}, config={}, interrupts={}))
             conn.session.add(
                 RunRow(
                     run_id=run_id,
@@ -197,9 +213,14 @@ async def test_expired_event_pruning_is_bounded_and_preserves_active_state(
         return False
 
     def request(
-        path: str, thread_id, *, cursor: str | None = None,
-        body: dict | None = None, denied: bool = False,
-        auth_handler: Auth | None = None, identity: str = "denied-user",
+        path: str,
+        thread_id,
+        *,
+        cursor: str | None = None,
+        body: dict | None = None,
+        denied: bool = False,
+        auth_handler: Auth | None = None,
+        identity: str = "denied-user",
     ):
         payload = json.dumps(body or {}).encode()
 
@@ -207,16 +228,16 @@ async def test_expired_event_pruning_is_bounded_and_preserves_active_state(
             return {"type": "http.request", "body": payload, "more_body": False}
 
         scope = {
-                "type": "http",
-                "method": "POST" if body is not None else "GET",
-                "path": path,
-                "headers": [(b"last-event-id", cursor.encode())] if cursor else [],
-                "query_string": b"",
-                "path_params": {"thread_id": str(thread_id)},
-                "app": SimpleNamespace(state=SimpleNamespace(
-                    auth_handler=auth_handler or (auth if denied else None)
-                )),
-            }
+            "type": "http",
+            "method": "POST" if body is not None else "GET",
+            "path": path,
+            "headers": [(b"last-event-id", cursor.encode())] if cursor else [],
+            "query_string": b"",
+            "path_params": {"thread_id": str(thread_id)},
+            "app": SimpleNamespace(
+                state=SimpleNamespace(auth_handler=auth_handler or (auth if denied else None))
+            ),
+        }
         if denied or auth_handler is not None:
             scope["principal"] = Principal.from_auth_user({"identity": identity})
         return Request(scope, receive=receive)
@@ -287,8 +308,11 @@ async def test_expired_event_pruning_is_bounded_and_preserves_active_state(
                         sequence=sequence,
                         topic="messages" if sequence < 6 else "lifecycle",
                         payload=(
-                            {"event": "lifecycle", "status": terminal_status,
-                             "error": {"message": "fixture failure"}}
+                            {
+                                "event": "lifecycle",
+                                "status": terminal_status,
+                                "error": {"message": "fixture failure"},
+                            }
                             if sequence == 6 and terminal_status == "error"
                             else {"event": "messages" if sequence < 6 else "lifecycle"}
                         ),
@@ -377,6 +401,32 @@ async def test_expired_event_pruning_is_bounded_and_preserves_active_state(
         assert thread_watermark == protocol_watermark == 5
         assert [row.sequence for row in thread_rows] == [6, 7]
         assert [row["seq"] for row in protocol_rows] == [6, 7]
+        non_resumable = await _run_sse(
+            request(f"/threads/{old_thread}/runs/{old_run}/stream", old_thread),
+            run_id=old_run,
+            thread_id=old_thread,
+            payload={},
+            include_location=False,
+        )
+        with pytest.raises(StopAsyncIteration):
+            await anext(non_resumable.body_iterator)
+        monkeypatch.setenv("GRAPHHARBOR_THREAD_STREAM_HEARTBEAT_SECONDS", "0.1")
+        thread_non_resumable = await thread_stream(
+            request(f"/threads/{old_thread}/stream", old_thread, cursor="-")
+        )
+        assert "event: custom" in await anext(thread_non_resumable.body_iterator)
+        assert "heartbeat" in await anext(thread_non_resumable.body_iterator)
+        await thread_non_resumable.body_iterator.aclose()
+        monkeypatch.setenv("GRAPHHARBOR_PROTOCOL_HEARTBEAT_SECONDS", "0.1")
+        protocol_non_resumable = await protocol_event_stream(
+            request(
+                f"/threads/{old_thread}/stream/events",
+                old_thread,
+                body={"channels": ["lifecycle"], "since": 0},
+            )
+        )
+        assert "heartbeat" in await anext(protocol_non_resumable.body_iterator)
+        await protocol_non_resumable.body_iterator.aclose()
         run_response = await _run_sse(
             request(f"/threads/{old_thread}/runs/{old_run}/stream", old_thread, cursor="1"),
             run_id=old_run,
@@ -402,14 +452,28 @@ async def test_expired_event_pruning_is_bounded_and_preserves_active_state(
         assert "cursor_expired" in protocol_response.body.decode()
         for attempt in (
             _run_sse(
-                request(f"/threads/{old_thread}/runs/{old_run}/stream", old_thread,
-                        cursor="1", denied=True),
-                run_id=old_run, thread_id=old_thread, payload={}, include_location=False,
+                request(
+                    f"/threads/{old_thread}/runs/{old_run}/stream",
+                    old_thread,
+                    cursor="1",
+                    denied=True,
+                ),
+                run_id=old_run,
+                thread_id=old_thread,
+                payload={},
+                include_location=False,
             ),
-            thread_stream(request(f"/threads/{old_thread}/stream", old_thread,
-                                  cursor="1-0", denied=True)),
-            protocol_event_stream(request(f"/threads/{old_thread}/stream/events", old_thread,
-                                          body={"channels": ["lifecycle"], "since": 1}, denied=True)),
+            thread_stream(
+                request(f"/threads/{old_thread}/stream", old_thread, cursor="1-0", denied=True)
+            ),
+            protocol_event_stream(
+                request(
+                    f"/threads/{old_thread}/stream/events",
+                    old_thread,
+                    body={"channels": ["lifecycle"], "since": 1},
+                    denied=True,
+                )
+            ),
         ):
             with pytest.raises(HTTPException) as denied_error:
                 await attempt
@@ -425,8 +489,12 @@ async def test_expired_event_pruning_is_bounded_and_preserves_active_state(
 
         def scoped_request(path, *, identity="alice", cursor=None, body=None):
             return request(
-                path, old_thread, cursor=cursor, body=body,
-                auth_handler=scoped_auth, identity=identity,
+                path,
+                old_thread,
+                cursor=cursor,
+                body=body,
+                auth_handler=scoped_auth,
+                identity=identity,
             )
 
         run_path = f"/threads/{old_thread}/runs/{old_run}/stream"
@@ -435,8 +503,11 @@ async def test_expired_event_pruning_is_bounded_and_preserves_active_state(
         protocol_body = {"channels": ["lifecycle"], "since": 1}
 
         allowed_run = await _run_sse(
-            scoped_request(run_path, cursor="1"), run_id=old_run,
-            thread_id=old_thread, payload={}, include_location=False,
+            scoped_request(run_path, cursor="1"),
+            run_id=old_run,
+            thread_id=old_thread,
+            payload={},
+            include_location=False,
         )
         assert "cursor_expired" in await anext(allowed_run.body_iterator)
         await allowed_run.body_iterator.aclose()
@@ -451,8 +522,11 @@ async def test_expired_event_pruning_is_bounded_and_preserves_active_state(
         access["alice"] = False
         for attempt in (
             _run_sse(
-                scoped_request(run_path, cursor="1"), run_id=old_run,
-                thread_id=old_thread, payload={}, include_location=False,
+                scoped_request(run_path, cursor="1"),
+                run_id=old_run,
+                thread_id=old_thread,
+                payload={},
+                include_location=False,
             ),
             thread_stream(scoped_request(thread_path, cursor="1-0")),
             protocol_event_stream(scoped_request(protocol_path, body=protocol_body)),
@@ -463,8 +537,11 @@ async def test_expired_event_pruning_is_bounded_and_preserves_active_state(
 
         with pytest.raises(HTTPException) as cross_user_error:
             await _run_sse(
-                scoped_request(run_path, identity="bob", cursor="1"), run_id=old_run,
-                thread_id=old_thread, payload={}, include_location=False,
+                scoped_request(run_path, identity="bob", cursor="1"),
+                run_id=old_run,
+                thread_id=old_thread,
+                payload={},
+                include_location=False,
             )
         assert cross_user_error.value.status_code == 404
         cross_user_thread = await thread_stream(

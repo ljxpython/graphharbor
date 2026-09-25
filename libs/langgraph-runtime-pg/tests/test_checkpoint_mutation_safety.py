@@ -69,7 +69,7 @@ async def execute_run(client, assistant_id, thread_id, graph, value):
     response = await client.post(
         f"/threads/{thread_id}/runs", json={"assistant_id": assistant_id, "input": {"value": value}}
     )
-    assert response.status_code == 201
+    assert response.status_code == 200
     repository = RunRepository()
     async with connect() as conn:
         run = await repository.claim_next(conn.session, "test-owner")
@@ -113,6 +113,44 @@ async def test_rollback_restores_history_and_rejects_late_writer(pg_runtime):
         assert await snapshot(tid) == before
         await execute_run(client, assistant, tid, graph, 2)
         assert (await client.get(f"/threads/{tid}")).json()["values"] == {"value": 3}
+
+
+async def test_root_run_checkpoint_uses_run_id_for_fencing(pg_runtime):
+    from langgraph_runtime_pg.checkpoint import get_checkpointer
+    from langgraph_runtime_pg.checkpoint_mutations import checkpoint_writer
+    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.models import AssistantRow
+    from langgraph_runtime_pg.run_store import RunRepository
+
+    assistant_id = uuid4()
+    async with connect() as conn:
+        conn.session.add(
+            AssistantRow(
+                assistant_id=assistant_id,
+                graph_id="root",
+                name="root",
+                config={},
+                context={},
+                metadata_={},
+            )
+        )
+        run = await RunRepository().create(
+            conn.session,
+            assistant_id=assistant_id,
+            thread_id=None,
+            kwargs={"input": {"value": 1}},
+            metadata={},
+        )
+        claimed = await RunRepository().claim_next(conn.session, "root-worker")
+        assert claimed is not None and claimed.run_id == run.run_id
+
+    graph = graph_fixture(get_checkpointer())
+    token = checkpoint_writer.set((str(run.run_id), "root-worker", claimed.retry_count))
+    try:
+        result = await graph.ainvoke({"value": 1}, {"configurable": {"thread_id": str(run.run_id)}})
+    finally:
+        checkpoint_writer.reset(token)
+    assert result == {"value": 2}
 
 
 async def test_prune_authorized_ids_and_input_validation(pg_runtime):

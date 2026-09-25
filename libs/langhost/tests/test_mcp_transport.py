@@ -148,5 +148,7 @@ async def test_mcp_tool_rejects_unverifiable_filter_and_missing_identity() -> No
         await _tool_for_graph("basic", _Registry(), auth)(ctx, input={"value": 1})
     assert exc.value.status_code == 403
     with pytest.raises(HTTPException) as exc:
-        await _tool_for_graph("basic", _Registry(), auth)(SimpleNamespace(request_context=None), input={})
+        await _tool_for_graph("basic", _Registry(), auth)(
+            SimpleNamespace(request_context=None), input={}
+        )
     assert exc.value.status_code == 401

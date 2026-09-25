@@ -104,20 +104,30 @@ async def _authorize(
 
 
 async def _authorized_resource(
-    request: Request, session: Any, model: Any, resource: str,
-    resource_id: UUID, action: str = "read", value: dict[str, Any] | None = None,
+    request: Request,
+    session: Any,
+    model: Any,
+    resource: str,
+    resource_id: UUID,
+    action: str = "read",
+    value: dict[str, Any] | None = None,
 ) -> Any:
     event_value = value if value is not None else {}
     id_field = {"assistants": "assistant_id", "threads": "thread_id", "crons": "cron_id"}[resource]
     event_value[id_field] = resource_id
     filters = await _authorize(request, resource, action, event_value)
-    return await session.scalar(select(model).where(
-        getattr(model, id_field) == resource_id, metadata_predicate(model.metadata_, filters)
-    ))
+    return await session.scalar(
+        select(model).where(
+            getattr(model, id_field) == resource_id, metadata_predicate(model.metadata_, filters)
+        )
+    )
 
 
 async def _authorized_run(
-    request: Request, session: Any, run_id: UUID, action: str = "read",
+    request: Request,
+    session: Any,
+    run_id: UUID,
+    action: str = "read",
     value: dict[str, Any] | None = None,
 ) -> RunRow | None:
     row = await session.get(RunRow, run_id)
@@ -127,8 +137,14 @@ async def _authorized_run(
     event_value.update(thread_id=row.thread_id, run_id=run_id)
     filters = await _authorize(request, "threads", action, event_value)
     model = ThreadRow if row.thread_id is not None else RunRow
-    identity = ThreadRow.thread_id == row.thread_id if row.thread_id is not None else RunRow.run_id == run_id
-    allowed = await session.scalar(select(model).where(identity, metadata_predicate(model.metadata_, filters)))
+    identity = (
+        ThreadRow.thread_id == row.thread_id
+        if row.thread_id is not None
+        else RunRow.run_id == run_id
+    )
+    allowed = await session.scalar(
+        select(model).where(identity, metadata_predicate(model.metadata_, filters))
+    )
     return row if allowed is not None and in_principal_scope(row, _principal(request)) else None
 
 
@@ -365,8 +381,14 @@ async def assistants_create(request: Request) -> JSONResponse:
     async with connect() as conn:
         existing = await conn.session.get(AssistantRow, assistant_id)
         if existing is not None:
-            authorized = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id)
-            if payload.get("if_exists") == "do_nothing" and authorized is not None and in_principal_scope(existing, principal):
+            authorized = await _authorized_resource(
+                request, conn.session, AssistantRow, "assistants", assistant_id
+            )
+            if (
+                payload.get("if_exists") == "do_nothing"
+                and authorized is not None
+                and in_principal_scope(existing, principal)
+            ):
                 return JSONResponse(_assistant(existing))
             return _error("assistant already exists", 409)
         row = AssistantRow(
@@ -407,7 +429,9 @@ async def assistants_get(request: Request) -> JSONResponse:
     except ValueError:
         return _error("assistant not found", 404)
     async with connect() as conn:
-        row = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id, "read")
+        row = await _authorized_resource(
+            request, conn.session, AssistantRow, "assistants", assistant_id, "read"
+        )
         if row is None or not _assistant_readable(row, principal):
             return _error("assistant not found", 404)
     return JSONResponse(_assistant(row))
@@ -420,7 +444,9 @@ async def assistants_graph(request: Request) -> JSONResponse:
     except ValueError:
         return _error("assistant not found", 404)
     async with connect() as conn:
-        row = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id, "read")
+        row = await _authorized_resource(
+            request, conn.session, AssistantRow, "assistants", assistant_id, "read"
+        )
     registry = getattr(request.app.state, "graph_registry", None)
     if row is None or not _assistant_readable(row, principal) or registry is None:
         return _error("assistant not found", 404)
@@ -480,7 +506,11 @@ async def assistants_schemas(request: Request) -> JSONResponse:
             UUID(graph_id)
         except ValueError:
             return _error("assistant not found", 404)
-    if not (principal is None and getattr(request.app.state, "auth_handler", None) is None and graph_id in registry.ids()):
+    if not (
+        principal is None
+        and getattr(request.app.state, "auth_handler", None) is None
+        and graph_id in registry.ids()
+    ):
         async with connect() as conn:
             authorized = await _resolve_assistant(request, conn.session, graph_id, principal)
         if authorized is None:
@@ -526,7 +556,9 @@ async def assistants_subgraphs(request: Request) -> JSONResponse:
     except ValueError:
         return _error("assistant not found", 404)
     async with connect() as conn:
-        row = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id)
+        row = await _authorized_resource(
+            request, conn.session, AssistantRow, "assistants", assistant_id
+        )
     registry = getattr(request.app.state, "graph_registry", None)
     if row is None or not _assistant_readable(row, principal) or registry is None:
         return _error("assistant not found", 404)
@@ -556,7 +588,9 @@ async def assistants_update(request: Request) -> JSONResponse:
         return _error("assistant not found", 404)
     payload = await request.json()
     async with connect() as conn:
-        row = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id, "update", payload)
+        row = await _authorized_resource(
+            request, conn.session, AssistantRow, "assistants", assistant_id, "update", payload
+        )
         if row is None or not in_principal_scope(row, principal):
             return _error("assistant not found", 404)
         for field in ("graph_id", "name", "description", "config", "context"):
@@ -589,7 +623,9 @@ async def assistants_delete(request: Request) -> JSONResponse | Response:
     except ValueError:
         return _no_content()
     async with connect() as conn:
-        row = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id, "delete")
+        row = await _authorized_resource(
+            request, conn.session, AssistantRow, "assistants", assistant_id, "delete"
+        )
         if row is None or not in_principal_scope(row, principal):
             return _no_content()
         await conn.session.delete(row)
@@ -609,7 +645,9 @@ async def assistants_versions(request: Request) -> JSONResponse:
     except ValueError as exc:
         return _error(str(exc))
     async with connect() as conn:
-        assistant = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id, "read")
+        assistant = await _authorized_resource(
+            request, conn.session, AssistantRow, "assistants", assistant_id, "read"
+        )
         if assistant is None or not in_principal_scope(assistant, principal):
             return _error("assistant not found", 404)
         query = (
@@ -650,7 +688,9 @@ async def assistants_latest(request: Request) -> JSONResponse:
     except (TypeError, ValueError):
         return _error("version must be an integer")
     async with connect() as conn:
-        row = await _authorized_resource(request, conn.session, AssistantRow, "assistants", assistant_id, "update", payload)
+        row = await _authorized_resource(
+            request, conn.session, AssistantRow, "assistants", assistant_id, "update", payload
+        )
         version_row = await conn.session.get(AssistantVersionRow, (assistant_id, version))
         if row is None or version_row is None or not in_principal_scope(row, principal):
             return _error("assistant not found", 404)
@@ -679,11 +719,17 @@ async def threads_create(request: Request) -> JSONResponse:
     async with connect() as conn:
         existing = await conn.session.get(ThreadRow, thread_id)
         if existing is not None:
-            allowed = await conn.session.scalar(select(ThreadRow.thread_id).where(
-                ThreadRow.thread_id == thread_id,
-                metadata_predicate(ThreadRow.metadata_, filters),
-            ))
-            if payload.get("if_exists") == "do_nothing" and allowed and in_principal_scope(existing, principal):
+            allowed = await conn.session.scalar(
+                select(ThreadRow.thread_id).where(
+                    ThreadRow.thread_id == thread_id,
+                    metadata_predicate(ThreadRow.metadata_, filters),
+                )
+            )
+            if (
+                payload.get("if_exists") == "do_nothing"
+                and allowed
+                and in_principal_scope(existing, principal)
+            ):
                 return JSONResponse(_thread(existing))
             return _error("thread already exists", 409)
         row = ThreadRow(
@@ -734,7 +780,9 @@ async def threads_count(request: Request) -> JSONResponse:
     query = query.where(metadata_predicate(ThreadRow.metadata_, filters))
     if payload.get("ids") is not None:
         try:
-            query = query.where(ThreadRow.thread_id.in_([UUID(str(item)) for item in payload["ids"]]))
+            query = query.where(
+                ThreadRow.thread_id.in_([UUID(str(item)) for item in payload["ids"]])
+            )
         except (TypeError, ValueError):
             return _error("ids must contain UUIDs")
     query = _metadata_filter(query, ThreadRow, payload.get("metadata"))
@@ -759,10 +807,12 @@ async def _get_thread(
     event_value["thread_id"] = thread_id
     filters = await _authorize(request, "threads", action, event_value)
     async with connect() as conn:
-        row = await conn.session.scalar(select(ThreadRow).where(
-            ThreadRow.thread_id == thread_id,
-            metadata_predicate(ThreadRow.metadata_, filters),
-        ))
+        row = await conn.session.scalar(
+            select(ThreadRow).where(
+                ThreadRow.thread_id == thread_id,
+                metadata_predicate(ThreadRow.metadata_, filters),
+            )
+        )
     return (
         (row if row is not None and in_principal_scope(row, principal) else None),
         principal,
@@ -1078,8 +1128,9 @@ async def threads_prune(request: Request) -> JSONResponse:
     action = "delete" if strategy == "delete" else "update"
     for thread_id in thread_ids:
         filters = await _authorize(request, "threads", action, {"thread_id": thread_id})
-        predicates.append(and_(ThreadRow.thread_id == thread_id,
-                               metadata_predicate(ThreadRow.metadata_, filters)))
+        predicates.append(
+            and_(ThreadRow.thread_id == thread_id, metadata_predicate(ThreadRow.metadata_, filters))
+        )
     deleted = 0
     async with connect() as conn:
         query = _scope(
@@ -1127,7 +1178,9 @@ async def _resolve_assistant(
     else:
         query = query.where(AssistantRow.graph_id == assistant_value)
     filters = await _authorize(request, "assistants", "read", {"assistant_id": assistant_id})
-    query = _scope(query, AssistantRow, principal).where(metadata_predicate(AssistantRow.metadata_, filters))
+    query = _scope(query, AssistantRow, principal).where(
+        metadata_predicate(AssistantRow.metadata_, filters)
+    )
     row = (await session.execute(query.limit(1))).scalar_one_or_none()
     return row
 
@@ -1170,8 +1223,12 @@ async def runs_create(
     assistant_value = str(payload.get("assistant_id") or "")
     if not assistant_value:
         return _error("assistant_id is required")
-    authorization_value = {**payload, "thread_id": UUID(thread_value) if thread_value else None,
-                           "assistant_id": assistant_value, "kwargs": payload}
+    authorization_value = {
+        **payload,
+        "thread_id": UUID(thread_value) if thread_value else None,
+        "assistant_id": assistant_value,
+        "kwargs": payload,
+    }
     filters = await _authorize(request, "threads", "create_run", authorization_value)
     payload["metadata"] = authorization_value.get("metadata", {})
     async with connect() as conn:
@@ -1188,10 +1245,12 @@ async def runs_create(
         if thread_value is not None and thread is None:
             return _error("thread not found", 404)
         if thread is not None:
-            allowed = await conn.session.scalar(select(ThreadRow.thread_id).where(
-                ThreadRow.thread_id == thread.thread_id,
-                metadata_predicate(ThreadRow.metadata_, filters),
-            ))
+            allowed = await conn.session.scalar(
+                select(ThreadRow.thread_id).where(
+                    ThreadRow.thread_id == thread.thread_id,
+                    metadata_predicate(ThreadRow.metadata_, filters),
+                )
+            )
             if allowed is None:
                 return _error("thread not found", 404)
         run_payload = dict(payload)
@@ -1233,7 +1292,9 @@ async def runs_create(
         trusted_context = _runtime_context(run_payload, principal)
         if trusted_context is not None:
             run_payload["runtime_context"] = trusted_context
-        raw_idempotency_key = request.headers.get("idempotency-key") or payload.get("idempotency_key")
+        raw_idempotency_key = request.headers.get("idempotency-key") or payload.get(
+            "idempotency_key"
+        )
         idempotency_key = scoped_idempotency_key(principal, raw_idempotency_key)
         try:
             run = await RunRepository().create(
@@ -1262,7 +1323,7 @@ async def runs_create(
         conn.schedule_after_commit(lambda run_id=run.run_id: enqueue_run(run_id))
         response = _run(run)
     metric_inc("graphharbor_runs_created_total")
-    return JSONResponse(response, status_code=201)
+    return JSONResponse(response)
 
 
 async def runs_create_root(request: Request) -> JSONResponse:
@@ -1525,7 +1586,9 @@ async def runs_cancel_many(request: Request) -> JSONResponse:
         )
         try:
             for row in rows:
-                authorized = await _authorized_run(request, conn.session, row.run_id, "update", {"action": action})
+                authorized = await _authorized_run(
+                    request, conn.session, row.run_id, "update", {"action": action}
+                )
                 if authorized is not None:
                     await _cancel_row(request, conn, row, action)
         except CheckpointConflict as exc:
@@ -1554,9 +1617,12 @@ async def _wait_for_run(thread_id: UUID | None, run_id: UUID, principal: Any) ->
                     output = event.payload.get("output")
                     interrupts = event.payload.get("interrupts") or []
                     if interrupts and isinstance(output, dict):
-                        return {**output, "__interrupt__": [
-                            {"value": item["value"], "id": item["id"]} for item in interrupts
-                        ]}
+                        return {
+                            **output,
+                            "__interrupt__": [
+                                {"value": item["value"], "id": item["id"]} for item in interrupts
+                            ],
+                        }
                     return output
                 return None
         await asyncio.sleep(0.1)
@@ -1725,7 +1791,9 @@ async def cron_update(request: Request) -> JSONResponse:
         return _error("cron not found", 404)
     payload = await request.json()
     async with connect() as conn:
-        row = await _authorized_resource(request, conn.session, CronRow, "crons", cron_id, "update", payload)
+        row = await _authorized_resource(
+            request, conn.session, CronRow, "crons", cron_id, "update", payload
+        )
         if row is None or not in_principal_scope(row, principal):
             return _error("cron not found", 404)
         for field in ("schedule", "timezone", "on_run_completed", "enabled"):
@@ -1739,7 +1807,10 @@ async def cron_update(request: Request) -> JSONResponse:
             )
         if isinstance(payload.get("metadata"), dict):
             row.metadata_ = {**row.metadata_, **payload["metadata"]}
-        row.payload = {**row.payload, **{key: value for key, value in payload.items() if key != "cron_id"}}
+        row.payload = {
+            **row.payload,
+            **{key: value for key, value in payload.items() if key != "cron_id"},
+        }
         row.updated_at = datetime.now(UTC)
         await conn.session.flush()
     return JSONResponse(_cron(row))

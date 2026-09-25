@@ -32,3 +32,7 @@
 Web 浏览器烟测使用同一隔离双库与端口 18632/18633，另以 18634 启动 Vite：`playwright-cli` 登录后进入项目会话治理，输入候选 Thread ID 并定位，页面显示“会话已读取，暂无消息或待审批项”；页面刷新后登录与项目上下文仍在，但定位输入未自动保留，故未把刷新记为会话续传通过。Graph 页面点击“刷新目录”后显示 `workflow_demo`；所见浏览器控制台为 0 errors，Vite `vue-tsc` 为 0 errors。浏览器及三个临时服务已停止；无模型调用、未进行断线/HITL/文件操作。
 
 下一步完成 V02 的官方超窗/鉴权差分和 V05 的平台 API 联合撤权/跨项目差分；在隔离候选双包与平台 API 栈验证 HTTP 断线恢复、Run 状态/历史、清理/订阅竞态、稳定期容量和离线回退合并。真实模型 `miaomiaoai` 的通用图烟测已完成，平台业务模型策略仍属平台侧验收；容量、清理和故障使用确定性图。现有浏览器烟测保留为补充证据，不要求浏览器断线/HITL/文件操作。当前平台服务监听本机业务数据库，不作为隔离候选验收。未补齐前 T02、T04、T05 保持未完成。
+
+2026-09-25 后续实施记录：针对已知官方差异，Run 创建响应改为 200，v2 Run SSE 从持久化失败/超时终态输出 `error` 帧；对创建时未启用 `stream_resumable` 的 Run，已有 Run 的 SSE 订阅不回放历史。新增失败帧与非续传订阅回归。`test_event_retention.py` 串行重跑 7 passed，`test_rest_contract.py -k run` 3 passed，涉及文件 Ruff check 通过。首次将两组写入同一隔离 PG17 库的测试并行执行，导致事件测试偶发 `RunOwnershipError`；该次失败不计通过，停止并行后复测成功。上述仅覆盖 Run SSE 局部行为；Thread/Protocol 非续传行为及候选 HTTP/SDK 差分尚待验证，T02 保持未完成。
+
+同日补验：锁定的官方 `langgraph-api 0.13.0` 本机 HTTP 实测 `POST /runs` 为 200、失败 v2 SSE 输出 `error` 帧，未启用 `stream_resumable` 的完成 Run 在 Run/Thread/Protocol 三入口均无历史帧。GraphHarbor 候选源码 API/worker 在独立 PG17 库 `graphharbor_event_retention_candidate` 的错误流已输出相同 `ValueError` 帧；非续传 Thread/Protocol 重连无历史帧。Run 重连初测多出一帧 metadata，已修复并由隔离 PG17 回归覆盖。6 个定向文件串行重跑 109 passed、4 skipped；首次运行有 4 项旧 fixture 在未设置续传时仍断言回放，已按官方语义修正后复测通过。版本提升至双包 `0.13.0.post33` 供后续发布和平台锁定；这不是全入口官方差分通过的结论。

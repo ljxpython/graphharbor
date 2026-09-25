@@ -40,10 +40,16 @@ async def test_empty_schema_migration_is_repeatable(pg_runtime) -> None:
         migration_config = alembic_config(isolated_uri, version_table_schema=schema)
         command.upgrade(migration_config, "007_checkpoint_baselines")
         seeds = (
-            ("assistants", "INSERT INTO assistants (assistant_id, graph_id, name, version) VALUES (%s, 'test', 'test', 1)"),
+            (
+                "assistants",
+                "INSERT INTO assistants (assistant_id, graph_id, name, version) VALUES (%s, 'test', 'test', 1)",
+            ),
             ("threads", "INSERT INTO threads (thread_id, status) VALUES (%s, 'idle')"),
             ("runs", "INSERT INTO runs (run_id, assistant_id, status) VALUES (%s, %s, 'pending')"),
-            ("crons", "INSERT INTO crons (cron_id, assistant_id, schedule) VALUES (%s, %s, '* * * * *')"),
+            (
+                "crons",
+                "INSERT INTO crons (cron_id, assistant_id, schedule) VALUES (%s, %s, '* * * * *')",
+            ),
         )
         for table, statement in seeds:
             with psycopg.connect(isolated_uri) as connection:
@@ -56,8 +62,14 @@ async def test_empty_schema_migration_is_repeatable(pg_runtime) -> None:
                     "007_checkpoint_baselines",
                 )
                 connection.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(table)))
-        assert upgrade_head(isolated_uri, version_table_schema=schema) == "009_event_retention_watermarks"
-        assert upgrade_head(isolated_uri, version_table_schema=schema) == "009_event_retention_watermarks"
+        assert (
+            upgrade_head(isolated_uri, version_table_schema=schema)
+            == "009_event_retention_watermarks"
+        )
+        assert (
+            upgrade_head(isolated_uri, version_table_schema=schema)
+            == "009_event_retention_watermarks"
+        )
         command.check(alembic_config(isolated_uri, version_table_schema=schema))
         with psycopg.connect(isolated_uri) as connection:
             tables = {

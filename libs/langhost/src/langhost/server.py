@@ -495,9 +495,11 @@ async def _assistants(request: Request) -> JSONResponse:
     request._json = dict(request.query_params)
     return await assistants_search(request)
 
+
 async def _threads(request: Request) -> JSONResponse:
     request._json = dict(request.query_params)
     return await threads_search(request)
+
 
 async def _assistant_get(request: Request) -> JSONResponse:
     try:
@@ -553,7 +555,9 @@ async def _run_create(request: Request) -> JSONResponse:
             thread = await conn.session.get(ThreadRow, thread_id)
             if thread is None or not in_principal_scope(thread, principal):
                 return JSONResponse({"detail": "thread not found"}, status_code=404)
-        raw_idempotency_key = request.headers.get("idempotency-key") or payload.get("idempotency_key")
+        raw_idempotency_key = request.headers.get("idempotency-key") or payload.get(
+            "idempotency_key"
+        )
         idempotency_key = scoped_idempotency_key(principal, raw_idempotency_key)
         run = await RunRepository().create(
             conn.session,

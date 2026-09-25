@@ -22,9 +22,7 @@ def test_custom_base_user_fields_survive_runtime_identity_snapshot():
             return {"identity": "alice", "team": "blue", "permissions": ["run"]}[key]
 
     principal = Principal.from_auth_user(User())
-    assert principal.auth_user == {
-        "identity": "alice", "team": "blue", "permissions": ["run"]
-    }
+    assert principal.auth_user == {"identity": "alice", "team": "blue", "permissions": ["run"]}
 
 
 @pytest.mark.asyncio
@@ -156,7 +154,9 @@ async def test_store_authorization_owns_namespace_without_builtin_scope(monkeypa
     monkeypatch.setattr(server, "_load_symbol", lambda *args: auth)
     monkeypatch.setattr(store_api, "_store", Store)
     app = server.create_app({"graphs": {}, "auth": {"path": "fixture:auth"}})
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
         response = await client.get("/store/items?namespace=notes&key=one")
         assert response.status_code == 200, response.text
         assert response.json()["namespace"] == ["alice", "notes"]
@@ -208,16 +208,20 @@ async def test_store_namespace_auth_isolates_real_postgres_items(monkeypatch):
             bob = {"Authorization": "bob"}
             item = {"namespace": ["notes"], "key": "one", "value": {"text": "private"}}
             assert (await client.put("/store/items", json=item, headers=alice)).status_code == 204
-            assert (await client.get("/store/items?namespace=notes&key=one", headers=bob)).json() is None
+            assert (
+                await client.get("/store/items?namespace=notes&key=one", headers=bob)
+            ).json() is None
             found = await client.get("/store/items?namespace=notes&key=one", headers=alice)
             assert found.json()["value"] == item["value"]
             search = await client.post(
                 "/store/items/search", json={"namespace_prefix": ["notes"]}, headers=alice
             )
             assert len(search.json()["items"]) == 1
-            assert (await client.post(
-                "/store/items/search", json={"namespace_prefix": ["notes"]}, headers=bob
-            )).json()["items"] == []
+            assert (
+                await client.post(
+                    "/store/items/search", json={"namespace_prefix": ["notes"]}, headers=bob
+                )
+            ).json()["items"] == []
             namespaces = await client.post(
                 "/store/namespaces", json={"suffix": ["notes"], "max_depth": 3}, headers=alice
             )
@@ -226,16 +230,20 @@ async def test_store_namespace_auth_isolates_real_postgres_items(monkeypatch):
                 "namespaces": []
             }
             expiring = {**item, "key": "expiring", "ttl": 0.001, "index": False}
-            assert (await client.put("/store/items", json=expiring, headers=alice)).status_code == 204
+            assert (
+                await client.put("/store/items", json=expiring, headers=alice)
+            ).status_code == 204
             await asyncio.sleep(0.2)
             assert await Store().sweep_ttl() >= 1
-            assert (await client.get(
-                "/store/items?namespace=notes&key=expiring", headers=alice
-            )).json() is None
+            assert (
+                await client.get("/store/items?namespace=notes&key=expiring", headers=alice)
+            ).json() is None
             assert (
                 await client.request("DELETE", "/store/items", json=item, headers=alice)
             ).status_code == 204
-            assert (await client.get("/store/items?namespace=notes&key=one", headers=alice)).json() is None
+            assert (
+                await client.get("/store/items?namespace=notes&key=one", headers=alice)
+            ).json() is None
     finally:
         await stop_pool()
 
@@ -381,7 +389,10 @@ async def test_postgres_authorized_thread_pagination_and_mutations(monkeypatch):
             denied_stream = await client.get(f"{path}/stream", headers=bob)
             assert denied_stream.status_code == 200
             assert denied_stream.headers["content-type"].startswith("text/event-stream")
-            assert 'event: error\ndata: {"error":"HTTPException","message":"404: Thread not found"}' in denied_stream.text
+            assert (
+                'event: error\ndata: {"error":"HTTPException","message":"404: Thread not found"}'
+                in denied_stream.text
+            )
             assert (await client.post("/threads/count", json={}, headers=alice)).json() == 1
             page = await client.post("/threads/search", json={"limit": 1}, headers=alice)
             assert [row["thread_id"] for row in page.json()] == [thread["thread_id"]]
@@ -504,12 +515,17 @@ async def test_auth_dispatch_matches_locked_official_reference(monkeypatch):
         official_calls = calls[:]
         calls.clear()
         try:
-            local_result = await authorize(auth, {"identity": "alice"}, resource, action, local_value)
+            local_result = await authorize(
+                auth, {"identity": "alice"}, resource, action, local_value
+            )
             local_status = None
         except HTTPException as exc:
             local_result, local_status = None, exc.status_code
         assert (local_status, local_result or {}, local_value, calls) == (
-            official_status, official_result or {}, official_value, official_calls
+            official_status,
+            official_result or {},
+            official_value,
+            official_calls,
         )
 
 

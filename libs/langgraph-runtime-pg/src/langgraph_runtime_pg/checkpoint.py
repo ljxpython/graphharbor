@@ -52,7 +52,7 @@ class FencedPostgresSaver(AsyncPostgresSaver):
                     or not run["valid"]
                     or run["lease_owner"] != owner
                     or run["retry_count"] != generation
-                    or str(run["thread_id"]) != thread_id
+                    or str(run["thread_id"] or run_id) != thread_id
                 ):
                     raise CheckpointConflict("checkpoint writer no longer owns the run")
             try:

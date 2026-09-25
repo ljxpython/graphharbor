@@ -62,9 +62,7 @@ async def test_same_client_key_isolated_by_authenticated_identity(pg_runtime):
     alice_thread, bob_thread = uuid4(), uuid4()
     async with connect() as conn:
         conn.session.add(AssistantRow(assistant_id=assistant_id, graph_id="test", name="test"))
-        conn.session.add_all([
-            ThreadRow(thread_id=alice_thread), ThreadRow(thread_id=bob_thread)
-        ])
+        conn.session.add_all([ThreadRow(thread_id=alice_thread), ThreadRow(thread_id=bob_thread)])
 
     async def submit(identity, thread_id):
         async with connect() as conn:
@@ -82,4 +80,6 @@ async def test_same_client_key_isolated_by_authenticated_identity(pg_runtime):
     bob = await submit("bob", bob_thread)
     assert alice != bob
     assert await submit("alice", alice_thread) == alice
-    assert scoped_idempotency_key(None, Principal(subject="alice").idempotency_key("retry")) != Principal(subject="alice").idempotency_key("retry")
+    assert scoped_idempotency_key(
+        None, Principal(subject="alice").idempotency_key("retry")
+    ) != Principal(subject="alice").idempotency_key("retry")

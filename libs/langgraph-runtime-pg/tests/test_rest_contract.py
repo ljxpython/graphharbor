@@ -185,7 +185,7 @@ async def test_core_rest_contract_covers_resources_and_errors(tmp_path: Path) ->
             f"/threads/{thread_id}/runs",
             json={"assistant_id": assistant_id, "input": {"value": 1}},
         )
-        assert run_response.status_code == 201, run_response.text
+        assert run_response.status_code == 200, run_response.text
         run_id = run_response.json()["run_id"]
         assert (await client.get(f"/threads/{thread_id}/runs")).status_code == 200
         assert (await client.get(f"/threads/{thread_id}/runs/{run_id}")).status_code == 200

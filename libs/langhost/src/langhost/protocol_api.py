@@ -58,7 +58,11 @@ async def _latest_run(thread_id: UUID, request: Request) -> RunRow | None:
             .limit(1)
         )
         row = (await conn.session.execute(query)).scalar_one_or_none()
-        return await _authorized_run(request, conn.session, row.run_id, "update") if row is not None else None
+        return (
+            await _authorized_run(request, conn.session, row.run_id, "update")
+            if row is not None
+            else None
+        )
 
 
 async def _run_by_idempotency(key: str, request: Request) -> RunRow | None:
@@ -69,9 +73,15 @@ async def _run_by_idempotency(key: str, request: Request) -> RunRow | None:
     if scoped_key is None:
         return None
     async with connect() as conn:
-        query = select(RunRow).where(RunRow.idempotency_key == scoped_key, RunRow.thread_id == thread_id)
+        query = select(RunRow).where(
+            RunRow.idempotency_key == scoped_key, RunRow.thread_id == thread_id
+        )
         row = (await conn.session.execute(query)).scalar_one_or_none()
-        return await _authorized_run(request, conn.session, row.run_id, "update") if row is not None else None
+        return (
+            await _authorized_run(request, conn.session, row.run_id, "update")
+            if row is not None
+            else None
+        )
 
 
 async def protocol_commands(request: Request) -> JSONResponse:
@@ -262,6 +272,8 @@ def _frame(wire: dict[str, Any]) -> str:
 
 
 async def protocol_event_stream(request: Request) -> JSONResponse | StreamingResponse:
+    from langhost.streaming import _resumable_run_ids
+
     try:
         thread_id = UUID(str(request.path_params["thread_id"]))
     except (KeyError, TypeError, ValueError):
@@ -297,6 +309,14 @@ async def protocol_event_stream(request: Request) -> JSONResponse | StreamingRes
             {"code": "cursor_expired", "detail": "cursor_expired", "recovery": "thread_snapshot"},
             status_code=410,
         )
+    resumable = await _resumable_run_ids(
+        {UUID(wire["params"]["run_id"]) for wire in replay if wire.get("params", {}).get("run_id")}
+    )
+    replay = [
+        wire
+        for wire in replay
+        if not wire.get("params", {}).get("run_id") or UUID(wire["params"]["run_id"]) in resumable
+    ]
 
     async def stream() -> AsyncIterator[str]:
         metric_inc("graphharbor_protocol_connections_opened_total")

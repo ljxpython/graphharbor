@@ -142,6 +142,22 @@ async def _thread_event_sequence(thread_id: UUID) -> int:
         return int(await conn.session.scalar(query) or 0)
 
 
+async def _resumable_run_ids(run_ids: set[UUID]) -> set[UUID]:
+    if not run_ids:
+        return set()
+    async with connect() as conn:
+        return set(
+            (
+                await conn.session.scalars(
+                    select(RunRow.run_id).where(
+                        RunRow.run_id.in_(run_ids),
+                        RunRow.kwargs["stream_resumable"].as_boolean().is_(True),
+                    )
+                )
+            ).all()
+        )
+
+
 async def _thread_frame(row: RuntimeEventRow, modes: set[str]) -> tuple[str, Any, str] | None:
     event = row.payload
     name = str(event.get("event") or event.get("method") or "custom")
@@ -208,6 +224,7 @@ async def thread_stream(request: Request) -> JSONResponse | StreamingResponse:
         try:
             if cursor_value < 0:
                 cursor_value = await _thread_event_sequence(thread_id)
+            initial_replay = True
             while True:
                 if (await _get_thread(request))[0] is None:
                     return
@@ -218,14 +235,22 @@ async def thread_stream(request: Request) -> JSONResponse | StreamingResponse:
                 ):
                     yield _sse("error", {"detail": "cursor_expired", "recovery": "thread_snapshot"})
                     return
+                resumable = (
+                    await _resumable_run_ids({row.run_id for row in rows if row.run_id})
+                    if initial_replay
+                    else set()
+                )
                 for row in rows:
                     if (await _get_thread(request))[0] is None:
                         return
                     cursor_value = row.sequence
+                    if initial_replay and row.run_id is not None and row.run_id not in resumable:
+                        continue
                     frame = await _thread_frame(row, modes)
                     if frame is not None:
                         name, data, event_id = frame
                         yield _sse(name, data, event_id=event_id, event_id_last=True)
+                initial_replay = False
                 try:
                     await asyncio.wait_for(queue.get(), timeout=heartbeat)
                 except TimeoutError:
@@ -280,7 +305,20 @@ def _event_frame(
     if (namespace or target_namespace) and not stream_subgraphs:
         return None
     if name == "lifecycle" and version != "v3":
-        return None
+        if event.get("status") not in {RunStatus.ERROR.value, RunStatus.TIMEOUT.value}:
+            return None
+        error = event.get("error") or {}
+        if not isinstance(error, dict):
+            error = {"message": str(error)}
+        try:
+            sequence = int(envelope["seq"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        return (
+            "error",
+            {"error": error.get("type", "Error"), "message": error.get("message", "")},
+            sequence,
+        )
     if version != "v3" and name not in modes and "events" not in modes and "debug" not in modes:
         return None
     data = typed_params.get("data")
@@ -395,6 +433,10 @@ async def _run_sse(
                     {"detail": "cursor_expired", "recovery": "run_snapshot"},
                 )
                 return
+            if not include_location and not snapshot.kwargs.get("stream_resumable", False):
+                if snapshot.status in _TERMINAL:
+                    return
+                replay = []
             yield _sse(
                 "metadata",
                 {"run_id": str(run_id), "attempt": snapshot.retry_count + 1},
