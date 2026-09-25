@@ -84,11 +84,11 @@ TTL、调度、后台清理等系统动作不冒充 end-user 请求，但必须�
 | ID | 改动内容 / 代码位置 | 预期结果 | 验证项 | 状态 |
 |---|---|---|---|---|
 | D01 | 两仓版本、实际消费者、G models/run_store/Store/签名历史只读盘点；官方 probe | 数据/依赖/差异清单，确认幂等及 namespace 契约 | V-D01 | 部分完成：平台现役源码未发现 GraphHarbor Store 调用，官方 Auth 子集差分通过；本机 PG17 两库完成计数级盘点，Store 两表为空；外部消费者与生产目标仍未知 |
-| D02 | G schema 迁移 + P 维护窗口 ACL 协调清理 | 旧运行数据清理后可迁移，备份可恢复 | V-D02 | 部分完成：隔离 PG17 已验证非空拒绝及旧 schema 备份恢复；本机两库已备份、协调清理 ACL/运行历史并升级至 `008` / `20260925_0005`，但本机两份归档尚未全量恢复演练 |
+| D02 | G schema 迁移 + P 维护窗口 ACL 协调清理 | 旧运行数据清理后可迁移，备份可恢复 | V-D02 | 部分完成：隔离 PG17 已验证非空拒绝及旧 schema 备份恢复；本机两库已备份、协调清理 ACL/运行历史并升级，且两份归档已完整恢复到隔离库；生产回退组合未演练 |
 | D03 | G run_store/models/migrations；P 既有稳定 key 接入测试 | 通用幂等域、无 NULL 穿透和跨域命中 | V-D03 | 部分完成：唯一索引改全局内部 key，API 用标准 Auth identity/匿名标签域化；PG17 并发提交和跨身份 2 passed。跨项目/响应丢失与平台联合验收未完成 |
 | D04 | G store_api；P 实际 Store 消费者和 auth | namespace 授权及旧数据可读，无物理搬迁 | V-D04 | 部分完成：GraphHarbor 隔离 PG17 Store 跨身份搜索/列举、suffix/max_depth、TTL sweep 回归通过；本机 Store 两表为空，平台现役源码未发现消费者，外部消费者未知 |
-| D05 | API/worker 格式版本切换、排队/恢复清点、候选包联调 | 维护窗口一次切换，无旧格式运行分支，故障恢复可操作 | V-D05 | 部分完成：双包候选安装并加载平台三份配置；PG17 worker 租约失效后重新入队及新 worker 完成回归通过；本机候选栈健康，既有临时 Thread HTTP 链路通过。HITL、业务 run/SSE、完整恢复与依赖锁定仍缺 |
-| D06 | 完整联合验收、发行说明、旧列/业务分支清理、能力文档更新 | 全部 Final 门禁通过后才能 done | V-D06—D08 | 部分完成：治理浏览器文件 10 passed，覆盖 Thread 私有/共享/接管、服务账号撤权与子资源拒绝；官方协议差分、业务 run/HITL、文件正向链路和完整回退仍缺 |
+| D05 | API/worker 格式版本切换、排队/恢复清点、候选包联调 | 维护窗口一次切换，无旧格式运行分支，故障恢复可操作 | V-D05 | 部分完成：公开 post33 安装及平台锁定、本机单项目业务 Run/SSE/HITL、PG17 worker 租约接管和两库归档隔离恢复已验证；长排队、worker 崩溃及过期身份组合仍缺 |
+| D06 | 完整联合验收、发行说明、旧列/业务分支清理、能力文档更新 | 全部 Final 门禁通过后才能 done | V-D06—D08 | 部分完成：治理浏览器 10 passed，单项目 Run/HITL 与文件正向链路通过；官方 identity-only Auth 子集通过，但完整 OpenAPI 比较仍有 203 处差异，跨项目故障与回退门禁未完成 |
 
 ## 验证要求与记录
 
@@ -136,6 +136,10 @@ TTL、调度、后台清理等系统动作不冒充 end-user 请求，但必须�
 
 **2026-09-25 完整备份恢复：** 用本机 PostgreSQL 17 的 `pg_restore --exit-on-error --no-owner --no-acl` 将两份切换前归档分别恢复到新库 `graphharbor_boundary_restore_post33` 和 `platform_boundary_restore_post33`；两个命令均退出 0。Runtime 归档恢复后 revision 为 `006_terminal_events`，有 Threads 57、Runs 324、Events 434,742、Store items 0，库约 7.8 GB；平台归档恢复后 revision 为 `20260922_0004`，有 Thread ACL 57、run requests 401，库约 29 MB。这证明本机备份可完整恢复到隔离库，不等于生产环境切换后的全量回退演练。首次误用 PATH 上 PostgreSQL 14 的 `pg_restore`，因归档头 1.16 失败；两个新库仍为空，改用 PG17 后成功。恢复库仅用于只读核对，不覆盖现有业务库。
 
+**2026-09-26 官方契约续验：** 使用同一 identity-only Auth fixture 启动锁定的 `langgraph-api==0.13.0` 开发服务与 GraphHarbor post33（独立 PG17 `graphharbor_boundary_auth_verify`、Redis DB15、测试签名密钥及独立 API/worker）。`check_boundary_auth.py` 的 12 类结果一致，包括创建 metadata 受信修改、跨用户 Thread/Run/state/history/search 拒绝、`runs/wait`、HITL 与 SSE 拒绝。随后执行 `scripts/compare_official_protocol.py --official-url http://127.0.0.1:31398 --graphharbor-url http://127.0.0.1:31399 --result-out /tmp/graphharbor-boundary-protocol-20260926.json`：比较失败，203 处差异全部位于 OpenAPI，其中路径/操作请求响应及参数 140 处、`components.schemas` 63 处。比较器现会识别 requestBody/schema 变化；此结果属于真实协议缺口，不得标 V-D06 通过。首次未设置签名密钥的 500 和未启动 worker 的超时均是隔离启动配置失败，不计成功；临时服务已停止。当前结果文件仅在本机 `/tmp`，后续需对差异按官方目标与明确排除项逐条分类并补行为验证。
+
+**2026-09-26 平台创建故障注入：** `create_thread` 的 ready 确认失败、5xx 后对账探测失败、明确 4xx 后 ACL 清理失败，以及 ACL 预留记录缺失，均有定向测试；前两类保留可用于受限 reconcile 的 UUID，缺 ACL 不报告 ready。平台五个 ACL/gateway/委托/SDK 测试模块共 71 tests、3 skipped；提交钩子 Ruff 和格式检查通过。明确 4xx 后清理数据库失败仍可能遗留 pending ACL，运行端没有 Thread；需平台侧人工核对清理，此场景不算自动补偿成功。GraphHarbor 不承担该业务 ACL 清理。
+
 ## 状态
 
-partial：D02/D03/D04/D05 有阶段实现；本机两库盘点、ACL 协调清理与 schema 切换已完成，但本机备份的完整恢复、可重复安装依赖、业务 run/HITL/文件正向链路及 Final V-D06—D08 尚未完成。2026-09-25 暂停后续实施，先处理[Runtime 流事件保留治理](../20260925-runtime-event-retention/README.md)；恢复顺序见本项目 README 的“暂停点与恢复入口”。worker 租约恢复已有回归，不能替代平台业务联合验收；不得据此切换生产。
+partial：D02/D03/D04/D05 有阶段实现；本机两库盘点、ACL 协调清理、schema 切换、归档隔离恢复、post33 可重复安装及单项目业务 Run/HITL/文件正向链路已有证据。官方完整 OpenAPI 对比仍有 203 处差异；跨项目与多用户拒绝、故障注入及 Final V-D06—D08 未完成。worker 租约恢复与 identity-only Auth 子集不能替代平台业务联合验收；不得据此切换生产。

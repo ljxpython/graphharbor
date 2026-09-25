@@ -5,7 +5,7 @@
 - **启动日期：** 2026-09-25（Asia/Shanghai）
 - **目标：** GraphHarbor 提供通用 LangGraph Agent Server；平台负责业务身份、ACL、模型与工具策略、业务观测和 workspace。
 - **改动级别：** 治理改动，跨仓库，涉及鉴权、持久化隔离、后台执行与升级回退。
-- **状态：** `partial`。Worker 业务字段、workspace 源码及核心 SQL tenant/project scope 已完成代码移除；Thread 创建未知结果可用 UUID 对账。本机 PG17 两库已备份、清理旧运行数据并升级到新 schema，候选包 local stack 已启动。完整备份恢复、业务 run/HITL、浏览器文件正向链路及最终联合验收仍缺证据。
+- **状态：** `partial`。Worker 业务字段、workspace 源码及核心 SQL tenant/project scope 已完成代码移除；Thread 创建未知结果可用 UUID 对账。双包 post33 已发布并由平台锁定；本机 PG17 两库已备份、清理旧运行数据、升级并在隔离库完整恢复。单项目业务 Run/HITL 和浏览器文件正向链路已有阶段证据；官方全入口协议、跨身份故障路径与最终联合验收仍缺。
 - **当前安排：** 事件保留专项已有核心实现，两项专项现进入联合验收；仍须完成官方全入口差分、跨项目故障路径和 Final 门禁。`partial` 不因阶段测试通过改为完成。
 - **负责人：** 待指定；评审人由用户指定，AI 不代替人工批准。
 - **预计工作量：** 12—18 人天，含联合验证；历史数据量、第三方消费者和官方授权差分结果可能调整估算。未承诺完成日期。
@@ -13,7 +13,7 @@
 
 **2026-09-25 用户决策：彻底解耦，不维护旧业务接口、旧字段语义或旧版本混跑兼容。两仓完成适配后维护窗口一次切换；官方 LangGraph API/SDK 契约仍是产品目标。历史数据允许在明确的维护切换窗口直接删除，不做旧业务字段回填。**
 
-2026-09-25 实施状态：已在本机配置指向的 `graphharbor_acceptance` 和 `platform_api` 执行停写、备份、旧运行数据清理及 schema 升级；这不是生产切换。候选代码已移除 tenant/project SQL 隔离；隔离 PG17 迁移拒绝与备份恢复、跨用户 Thread 拒绝路径已验证。完整入口授权矩阵、业务验收及本机两库备份的完整恢复演练仍须完成。
+2026-09-25 实施状态：已在本机配置指向的 `graphharbor_acceptance` 和 `platform_api` 执行停写、备份、旧运行数据清理及 schema 升级；这不是生产切换。候选代码已移除 tenant/project SQL 隔离；隔离 PG17 迁移拒绝与备份恢复、跨用户 Thread 拒绝路径已验证。其后两份本机归档已在隔离库完整恢复；完整入口授权矩阵与最终业务验收仍须完成。
 
 本目录为跨项目方案唯一事实源。平台仓库同名项目只维护导航与责任入口，任务和验证结果只更新本目录对应专题。
 
@@ -130,8 +130,10 @@ ACL = Access Control List（访问控制列表），在本项目指“某个用�
 
 2026-09-26 续验：隔离治理浏览器矩阵 10 passed 且 fixture ACL 残留为 0；平台 Runtime workspace 定向 54 passed、PG17 restart/HITL 1 passed、skill snapshot restart 4 passed。GraphHarbor 隔离 PG17 + Redis DB15 的事件/worker/授权定向回归 102 passed、4 skipped。完整官方 Auth/SSE 差分、故障注入和跨项目联合流程仍未完成。
 
+2026-09-26 官方 identity-only Auth 子集续验：同一 `boundary.langgraph.json` 分别启动 `langgraph-api==0.13.0` 的 `langgraph dev` 和 post33 GraphHarbor；GraphHarbor 使用独立 PG17 库、Redis DB15 和测试签名密钥，API/worker 均启动后运行 `PYTHONPATH=. uv run --no-sync python tests/acceptance_app/check_boundary_auth.py --official-url http://127.0.0.1:31398 --graphharbor-url http://127.0.0.1:31399`，12 类结果一致并通过，包括无认证、跨用户资源拒绝、搜索、`runs/wait`、HITL 和 SSE 拒绝。先前缺签名密钥返回 500、未启动 worker 导致超时，两次不计通过。相同双端的完整 OpenAPI 比较报 203 处差异（路径/操作 140、组件 schema 63），见专题 04；因此子集通过不能扩展为全入口兼容。临时服务已停止。
+
 ## 暂停点与恢复入口
 
-2026-09-25 暂停快照：本机 `graphharbor_acceptance` 为 `008_remove_business_scope`，`platform_api` 为 `20260925_0005`；Thread/Run/Event 及平台 ACL/run requests 已清零，Dear memory/skills 保留。两份 0600 备份仍在上述 `/tmp` 路径，仅核对归档目录，未完整恢复。本轮检查时 8123 `/ready` 健康，候选平台栈采用已安装 wheel + `UV_NO_SYNC=1`；这些进程和临时文件的后续存在性必须重新核对，不能照抄为未来的验收结果。
+2026-09-25 暂停快照（历史记录）：当时本机 `graphharbor_acceptance` 为 `008_remove_business_scope`，`platform_api` 为 `20260925_0005`；Thread/Run/Event 及平台 ACL/run requests 已清零，Dear memory/skills 保留。其后两份归档已完整恢复到隔离库，runtime-service 已锁定公开 post33 并以普通 `uv run --frozen` 运行；不再需要 `UV_NO_SYNC=1`。当前服务及临时文件仍须每次验收前重新核对。
 
-完成事件保留专项后，从[专题 04 的 D05/D06 与 V-D06—D08](04-data-migration-and-cutover.md)继续：先解决平台锁文件指向旧 PyPI wheel 的可重复安装问题并做两库备份完整恢复；再以新数据跑业务 Run/SSE/HITL、文件创建/预览/下载及 workspace 恢复；最后完成官方全入口 Auth/API/SSE 差分、拒绝副作用、打包和回退门禁。身份、模型/trace、workspace 各专题未勾选的 Final 项照原文逐项核对。不能因为本机库已清理、服务健康或事件保留项目完成就宣称业务边界专项 `done`；无用户明确发布指令不提交、推送或发布。
+继续[专题 04 的 D05/D06 与 V-D06—D08](04-data-migration-and-cutover.md)：优先处理官方 OpenAPI 差异及全入口 Auth/API/SSE 差分，再补跨项目/跨用户拒绝副作用、创建与 worker 故障注入、模型/观测异常、workspace 完整链路和回退门禁。已完成的 post33 安装、两库恢复、单项目 Run/HITL 与文件正向链路作为阶段证据保留，不重复作为未完成项。身份、模型/trace、workspace 各专题未勾选的 Final 项仍须逐项核对；未补齐前不能宣称业务边界专项 `done`。

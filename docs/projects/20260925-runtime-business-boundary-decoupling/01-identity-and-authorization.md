@@ -161,4 +161,8 @@ partial：A02/A03/A04/A05/A06 有阶段实现，A01 官方全入口 Auth 差分�
 
 2026-09-25 隔离治理浏览器补验：将运行中 Runtime API 的 `PLATFORM_THREAD_AUTHORIZATION_URL` 临时指向隔离治理平台 12142 后，`RUN_LOCAL_GOVERNANCE_E2E=1 ... playwright test e2e/platform-access-governance.spec.ts --workers=1` 10 项均通过（29.4 秒），覆盖私有/共享/接管/撤权、服务账号 grant/token、子资源拒绝和成员移除。第一次未切换回查地址时 5 项创建 Thread 返回 403，原因是隔离平台 token 被 Runtime 回查主平台 2142 拒绝；该次不计通过。测试 fixture 退出时留下 6 条临时 ACL，导致 shutdown cleanup 抛错；测试数据库在临时目录内，未触及正式平台库。完成跨资源动态差分和清理无残留仍需单独核对。
 
+2026-09-26 创建失败补偿续验：平台 `create_thread` 在 Runtime 成功但 ACL ready 确认失败、上游 5xx 且 reconcile 探测再次失败、明确 4xx 后 pending 清理失败时，均向客户端保留 Thread UUID 和 reconcile 路径；`mark_provisioned` 对缺失 ACL 明确返回失败，网关不再把无 ACL 的 Thread 报告为 ready。平台 SQLite 故障注入与网关 HTTP/委托/SDK 定向 unittest 共 71 项（3 skipped）通过，Ruff/format 钩子通过。ready 更新失败后 owner 可用受限 reconcile 将同一 Thread 转为 ready，非 owner 与跨项目限制沿用既有测试。明确 4xx 且数据库清理失败时，Runtime 不存在而 pending ACL 可能悬留；目前对账 404 仍保持 pending，需平台运维核对并清理，不将其记为自动补偿完成。GraphHarbor 核心未加入业务 ACL 逻辑。
+
+同日平台 Web `session.service.spec.ts` 的 503/504 pending Thread 持久化及重试对账共 7 passed，pre-commit 的 Ruff/format/eslint/prettier 全部通过。正式本机栈经平台登录，临时项目中 Thread 创建和读取均为 200，随后 Thread 与项目删除均为 200；只验证当前单用户正向路径，不代表跨身份 Final。
+
 2026-09-26 联合治理复测：隔离平台 API 12142 + Runtime 8123 + Web 13000 的治理矩阵为 10 passed；fixture `thread_access` 残留为 0，正式 Runtime ACL 回查地址已恢复到 2142。首轮 5 failed 的 503 是临时地址漏写 `/api/runtime/internal/thread-authorization`，不计通过。本结果不等于官方全入口 Auth 差分完成。
