@@ -9,7 +9,6 @@ from contextlib import suppress
 
 import pytest
 import redis.asyncio as redis
-from httpx import ASGITransport, AsyncClient
 from starlette.exceptions import HTTPException
 
 
@@ -623,71 +622,3 @@ async def test_threads_search_honors_extract(pg_runtime):
             "extracted": {"n": 7},
         }
     ]
-
-
-async def test_fake_death_queue_reclaims_and_finishes(api_lifespan_no_queue, monkeypatch):
-    """Orphan a claimed run (dead worker), start queue → sweep → success."""
-    monkeypatch.setattr("langgraph_api.config.N_JOBS_PER_WORKER", 1)
-
-    from langgraph_api.server import app
-
-    from langgraph_runtime_pg import ops, queue
-    from langgraph_runtime_pg.database import connect
-    from langgraph_runtime_pg.redis_stream import clear_run_heartbeat, wake_run_queue
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        aid = str(uuid.uuid4())
-        ares = await client.post(
-            "/assistants",
-            json={
-                "assistant_id": aid,
-                "graph_id": "tools_agent",  # finishes to success (unlike streaming "agent")
-                "name": "fake-death",
-                "config": {},
-                "metadata": {},
-            },
-        )
-        assert ares.status_code in (200, 201), ares.text
-
-        tres = await client.post("/threads", json={"metadata": {}})
-        assert tres.status_code in (200, 201), tres.text
-        tid = tres.json()["thread_id"]
-
-        run_res = await client.post(
-            f"/threads/{tid}/runs",
-            json={
-                "assistant_id": aid,
-                "input": {"messages": [{"role": "user", "content": "reclaim-me"}]},
-            },
-        )
-        assert run_res.status_code in (200, 201), run_res.text
-        rid = uuid.UUID(run_res.json()["run_id"])
-        tid_uuid = uuid.UUID(tid)
-
-    claimed = [
-        (run["run_id"], attempt) async for run, attempt in ops.Runs.next(wait=False, limit=1)
-    ]
-    assert len(claimed) == 1 and claimed[0] == (rid, 1)
-
-    await clear_run_heartbeat(rid)
-    await wake_run_queue()
-
-    qtask = asyncio.create_task(queue.queue(), name="fake-death-queue")
-    try:
-
-        async def _wait_terminal() -> str:
-            while True:
-                async with connect() as conn:
-                    run = await anext(await ops.Runs.get(conn, rid, thread_id=tid_uuid))
-                    status = run["status"]
-                if status in ("success", "error", "interrupted", "timeout"):
-                    return status
-                await asyncio.sleep(0.5)
-
-        status = await asyncio.wait_for(_wait_terminal(), timeout=30.0)
-        assert status == "success", f"expected success after fake death, got {status}"
-    finally:
-        qtask.cancel()
-        with suppress(asyncio.CancelledError):
-            await qtask

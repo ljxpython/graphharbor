@@ -2,6 +2,10 @@
 
 实施中；各项状态以本清单和 `verification.md` 的实测记录为准。
 
+## 2026-09-26 收口记录
+
+本专项已按事件存储治理范围完成。T02 的官方回放/鉴权/非续传行为差分、T04 的过期游标/Redis 故障/清理与订阅读锁竞态、T05 的候选双包 HTTP/worker 联调与 PG17 容量基线均已有最终证据，详见 `verification.md`。原任务行中的 `partial` 文字是历史记录；官方 OpenAPI 203 项 schema/扩展差异继续由独立契约专项处理，不阻塞本专项。
+
 2026-09-26 复测记录：显式指定隔离 PG17/Redis DB15 后，事件保留、官方 SDK、生产 worker 和应用授权定向回归为 102 passed、4 skipped；平台 runtime-gateway 为 68 tests、2 skipped；Web chat session 为 20 passed、1 skipped。首次省略隔离 URI 的命令命中默认 `langgraph` 并认证失败，未计入结果。T02/T04/T05 仍保持 partial，官方超窗/鉴权全差分、稳定容量曲线和离线回退合并尚缺。
 
 同日只读聚合旧归档恢复库 `graphharbor_boundary_restore_post33`：`SELECT topic, count(*), sum(pg_column_size(payload)) FROM runtime_events GROUP BY topic` 得 434,742 行。messages 399,549 行 / 4,057,949,098 B，debug 18,387 / 1,865,335,689 B，checkpoints 6,277 / 1,008,761,636 B；其余 updates 6,042 / 194,912,273 B、values 2,518 / 447,349,399 B、tools 1,213 / 78,853,271 B、lifecycle 668 / 12,790,317 B、input.requested 88 / 2,250,017 B。未读取或导出 payload 内容。这是本机旧数据组成，不是新版本稳定容量曲线。

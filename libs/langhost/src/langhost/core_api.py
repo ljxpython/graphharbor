@@ -858,10 +858,16 @@ async def threads_delete(request: Request) -> JSONResponse | Response:
     return _no_content()
 
 
-def _checkpoint_config(thread_id: UUID, checkpoint_id: str | None = None) -> dict[str, Any]:
+def _checkpoint_config(
+    thread_id: UUID,
+    checkpoint_id: str | None = None,
+    checkpoint_ns: str | None = None,
+) -> dict[str, Any]:
     configurable: dict[str, Any] = {"thread_id": str(thread_id)}
     if checkpoint_id:
         configurable["checkpoint_id"] = checkpoint_id
+    if checkpoint_ns is not None:
+        configurable["checkpoint_ns"] = checkpoint_ns
     return {"configurable": configurable}
 
 
@@ -936,57 +942,73 @@ async def threads_state(request: Request) -> JSONResponse:
     if row is None or thread_id is None:
         return _error("thread not found", 404)
     checkpoint_id = request.path_params.get("checkpoint_id")
-    if not checkpoint_id and request.method == "POST":
+    checkpoint_ns = request.query_params.get("checkpoint_ns")
+    if request.method == "POST":
         try:
             body = await request.json()
             if isinstance(body, dict):
                 cp_data = body.get("checkpoint")
                 if isinstance(cp_data, dict):
-                    checkpoint_id = cp_data.get("checkpoint_id")
-                elif isinstance(cp_data, str):
+                    if not checkpoint_id:
+                        checkpoint_id = cp_data.get("checkpoint_id")
+                    if not checkpoint_ns:
+                        checkpoint_ns = cp_data.get("checkpoint_ns")
+                elif isinstance(cp_data, str) and not checkpoint_id:
                     checkpoint_id = cp_data
                 if not checkpoint_id:
                     checkpoint_id = body.get("checkpoint_id")
+                if not checkpoint_ns:
+                    checkpoint_ns = body.get("checkpoint_ns")
         except Exception:
             pass
 
+    is_subgraph = bool(checkpoint_ns)
+    config = cast(
+        RunnableConfig,
+        _checkpoint_config(thread_id, checkpoint_id=checkpoint_id, checkpoint_ns=checkpoint_ns),
+    )
     registry = getattr(request.app.state, "graph_registry", None)
     graph_id = row.graph_id or row.metadata_.get("graph_id")
-    if registry is not None and graph_id and str(graph_id) in registry.ids():
-        config = cast(RunnableConfig, _checkpoint_config(thread_id, checkpoint_id))
+    # Subgraphs invoked dynamically within tools do not exist in the root graph's
+    # static topology; querying the compiled graph would raise SubgraphNotFound.
+    # Route subgraphs directly to the persistent checkpointer.
+    if not is_subgraph and registry is not None and graph_id and str(graph_id) in registry.ids():
         try:
             async with registry.open(str(graph_id), config) as graph:
                 return JSONResponse(_state_from_snapshot(await graph.aget_state(config)))
         except Exception as exc:
             return _error(f"checkpoint read failed: {exc}", 503)
     try:
-        item = await get_checkpointer().aget_tuple(
-            cast(RunnableConfig, _checkpoint_config(thread_id, checkpoint_id))
-        )
+        item = await get_checkpointer().aget_tuple(config)
     except Exception as exc:
         return _error(f"checkpoint read failed: {exc}", 503)
     if item is None:
         return JSONResponse(
             _plain(
                 {
-                    "values": row.values_ or {},
+                    "values": {} if is_subgraph else (row.values_ or {}),
                     "next": [],
-                    "checkpoint": _checkpoint_key(_checkpoint_config(thread_id, checkpoint_id)),
+                    "checkpoint": _checkpoint_key(config),
                     "metadata": {},
                     "created_at": None,
                     "parent_checkpoint": None,
                     "tasks": [],
-                    "interrupts": _stored_interrupts(row),
+                    "interrupts": [] if is_subgraph else _stored_interrupts(row),
                 }
             )
         )
     state = _state_from_tuple(item)
-    if not state.get("interrupts"):
+    if not is_subgraph and not state.get("interrupts"):
         state["interrupts"] = _stored_interrupts(row)
     # Some LangChain/Deep Agents checkpoints keep only scheduler bookkeeping in
     # channel_values while the durable thread row has the final projected state.
     # Expose that state instead of returning the misleading bare __pregel_tasks.
-    if checkpoint_id is None and not _has_projected_values(state.get("values")) and row.values_:
+    if (
+        not is_subgraph
+        and checkpoint_id is None
+        and not _has_projected_values(state.get("values"))
+        and row.values_
+    ):
         state["values"] = _plain(row.values_)
     return JSONResponse(state)
 
@@ -1002,7 +1024,18 @@ async def threads_history(request: Request) -> JSONResponse:
         limit, _ = _pagination(request, payload)
     except ValueError as exc:
         return _error(str(exc))
-    config = cast(RunnableConfig, _checkpoint_config(thread_id))
+
+    checkpoint_ns: str | None = None
+    if request.method == "POST":
+        cp_data = payload.get("checkpoint")
+        if isinstance(cp_data, dict):
+            checkpoint_ns = cp_data.get("checkpoint_ns")
+        if not checkpoint_ns:
+            checkpoint_ns = payload.get("checkpoint_ns")
+    if not checkpoint_ns:
+        checkpoint_ns = request.query_params.get("checkpoint_ns")
+
+    config = cast(RunnableConfig, _checkpoint_config(thread_id, checkpoint_ns=checkpoint_ns))
     before = (
         payload.get("before") if request.method == "POST" else request.query_params.get("before")
     )
@@ -1011,12 +1044,16 @@ async def threads_history(request: Request) -> JSONResponse:
             before = json.loads(before)
         except (TypeError, json.JSONDecodeError):
             return _error("before must be a JSON object")
-    if isinstance(before, dict):
+    if isinstance(before, str):
+        before = {"configurable": {"checkpoint_id": before}}
+    elif isinstance(before, dict):
         before = {"configurable": before}
     before_config = cast(RunnableConfig | None, before)
+
+    is_subgraph = bool(checkpoint_ns)
     registry = getattr(request.app.state, "graph_registry", None)
     graph_id = row.graph_id or row.metadata_.get("graph_id")
-    if registry is not None and graph_id and str(graph_id) in registry.ids():
+    if not is_subgraph and registry is not None and graph_id and str(graph_id) in registry.ids():
         try:
             async with registry.open(str(graph_id), config) as graph:
                 return JSONResponse(

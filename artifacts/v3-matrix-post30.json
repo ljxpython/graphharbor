@@ -1,0 +1,271 @@
+{
+  "nested": {
+    "graph": "v3_nested",
+    "scenario": "completed",
+    "thread_id": "5720b9f7-c056-48d4-8ca1-ce6c746d9268",
+    "run_id": "1fb317ad-fbc0-4920-be1f-61cbab1c93c5",
+    "events": [
+      {
+        "type": "event",
+        "event_id": "1099d44e-ed83-4c4b-b410-beb94ed6adc1",
+        "seq": 1,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [],
+          "timestamp": 1789448603896,
+          "data": {
+            "event": "running",
+            "status": "running",
+            "graph_name": "v3_nested"
+          },
+          "run_id": "1fb317ad-fbc0-4920-be1f-61cbab1c93c5",
+          "thread_id": "5720b9f7-c056-48d4-8ca1-ce6c746d9268",
+          "interrupts": []
+        }
+      },
+      {
+        "type": "event",
+        "event_id": "4ae92606-7276-4d29-a137-6d2c3b1daebe",
+        "seq": 13,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [
+            "outer:41b94c67-f3be-99d3-b03c-db6ee165f203"
+          ],
+          "timestamp": 1789448604161,
+          "data": {
+            "event": "started",
+            "namespace": [
+              "outer:41b94c67-f3be-99d3-b03c-db6ee165f203"
+            ],
+            "graph_name": "outer",
+            "trigger_call_id": "41b94c67-f3be-99d3-b03c-db6ee165f203"
+          },
+          "run_id": "1fb317ad-fbc0-4920-be1f-61cbab1c93c5",
+          "thread_id": "5720b9f7-c056-48d4-8ca1-ce6c746d9268",
+          "interrupts": []
+        }
+      },
+      {
+        "type": "event",
+        "event_id": "4930c8e0-6689-40f5-a783-01d79628f2e0",
+        "seq": 20,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [
+            "outer:41b94c67-f3be-99d3-b03c-db6ee165f203",
+            "child:cf229ee0-6862-1b12-ef22-84f5f992bd29"
+          ],
+          "timestamp": 1789448604288,
+          "data": {
+            "event": "started",
+            "namespace": [
+              "outer:41b94c67-f3be-99d3-b03c-db6ee165f203",
+              "child:cf229ee0-6862-1b12-ef22-84f5f992bd29"
+            ],
+            "graph_name": "child",
+            "trigger_call_id": "cf229ee0-6862-1b12-ef22-84f5f992bd29"
+          },
+          "run_id": "1fb317ad-fbc0-4920-be1f-61cbab1c93c5",
+          "thread_id": "5720b9f7-c056-48d4-8ca1-ce6c746d9268",
+          "interrupts": []
+        }
+      },
+      {
+        "type": "event",
+        "event_id": "d32d8d74-93b4-4bc2-9202-d633d300a102",
+        "seq": 28,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [
+            "outer:41b94c67-f3be-99d3-b03c-db6ee165f203",
+            "child:cf229ee0-6862-1b12-ef22-84f5f992bd29"
+          ],
+          "timestamp": 1789448604520,
+          "data": {
+            "event": "completed",
+            "namespace": [
+              "outer:41b94c67-f3be-99d3-b03c-db6ee165f203",
+              "child:cf229ee0-6862-1b12-ef22-84f5f992bd29"
+            ],
+            "graph_name": "child"
+          },
+          "run_id": "1fb317ad-fbc0-4920-be1f-61cbab1c93c5",
+          "thread_id": "5720b9f7-c056-48d4-8ca1-ce6c746d9268",
+          "interrupts": []
+        }
+      },
+      {
+        "type": "event",
+        "event_id": "38e49364-d496-432d-946c-e1efccab8c2a",
+        "seq": 34,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [
+            "outer:41b94c67-f3be-99d3-b03c-db6ee165f203"
+          ],
+          "timestamp": 1789448604681,
+          "data": {
+            "event": "completed",
+            "namespace": [
+              "outer:41b94c67-f3be-99d3-b03c-db6ee165f203"
+            ],
+            "graph_name": "outer"
+          },
+          "run_id": "1fb317ad-fbc0-4920-be1f-61cbab1c93c5",
+          "thread_id": "5720b9f7-c056-48d4-8ca1-ce6c746d9268",
+          "interrupts": []
+        }
+      },
+      {
+        "type": "event",
+        "event_id": "1ce94941-e871-4333-b19a-fb2fe28740e2",
+        "seq": 39,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [],
+          "timestamp": 1789448604804,
+          "data": {
+            "event": "completed",
+            "status": "success",
+            "graph_name": "v3_nested",
+            "reason": "completed",
+            "output": {
+              "scenario": "completed",
+              "results": [
+                "done"
+              ]
+            }
+          },
+          "run_id": "1fb317ad-fbc0-4920-be1f-61cbab1c93c5",
+          "thread_id": "5720b9f7-c056-48d4-8ca1-ce6c746d9268",
+          "interrupts": []
+        }
+      }
+    ]
+  },
+  "caught": {
+    "graph": "v3_caught",
+    "scenario": "completed",
+    "thread_id": "509d799e-edbf-4421-92bb-a30dd9383b5d",
+    "run_id": "9d64a50b-708a-4725-ac7d-33ff11b926cf",
+    "events": [
+      {
+        "type": "event",
+        "event_id": "4f230318-7f3a-420e-ac37-a355ba9978f5",
+        "seq": 1,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [],
+          "timestamp": 1789448605539,
+          "data": {
+            "event": "running",
+            "status": "running",
+            "graph_name": "v3_caught"
+          },
+          "run_id": "9d64a50b-708a-4725-ac7d-33ff11b926cf",
+          "thread_id": "509d799e-edbf-4421-92bb-a30dd9383b5d",
+          "interrupts": []
+        }
+      },
+      {
+        "type": "event",
+        "event_id": "45768755-294e-456e-b82d-052ef828b09c",
+        "seq": 12,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [
+            "catch:bd535318-3d0a-ec91-c0ea-a80428cac86d"
+          ],
+          "timestamp": 1789448605823,
+          "data": {
+            "event": "started",
+            "namespace": [
+              "catch:bd535318-3d0a-ec91-c0ea-a80428cac86d"
+            ],
+            "graph_name": "catch",
+            "trigger_call_id": "bd535318-3d0a-ec91-c0ea-a80428cac86d"
+          },
+          "run_id": "9d64a50b-708a-4725-ac7d-33ff11b926cf",
+          "thread_id": "509d799e-edbf-4421-92bb-a30dd9383b5d",
+          "interrupts": []
+        }
+      },
+      {
+        "type": "event",
+        "event_id": "3187f201-ff82-4653-bb85-787839d7b108",
+        "seq": 16,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [
+            "catch:bd535318-3d0a-ec91-c0ea-a80428cac86d"
+          ],
+          "timestamp": 1789448605935,
+          "data": {
+            "event": "completed",
+            "namespace": [
+              "catch:bd535318-3d0a-ec91-c0ea-a80428cac86d"
+            ],
+            "graph_name": "catch"
+          },
+          "run_id": "9d64a50b-708a-4725-ac7d-33ff11b926cf",
+          "thread_id": "509d799e-edbf-4421-92bb-a30dd9383b5d",
+          "interrupts": []
+        }
+      },
+      {
+        "type": "event",
+        "event_id": "79e9fb70-75cb-4f9b-a3f9-eb75cd0a403d",
+        "seq": 21,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [],
+          "timestamp": 1789448606327,
+          "data": {
+            "event": "completed",
+            "status": "success",
+            "graph_name": "v3_caught",
+            "reason": "completed",
+            "output": {
+              "scenario": "completed",
+              "results": [
+                "caught"
+              ]
+            }
+          },
+          "run_id": "9d64a50b-708a-4725-ac7d-33ff11b926cf",
+          "thread_id": "509d799e-edbf-4421-92bb-a30dd9383b5d",
+          "interrupts": []
+        }
+      }
+    ]
+  },
+  "multi": {
+    "thread_id": "0119db4a-8a1e-485c-862c-b06471fb5430",
+    "runs": [
+      "e849979f-a4a0-41cf-9135-dad492e93d5c",
+      "3edd50a1-a52c-4e15-9ba2-477d87eb4aaf"
+    ],
+    "results": [
+      "alpha:ALPHA",
+      "beta:BETA"
+    ]
+  },
+  "transport": {
+    "nested_filters": "passed",
+    "repeated_subscriptions": "passed",
+    "streams": [
+      {
+        "subgraphs": false,
+        "events": 12,
+        "cursor": 32
+      },
+      {
+        "subgraphs": true,
+        "events": 38,
+        "cursor": 20
+      }
+    ],
+    "heartbeat": true
+  }
+}

@@ -32,6 +32,7 @@ async def main() -> None:
         )
     repository = RunRepository()
     start = time.perf_counter()
+    batch_write_ms: list[float] = []
     for offset in range(0, 10_000, 100):
         events = [
             {
@@ -47,10 +48,12 @@ async def main() -> None:
             }
             for i in range(100)
         ]
+        batch_start = time.perf_counter()
         async with connect() as conn:
             await repository.record_message_deltas(
                 conn.session, run_id=run_id, thread_id=thread_id, events=events
             )
+        batch_write_ms.append((time.perf_counter() - batch_start) * 1000)
     elapsed = time.perf_counter() - start
     async with connect() as conn:
         rows = await conn.session.execute(
@@ -76,6 +79,7 @@ async def main() -> None:
     sys.stdout.write(
         json.dumps(
             {
+                "run_id": str(run_id),
                 "rows": row.rows,
                 "payload_bytes": row.payload_bytes,
                 "max_payload_bytes": row.max_payload_bytes,
@@ -83,6 +87,9 @@ async def main() -> None:
                 "toast_bytes": sizes.toast_bytes,
                 "index_bytes": sizes.index_bytes,
                 "write_seconds": round(elapsed, 3),
+                "batch_write_p95_ms": round(
+                    sorted(batch_write_ms)[94], 3
+                ),
             }
         )
         + "\n"

@@ -86,6 +86,43 @@ def _differences(official: Any, graphharbor: Any, path: str = "$") -> list[Diffe
     return [] if official == graphharbor else [Difference(path, official, graphharbor)]
 
 
+def compare_lifecycle_reports(
+    official: dict[str, Any], graphharbor: dict[str, Any]
+) -> list[Difference]:
+    """Compare probe reports without erasing scope identity or optional fields."""
+
+    def lifecycle(report: dict[str, Any]) -> list[dict[str, Any]]:
+        cases = []
+        for case in report["scenarios"]:
+            aliases: dict[str, str] = {}
+
+            def normalize_id(value: Any, aliases: dict[str, str] = aliases) -> Any:
+                if isinstance(value, dict):
+                    return {key: normalize_id(item) for key, item in value.items()}
+                if isinstance(value, list):
+                    return [normalize_id(item) for item in value]
+                if isinstance(value, str):
+                    prefix, separator, suffix = value.rpartition(":")
+                    candidate = suffix if separator else value
+                    if re.fullmatch(
+                        r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", candidate, re.I
+                    ):
+                        alias = aliases.setdefault(candidate, f"runtime-{len(aliases) + 1}")
+                        return f"{prefix}:{alias}" if separator else alias
+                return value
+
+            events = [
+                normalize_id(
+                    {"namespace": item["params"]["namespace"], "data": item["params"]["data"]}
+                )
+                for item in case.get("events", [])
+            ]
+            cases.append({"graph": case["graph"], "scenario": case["scenario"], "events": events})
+        return cases
+
+    return _differences(lifecycle(official), lifecycle(graphharbor), path="lifecycle")
+
+
 def _normalize_sse(body: Any) -> Any:
     if not isinstance(body, str):
         return body

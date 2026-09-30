@@ -1,0 +1,13 @@
+{
+  "dependencies": ["./"],
+  "graphs": {
+    "v3_edge": "./v3_graphs.py:edge_graph",
+    "v3_send": "./v3_graphs.py:send_graph",
+    "v3_tool": "./v3_graphs.py:tool_graph",
+    "v3_nested": "./v3_graphs.py:nested_graph",
+    "v3_caught": "./v3_graphs.py:caught_graph",
+    "v3_multi": "./v3_graphs.py:multi_graph",
+    "v3_slow": "./v3_graphs.py:slow_graph",
+    "v3_projection": "./v3_graphs.py:projection_graph"
+  }
+}

@@ -1,0 +1,573 @@
+{
+  "info": {
+    "flags": {
+      "assistants": true,
+      "crons": true,
+      "langsmith": false,
+      "langsmith_tracing_replicas": true,
+      "langsmith_tracing_session_on_runs": true
+    },
+    "host": {
+      "host_revision_id": null,
+      "kind": "self-hosted",
+      "project_id": null,
+      "revision_id": null,
+      "tenant_id": null
+    },
+    "langgraph_py_version": "1.2.11",
+    "version": "0.13.0"
+  },
+  "scenarios": [
+    {
+      "graph": "v3_edge",
+      "scenario": "completed",
+      "thread_id": "24813b52-9eff-49f6-ad98-de65dee225bf",
+      "run_id": "9931a566-66fa-420b-8e39-0928ccbd42ee",
+      "events": [
+        {
+          "type": "event",
+          "event_id": "1b744d41-19b8-4d2e-9b50-b93915100f69",
+          "seq": 1,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443232741,
+            "data": {
+              "event": "started",
+              "status": "running"
+            },
+            "run_id": "9931a566-66fa-420b-8e39-0928ccbd42ee",
+            "thread_id": "24813b52-9eff-49f6-ad98-de65dee225bf",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "1d629b04-865c-4b89-9cd0-098df2d1b947",
+          "seq": 13,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443232922,
+            "data": {
+              "event": "started",
+              "namespace": [
+                "child:3ac5a943-311d-4547-e7ae-d883b8cda50f"
+              ],
+              "graph_name": "child",
+              "trigger_call_id": "3ac5a943-311d-4547-e7ae-d883b8cda50f"
+            },
+            "run_id": "9931a566-66fa-420b-8e39-0928ccbd42ee",
+            "thread_id": "24813b52-9eff-49f6-ad98-de65dee225bf",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "76ee48b6-0672-4421-bb1d-8271beadddad",
+          "seq": 21,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443233009,
+            "data": {
+              "event": "completed",
+              "namespace": [
+                "child:3ac5a943-311d-4547-e7ae-d883b8cda50f"
+              ]
+            },
+            "run_id": "9931a566-66fa-420b-8e39-0928ccbd42ee",
+            "thread_id": "24813b52-9eff-49f6-ad98-de65dee225bf",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "bdd6b399-5861-4797-ab4e-12ec3d22e64d",
+          "seq": 26,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443233072,
+            "data": {
+              "event": "completed",
+              "status": "success",
+              "reason": "completed",
+              "output": {
+                "scenario": "completed",
+                "results": [
+                  "done"
+                ]
+              }
+            },
+            "run_id": "9931a566-66fa-420b-8e39-0928ccbd42ee",
+            "thread_id": "24813b52-9eff-49f6-ad98-de65dee225bf",
+            "interrupts": []
+          }
+        }
+      ]
+    },
+    {
+      "graph": "v3_edge",
+      "scenario": "failed",
+      "thread_id": "dc27df49-3112-4e93-b372-479e1de75c21",
+      "run_id": "27165fae-4ed6-40ee-985b-d1fc103522cc",
+      "events": [
+        {
+          "type": "event",
+          "event_id": "d6b170b4-3fa1-4294-80ac-5415e718cef3",
+          "seq": 1,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443233119,
+            "data": {
+              "event": "started",
+              "status": "running"
+            },
+            "run_id": "27165fae-4ed6-40ee-985b-d1fc103522cc",
+            "thread_id": "dc27df49-3112-4e93-b372-479e1de75c21",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "8b0ffcfd-2d66-49b4-a5b3-3859109d1532",
+          "seq": 13,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443233264,
+            "data": {
+              "event": "started",
+              "namespace": [
+                "child:12ffd1b9-e4aa-1462-5ad6-c3272dc06cac"
+              ],
+              "graph_name": "child",
+              "trigger_call_id": "12ffd1b9-e4aa-1462-5ad6-c3272dc06cac"
+            },
+            "run_id": "27165fae-4ed6-40ee-985b-d1fc103522cc",
+            "thread_id": "dc27df49-3112-4e93-b372-479e1de75c21",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "e359eb0e-3463-4ee9-8ee1-45954c36ffef",
+          "seq": 16,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443233301,
+            "data": {
+              "event": "failed",
+              "namespace": [
+                "child:12ffd1b9-e4aa-1462-5ad6-c3272dc06cac"
+              ],
+              "error": "v3 fixture failure"
+            },
+            "run_id": "27165fae-4ed6-40ee-985b-d1fc103522cc",
+            "thread_id": "dc27df49-3112-4e93-b372-479e1de75c21",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "651f44f0-cb88-4d8e-8a0c-46cd501b71a4",
+          "seq": 18,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443233326,
+            "data": {
+              "event": "failed",
+              "status": "error",
+              "reason": "business_error",
+              "error": {
+                "type": "ValueError",
+                "message": "v3 fixture failure"
+              }
+            },
+            "run_id": "27165fae-4ed6-40ee-985b-d1fc103522cc",
+            "thread_id": "dc27df49-3112-4e93-b372-479e1de75c21",
+            "interrupts": []
+          }
+        }
+      ]
+    },
+    {
+      "graph": "v3_edge",
+      "scenario": "interrupted",
+      "thread_id": "4803882f-22e6-4e6d-a607-fbe943f526d1",
+      "run_id": "f2d73d86-4e98-411f-9ac4-7543d165e1b1",
+      "events": [
+        {
+          "type": "event",
+          "event_id": "5468d084-d9a6-4169-b4b8-e77d5d7de2cf",
+          "seq": 1,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443233376,
+            "data": {
+              "event": "started",
+              "status": "running"
+            },
+            "run_id": "f2d73d86-4e98-411f-9ac4-7543d165e1b1",
+            "thread_id": "4803882f-22e6-4e6d-a607-fbe943f526d1",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "b2756bad-d484-4dcd-a519-fc2de613cecd",
+          "seq": 13,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443233536,
+            "data": {
+              "event": "started",
+              "namespace": [
+                "child:7a870f6f-3e5e-fb9a-6915-e4eb16c5c105"
+              ],
+              "graph_name": "child",
+              "trigger_call_id": "7a870f6f-3e5e-fb9a-6915-e4eb16c5c105"
+            },
+            "run_id": "f2d73d86-4e98-411f-9ac4-7543d165e1b1",
+            "thread_id": "4803882f-22e6-4e6d-a607-fbe943f526d1",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "82346fbc-8356-4d5e-b2a5-4b4f02a0c1f6",
+          "seq": 20,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443233617,
+            "data": {
+              "event": "interrupted",
+              "namespace": [
+                "child:7a870f6f-3e5e-fb9a-6915-e4eb16c5c105"
+              ]
+            },
+            "run_id": "f2d73d86-4e98-411f-9ac4-7543d165e1b1",
+            "thread_id": "4803882f-22e6-4e6d-a607-fbe943f526d1",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "551fafeb-d4a9-48b1-b895-d19b01e8dae6",
+          "seq": 23,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443233649,
+            "data": {
+              "event": "interrupted",
+              "status": "interrupted",
+              "reason": "hitl_interrupt",
+              "output": {
+                "scenario": "interrupted",
+                "results": []
+              },
+              "interrupts": [
+                {
+                  "id": "e19937ce5a5d281b65e53864d15b218d",
+                  "value": {
+                    "question": "Continue fixture?"
+                  },
+                  "ns": null
+                }
+              ]
+            },
+            "run_id": "f2d73d86-4e98-411f-9ac4-7543d165e1b1",
+            "thread_id": "4803882f-22e6-4e6d-a607-fbe943f526d1",
+            "interrupts": [
+              {
+                "id": "e19937ce5a5d281b65e53864d15b218d",
+                "value": {
+                  "question": "Continue fixture?"
+                },
+                "ns": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "graph": "v3_send",
+      "scenario": "completed",
+      "thread_id": "64a35e92-e0ca-492f-9e9f-40cc1124e456",
+      "run_id": "8cf82719-7371-42d6-8da3-e34d5356b151",
+      "events": [
+        {
+          "type": "event",
+          "event_id": "075f475b-6539-426c-aef1-9253d3421a20",
+          "seq": 1,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443233699,
+            "data": {
+              "event": "started",
+              "status": "running"
+            },
+            "run_id": "8cf82719-7371-42d6-8da3-e34d5356b151",
+            "thread_id": "64a35e92-e0ca-492f-9e9f-40cc1124e456",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "ba7a1216-f0b0-4eb0-ac4a-d50c96b6b67e",
+          "seq": 13,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443233865,
+            "data": {
+              "event": "started",
+              "namespace": [
+                "child:0421b232-08f5-45f2-b330-0afad8df90e2"
+              ],
+              "graph_name": "child",
+              "trigger_call_id": "0421b232-08f5-45f2-b330-0afad8df90e2"
+            },
+            "run_id": "8cf82719-7371-42d6-8da3-e34d5356b151",
+            "thread_id": "64a35e92-e0ca-492f-9e9f-40cc1124e456",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "9091d4f2-d91e-4443-827d-a905623f5133",
+          "seq": 20,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443234012,
+            "data": {
+              "event": "started",
+              "namespace": [
+                "child:7b00832d-5dac-316e-7f94-cbd0b4ef3be4"
+              ],
+              "graph_name": "child",
+              "trigger_call_id": "7b00832d-5dac-316e-7f94-cbd0b4ef3be4"
+            },
+            "run_id": "8cf82719-7371-42d6-8da3-e34d5356b151",
+            "thread_id": "64a35e92-e0ca-492f-9e9f-40cc1124e456",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "d60a2c0d-1838-4725-b672-4001eae52718",
+          "seq": 33,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443234181,
+            "data": {
+              "event": "completed",
+              "namespace": [
+                "child:0421b232-08f5-45f2-b330-0afad8df90e2"
+              ]
+            },
+            "run_id": "8cf82719-7371-42d6-8da3-e34d5356b151",
+            "thread_id": "64a35e92-e0ca-492f-9e9f-40cc1124e456",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "daf0f04c-e2f3-49bf-95a2-7b03d188ad74",
+          "seq": 36,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443234216,
+            "data": {
+              "event": "completed",
+              "namespace": [
+                "child:7b00832d-5dac-316e-7f94-cbd0b4ef3be4"
+              ]
+            },
+            "run_id": "8cf82719-7371-42d6-8da3-e34d5356b151",
+            "thread_id": "64a35e92-e0ca-492f-9e9f-40cc1124e456",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "945e1372-0957-4669-9be9-427be86f6fbe",
+          "seq": 41,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443234277,
+            "data": {
+              "event": "completed",
+              "status": "success",
+              "reason": "completed",
+              "output": {
+                "results": [
+                  "alpha",
+                  "beta"
+                ]
+              }
+            },
+            "run_id": "8cf82719-7371-42d6-8da3-e34d5356b151",
+            "thread_id": "64a35e92-e0ca-492f-9e9f-40cc1124e456",
+            "interrupts": []
+          }
+        }
+      ]
+    },
+    {
+      "graph": "v3_tool",
+      "scenario": "completed",
+      "thread_id": "207c667d-6671-4140-b760-4bb572890da4",
+      "run_id": "6effef32-52e6-4e46-b2c3-b3b290dcdc24",
+      "events": [
+        {
+          "type": "event",
+          "event_id": "d5d6323b-853b-4549-933f-09e2f76761da",
+          "seq": 1,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443234325,
+            "data": {
+              "event": "started",
+              "status": "running"
+            },
+            "run_id": "6effef32-52e6-4e46-b2c3-b3b290dcdc24",
+            "thread_id": "207c667d-6671-4140-b760-4bb572890da4",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "223f89d0-f377-4159-ad38-de30945e7a39",
+          "seq": 20,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443234610,
+            "data": {
+              "event": "started",
+              "namespace": [
+                "tools:bc09316b-f5f9-c89e-c5ba-62d835630b2a"
+              ],
+              "graph_name": "named-child",
+              "trigger_call_id": "bc09316b-f5f9-c89e-c5ba-62d835630b2a"
+            },
+            "run_id": "6effef32-52e6-4e46-b2c3-b3b290dcdc24",
+            "thread_id": "207c667d-6671-4140-b760-4bb572890da4",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "65be89ce-d6e0-4a21-82f9-5b431297f917",
+          "seq": 40,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443234855,
+            "data": {
+              "event": "completed",
+              "namespace": [
+                "tools:bc09316b-f5f9-c89e-c5ba-62d835630b2a"
+              ]
+            },
+            "run_id": "6effef32-52e6-4e46-b2c3-b3b290dcdc24",
+            "thread_id": "207c667d-6671-4140-b760-4bb572890da4",
+            "interrupts": []
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "26c20257-49ec-4477-ba92-2e68e9cfa4cc",
+          "seq": 45,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789443234953,
+            "data": {
+              "event": "completed",
+              "status": "success",
+              "reason": "completed",
+              "output": {
+                "messages": [
+                  {
+                    "content": "",
+                    "additional_kwargs": {},
+                    "response_metadata": {},
+                    "type": "ai",
+                    "name": null,
+                    "id": "f3db6339-6d7a-43e5-96bb-47a0cc6c34fa",
+                    "tool_calls": [
+                      {
+                        "name": "delegate",
+                        "args": {
+                          "label": "alpha"
+                        },
+                        "id": "dispatch-alpha",
+                        "type": "tool_call"
+                      },
+                      {
+                        "name": "delegate",
+                        "args": {
+                          "label": "beta"
+                        },
+                        "id": "dispatch-beta",
+                        "type": "tool_call"
+                      }
+                    ],
+                    "invalid_tool_calls": [],
+                    "usage_metadata": null
+                  },
+                  {
+                    "content": "child-result",
+                    "additional_kwargs": {},
+                    "response_metadata": {},
+                    "type": "tool",
+                    "name": "delegate",
+                    "id": "dd0415a7-1689-42de-b4b6-be118b90c541",
+                    "tool_call_id": "dispatch-alpha",
+                    "artifact": null,
+                    "status": "success"
+                  },
+                  {
+                    "content": "child-result",
+                    "additional_kwargs": {},
+                    "response_metadata": {},
+                    "type": "tool",
+                    "name": "delegate",
+                    "id": "ebfdcd7b-4673-4e00-8911-00eb7c13ab7a",
+                    "tool_call_id": "dispatch-beta",
+                    "artifact": null,
+                    "status": "success"
+                  }
+                ]
+              }
+            },
+            "run_id": "6effef32-52e6-4e46-b2c3-b3b290dcdc24",
+            "thread_id": "207c667d-6671-4140-b760-4bb572890da4",
+            "interrupts": []
+          }
+        }
+      ]
+    }
+  ],
+  "run_sse_v3": {
+    "status": 200,
+    "body": "event: metadata\ndata: {\"run_id\":\"a5813199-8a6b-4c42-a585-191173318184\",\"attempt\":1}\n\nevent: lifecycle\ndata: {\"method\":\"lifecycle\",\"params\":{\"namespace\":[],\"timestamp\":1789443235013,\"data\":{\"event\":\"running\",\"status\":\"running\"}},\"seq\":1}\n\nevent: checkpoints\ndata: {\"method\":\"checkpoints\",\"params\":{\"namespace\":[],\"timestamp\":1789443235017,\"data\":{\"config\":{\"configurable\":{\"checkpoint_ns\":\"\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_id\":\"1f1b0b64-731a-6f5a-bfff-41f5cf939435\"}},\"parent_config\":null,\"values\":{\"results\":[]},\"metadata\":{\"source\":\"input\",\"step\":-1,\"parents\":{}},\"next\":[\"__start__\"],\"tasks\":[{\"id\":\"81ebd803-2816-fdd8-9524-1670b58c007d\",\"name\":\"__start__\",\"interrupts\":[],\"state\":null}]}},\"seq\":2}\n\nevent: debug\ndata: {\"method\":\"debug\",\"params\":{\"namespace\":[],\"timestamp\":1789443235031,\"data\":{\"step\":-1,\"timestamp\":\"2026-09-15T03:33:55.017278+00:00\",\"type\":\"checkpoint\",\"payload\":{\"config\":{\"configurable\":{\"checkpoint_ns\":\"\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_id\":\"1f1b0b64-731a-6f5a-bfff-41f5cf939435\"}},\"parent_config\":null,\"values\":{\"results\":[]},\"metadata\":{\"source\":\"input\",\"step\":-1,\"parents\":{}},\"next\":[\"__start__\"],\"tasks\":[{\"id\":\"81ebd803-2816-fdd8-9524-1670b58c007d\",\"name\":\"__start__\",\"interrupts\":[],\"state\":null}]}}},\"seq\":3}\n\nevent: values\ndata: {\"method\":\"values\",\"params\":{\"namespace\":[],\"timestamp\":1789443235048,\"data\":{\"label\":\"probe\",\"results\":[]}},\"seq\":4}\n\nevent: checkpoints\ndata: {\"method\":\"checkpoints\",\"params\":{\"namespace\":[],\"timestamp\":1789443235063,\"data\":{\"config\":{\"configurable\":{\"checkpoint_ns\":\"\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_id\":\"1f1b0b64-7365-6ece-8000-9fc619536044\"}},\"parent_config\":{\"configurable\":{\"checkpoint_ns\":\"\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_id\":\"1f1b0b64-731a-6f5a-bfff-41f5cf939435\"}},\"values\":{\"label\":\"probe\",\"results\":[]},\"metadata\":{\"source\":\"loop\",\"step\":0,\"parents\":{}},\"next\":[\"child\"],\"tasks\":[{\"id\":\"ae0fef95-6113-c284-c307-ca2fe20c6f4b\",\"name\":\"child\",\"interrupts\":[],\"state\":{\"configurable\":{\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"checkpoint_ns\":\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\"}}}]}},\"seq\":5}\n\nevent: debug\ndata: {\"method\":\"debug\",\"params\":{\"namespace\":[],\"timestamp\":1789443235073,\"data\":{\"step\":0,\"timestamp\":\"2026-09-15T03:33:55.047990+00:00\",\"type\":\"checkpoint\",\"payload\":{\"config\":{\"configurable\":{\"checkpoint_ns\":\"\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_id\":\"1f1b0b64-7365-6ece-8000-9fc619536044\"}},\"parent_config\":{\"configurable\":{\"checkpoint_ns\":\"\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_id\":\"1f1b0b64-731a-6f5a-bfff-41f5cf939435\"}},\"values\":{\"label\":\"probe\",\"results\":[]},\"metadata\":{\"source\":\"loop\",\"step\":0,\"parents\":{}},\"next\":[\"child\"],\"tasks\":[{\"id\":\"ae0fef95-6113-c284-c307-ca2fe20c6f4b\",\"name\":\"child\",\"interrupts\":[],\"state\":{\"configurable\":{\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"checkpoint_ns\":\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\"}}}]}}},\"seq\":6}\n\nevent: debug\ndata: {\"method\":\"debug\",\"params\":{\"namespace\":[],\"timestamp\":1789443235085,\"data\":{\"step\":1,\"timestamp\":\"2026-09-15T03:33:55.048004+00:00\",\"type\":\"task\",\"payload\":{\"id\":\"ae0fef95-6113-c284-c307-ca2fe20c6f4b\",\"name\":\"child\",\"input\":{\"label\":\"probe\",\"results\":[]},\"triggers\":[\"branch:to:child\"],\"metadata\":{\"created_by\":\"system\",\"run_id\":\"a5813199-8a6b-4c42-a585-191173318184\",\"assistant_id\":\"a30ebd02-f6bf-5f7e-bfcb-2de069ea6945\",\"assistant_version\":1,\"__graphharbor_thread_metadata\":{}}}}},\"seq\":7}\n\nevent: checkpoints\ndata: {\"method\":\"checkpoints\",\"params\":{\"namespace\":[\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\"],\"timestamp\":1789443235101,\"data\":{\"config\":{\"configurable\":{\"checkpoint_ns\":\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_map\":{\"\":\"1f1b0b64-7365-6ece-8000-9fc619536044\",\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\":\"1f1b0b64-73e5-69f8-bfff-1632c7726a09\"},\"checkpoint_id\":\"1f1b0b64-73e5-69f8-bfff-1632c7726a09\"}},\"parent_config\":null,\"values\":{\"results\":[]},\"metadata\":{\"source\":\"input\",\"step\":-1,\"parents\":{\"\":\"1f1b0b64-7365-6ece-8000-9fc619536044\"}},\"next\":[\"__start__\"],\"tasks\":[{\"id\":\"ac432a8e-4fb7-b524-643d-b1adc8aaef1a\",\"name\":\"__start__\",\"interrupts\":[],\"state\":null}]}},\"seq\":8}\n\nevent: debug\ndata: {\"method\":\"debug\",\"params\":{\"namespace\":[\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\"],\"timestamp\":1789443235121,\"data\":{\"step\":-1,\"timestamp\":\"2026-09-15T03:33:55.100295+00:00\",\"type\":\"checkpoint\",\"payload\":{\"config\":{\"configurable\":{\"checkpoint_ns\":\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_map\":{\"\":\"1f1b0b64-7365-6ece-8000-9fc619536044\",\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\":\"1f1b0b64-73e5-69f8-bfff-1632c7726a09\"},\"checkpoint_id\":\"1f1b0b64-73e5-69f8-bfff-1632c7726a09\"}},\"parent_config\":null,\"values\":{\"results\":[]},\"metadata\":{\"source\":\"input\",\"step\":-1,\"parents\":{\"\":\"1f1b0b64-7365-6ece-8000-9fc619536044\"}},\"next\":[\"__start__\"],\"tasks\":[{\"id\":\"ac432a8e-4fb7-b524-643d-b1adc8aaef1a\",\"name\":\"__start__\",\"interrupts\":[],\"state\":null}]}}},\"seq\":9}\n\nevent: values\ndata: {\"method\":\"values\",\"params\":{\"namespace\":[\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\"],\"timestamp\":1789443235134,\"data\":{\"results\":[]}},\"seq\":10}\n\nevent: checkpoints\ndata: {\"method\":\"checkpoints\",\"params\":{\"namespace\":[\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\"],\"timestamp\":1789443235148,\"data\":{\"config\":{\"configurable\":{\"checkpoint_ns\":\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_map\":{\"\":\"1f1b0b64-7365-6ece-8000-9fc619536044\",\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\":\"1f1b0b64-73e6-6830-8000-361e9fd05e0a\"},\"checkpoint_id\":\"1f1b0b64-73e6-6830-8000-361e9fd05e0a\"}},\"parent_config\":{\"configurable\":{\"checkpoint_ns\":\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_map\":{\"\":\"1f1b0b64-7365-6ece-8000-9fc619536044\",\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\":\"1f1b0b64-73e5-69f8-bfff-1632c7726a09\"},\"checkpoint_id\":\"1f1b0b64-73e5-69f8-bfff-1632c7726a09\"}},\"values\":{\"label\":\"probe\",\"results\":[]},\"metadata\":{\"source\":\"loop\",\"step\":0,\"parents\":{\"\":\"1f1b0b64-7365-6ece-8000-9fc619536044\"}},\"next\":[\"work\"],\"tasks\":[{\"id\":\"9d569311-7f02-7ba5-ef52-5e62eec95570\",\"name\":\"work\",\"interrupts\":[],\"state\":null}]}},\"seq\":11}\n\nevent: debug\ndata: {\"method\":\"debug\",\"params\":{\"namespace\":[\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\"],\"timestamp\":1789443235162,\"data\":{\"step\":0,\"timestamp\":\"2026-09-15T03:33:55.100617+00:00\",\"type\":\"checkpoint\",\"payload\":{\"config\":{\"configurable\":{\"checkpoint_ns\":\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_map\":{\"\":\"1f1b0b64-7365-6ece-8000-9fc619536044\",\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\":\"1f1b0b64-73e6-6830-8000-361e9fd05e0a\"},\"checkpoint_id\":\"1f1b0b64-73e6-6830-8000-361e9fd05e0a\"}},\"parent_config\":{\"configurable\":{\"checkpoint_ns\":\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_map\":{\"\":\"1f1b0b64-7365-6ece-8000-9fc619536044\",\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\":\"1f1b0b64-73e5-69f8-bfff-1632c7726a09\"},\"checkpoint_id\":\"1f1b0b64-73e5-69f8-bfff-1632c7726a09\"}},\"values\":{\"label\":\"probe\",\"results\":[]},\"metadata\":{\"source\":\"loop\",\"step\":0,\"parents\":{\"\":\"1f1b0b64-7365-6ece-8000-9fc619536044\"}},\"next\":[\"work\"],\"tasks\":[{\"id\":\"9d569311-7f02-7ba5-ef52-5e62eec95570\",\"name\":\"work\",\"interrupts\":[],\"state\":null}]}}},\"seq\":12}\n\nevent: lifecycle\ndata: {\"method\":\"lifecycle\",\"params\":{\"namespace\":[],\"timestamp\":1789443235174,\"data\":{\"event\":\"started\",\"namespace\":[\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\"],\"graph_name\":\"child\",\"trigger_call_id\":\"ae0fef95-6113-c284-c307-ca2fe20c6f4b\"}},\"seq\":13}\n\nevent: debug\ndata: {\"method\":\"debug\",\"params\":{\"namespace\":[\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\"],\"timestamp\":1789443235186,\"data\":{\"step\":1,\"timestamp\":\"2026-09-15T03:33:55.100634+00:00\",\"type\":\"task\",\"payload\":{\"id\":\"9d569311-7f02-7ba5-ef52-5e62eec95570\",\"name\":\"work\",\"input\":{\"label\":\"probe\",\"results\":[]},\"triggers\":[\"branch:to:work\"],\"metadata\":{\"created_by\":\"system\",\"run_id\":\"a5813199-8a6b-4c42-a585-191173318184\",\"assistant_id\":\"a30ebd02-f6bf-5f7e-bfcb-2de069ea6945\",\"assistant_version\":1,\"__graphharbor_thread_metadata\":{}}}}},\"seq\":14}\n\nevent: updates\ndata: {\"method\":\"updates\",\"params\":{\"namespace\":[\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\"],\"timestamp\":1789443235199,\"data\":{\"work\":{\"results\":[\"probe\"]}}},\"seq\":15}\n\nevent: debug\ndata: {\"method\":\"debug\",\"params\":{\"namespace\":[\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\"],\"timestamp\":1789443235214,\"data\":{\"step\":1,\"timestamp\":\"2026-09-15T03:33:55.102030+00:00\",\"type\":\"task_result\",\"payload\":{\"id\":\"9d569311-7f02-7ba5-ef52-5e62eec95570\",\"name\":\"work\",\"error\":null,\"result\":{\"results\":[\"probe\"]},\"interrupts\":[]}}},\"seq\":16}\n\nevent: values\ndata: {\"method\":\"values\",\"params\":{\"namespace\":[\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\"],\"timestamp\":1789443235225,\"data\":{\"results\":[\"probe\"]}},\"seq\":17}\n\nevent: checkpoints\ndata: {\"method\":\"checkpoints\",\"params\":{\"namespace\":[\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\"],\"timestamp\":1789443235235,\"data\":{\"config\":{\"configurable\":{\"checkpoint_ns\":\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_map\":{\"\":\"1f1b0b64-7365-6ece-8000-9fc619536044\",\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\":\"1f1b0b64-73ea-6b06-8001-04bee959015d\"},\"checkpoint_id\":\"1f1b0b64-73ea-6b06-8001-04bee959015d\"}},\"parent_config\":{\"configurable\":{\"checkpoint_ns\":\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_map\":{\"\":\"1f1b0b64-7365-6ece-8000-9fc619536044\",\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\":\"1f1b0b64-73e6-6830-8000-361e9fd05e0a\"},\"checkpoint_id\":\"1f1b0b64-73e6-6830-8000-361e9fd05e0a\"}},\"values\":{\"label\":\"probe\",\"results\":[\"probe\"]},\"metadata\":{\"source\":\"loop\",\"step\":1,\"parents\":{\"\":\"1f1b0b64-7365-6ece-8000-9fc619536044\"}},\"next\":[],\"tasks\":[]}},\"seq\":18}\n\nevent: debug\ndata: {\"method\":\"debug\",\"params\":{\"namespace\":[\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\"],\"timestamp\":1789443235268,\"data\":{\"step\":1,\"timestamp\":\"2026-09-15T03:33:55.102283+00:00\",\"type\":\"checkpoint\",\"payload\":{\"config\":{\"configurable\":{\"checkpoint_ns\":\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_map\":{\"\":\"1f1b0b64-7365-6ece-8000-9fc619536044\",\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\":\"1f1b0b64-73ea-6b06-8001-04bee959015d\"},\"checkpoint_id\":\"1f1b0b64-73ea-6b06-8001-04bee959015d\"}},\"parent_config\":{\"configurable\":{\"checkpoint_ns\":\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_map\":{\"\":\"1f1b0b64-7365-6ece-8000-9fc619536044\",\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\":\"1f1b0b64-73e6-6830-8000-361e9fd05e0a\"},\"checkpoint_id\":\"1f1b0b64-73e6-6830-8000-361e9fd05e0a\"}},\"values\":{\"label\":\"probe\",\"results\":[\"probe\"]},\"metadata\":{\"source\":\"loop\",\"step\":1,\"parents\":{\"\":\"1f1b0b64-7365-6ece-8000-9fc619536044\"}},\"next\":[],\"tasks\":[]}}},\"seq\":19}\n\nevent: updates\ndata: {\"method\":\"updates\",\"params\":{\"namespace\":[],\"timestamp\":1789443235283,\"data\":{\"child\":{\"results\":[\"probe\"]}}},\"seq\":20}\n\nevent: lifecycle\ndata: {\"method\":\"lifecycle\",\"params\":{\"namespace\":[],\"timestamp\":1789443235294,\"data\":{\"event\":\"completed\",\"namespace\":[\"child:ae0fef95-6113-c284-c307-ca2fe20c6f4b\"]}},\"seq\":21}\n\nevent: debug\ndata: {\"method\":\"debug\",\"params\":{\"namespace\":[],\"timestamp\":1789443235304,\"data\":{\"step\":1,\"timestamp\":\"2026-09-15T03:33:55.126334+00:00\",\"type\":\"task_result\",\"payload\":{\"id\":\"ae0fef95-6113-c284-c307-ca2fe20c6f4b\",\"name\":\"child\",\"error\":null,\"result\":{\"results\":[\"probe\"]},\"interrupts\":[]}}},\"seq\":22}\n\nevent: values\ndata: {\"method\":\"values\",\"params\":{\"namespace\":[],\"timestamp\":1789443235318,\"data\":{\"label\":\"probe\",\"results\":[\"probe\"]}},\"seq\":23}\n\nevent: checkpoints\ndata: {\"method\":\"checkpoints\",\"params\":{\"namespace\":[],\"timestamp\":1789443235332,\"data\":{\"config\":{\"configurable\":{\"checkpoint_ns\":\"\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_id\":\"1f1b0b64-75f6-6b0c-8001-fa0a86aa2e71\"}},\"parent_config\":{\"configurable\":{\"checkpoint_ns\":\"\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_id\":\"1f1b0b64-7365-6ece-8000-9fc619536044\"}},\"values\":{\"label\":\"probe\",\"results\":[\"probe\"]},\"metadata\":{\"source\":\"loop\",\"step\":1,\"parents\":{}},\"next\":[],\"tasks\":[]}},\"seq\":24}\n\nevent: debug\ndata: {\"method\":\"debug\",\"params\":{\"namespace\":[],\"timestamp\":1789443235355,\"data\":{\"step\":1,\"timestamp\":\"2026-09-15T03:33:55.316945+00:00\",\"type\":\"checkpoint\",\"payload\":{\"config\":{\"configurable\":{\"checkpoint_ns\":\"\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_id\":\"1f1b0b64-75f6-6b0c-8001-fa0a86aa2e71\"}},\"parent_config\":{\"configurable\":{\"checkpoint_ns\":\"\",\"thread_id\":\"5a1c1d71-5576-4faf-b7b4-4add5abcffe0\",\"__graphharbor_runtime_context\":{\"user_id\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[]},\"langgraph_auth_user\":{\"identity\":\"anonymous\",\"tenant_id\":\"__anonymous__\",\"project_id\":\"__acceptance__\",\"role\":\"anonymous\",\"permissions\":[],\"is_authenticated\":true},\"checkpoint_id\":\"1f1b0b64-7365-6ece-8000-9fc619536044\"}},\"values\":{\"label\":\"probe\",\"results\":[\"probe\"]},\"metadata\":{\"source\":\"loop\",\"step\":1,\"parents\":{}},\"next\":[],\"tasks\":[]}}},\"seq\":25}\n\nevent: lifecycle\ndata: {\"method\":\"lifecycle\",\"params\":{\"namespace\":[],\"timestamp\":1789443235392,\"data\":{\"event\":\"completed\",\"status\":\"success\",\"reason\":\"completed\",\"output\":{\"label\":\"probe\",\"results\":[\"probe\"]},\"interrupts\":[]}},\"seq\":26}\n\n"
+  }
+}

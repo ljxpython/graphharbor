@@ -168,6 +168,85 @@ async def test_redis_heartbeat_outage_does_not_cancel_postgres_owned_run(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_pruning_waits_for_inflight_thread_replay() -> None:
+    assert "graphharbor_event_retention_verify" in os.environ.get("DATABASE_URI", "")
+
+    from langgraph_runtime_pg.database import connect, start_pool, stop_pool
+    from langgraph_runtime_pg.models import AssistantRow, RunRow, RuntimeEventRow, ThreadRow
+    from langgraph_runtime_pg.run_store import RunRepository
+
+    assistant_id, thread_id, run_id = uuid4(), uuid4(), uuid4()
+    old = datetime.now(UTC) - timedelta(days=2)
+    await start_pool()
+    try:
+        async with connect() as conn:
+            conn.session.add(AssistantRow(assistant_id=assistant_id, graph_id="retention-test"))
+            conn.session.add(ThreadRow(thread_id=thread_id, metadata_={}, config={}, interrupts={}))
+            conn.session.add(
+                RunRow(
+                    run_id=run_id,
+                    thread_id=thread_id,
+                    assistant_id=assistant_id,
+                    status="success",
+                    updated_at=old,
+                    kwargs={},
+                    metadata_={},
+                )
+            )
+            await conn.session.flush()
+            conn.session.add(
+                RuntimeEventRow(
+                    run_id=run_id,
+                    thread_id=thread_id,
+                    sequence=1,
+                    topic="messages",
+                    payload={"event": "messages"},
+                    created_at=old,
+                )
+            )
+
+        async with connect() as reader:
+            thread = await reader.session.scalar(
+                select(ThreadRow)
+                .where(ThreadRow.thread_id == thread_id)
+                .with_for_update(read=True)
+            )
+            assert thread is not None and thread.event_pruned_through == 0
+
+            async def prune() -> int:
+                async with connect() as writer:
+                    return await RunRepository().prune_expired_events(
+                        writer.session, retention_seconds=86400, now=datetime.now(UTC)
+                    )
+
+            task = asyncio.create_task(prune())
+            try:
+                with pytest.raises(TimeoutError):
+                    await asyncio.wait_for(asyncio.shield(task), timeout=0.2)
+                rows = (
+                    await reader.session.scalars(
+                        select(RuntimeEventRow).where(RuntimeEventRow.thread_id == thread_id)
+                    )
+                ).all()
+                assert [row.sequence for row in rows] == [1]
+            finally:
+                if task.done():
+                    await task
+        assert await asyncio.wait_for(task, timeout=5) == 1
+        async with connect() as conn:
+            thread = await conn.session.get(ThreadRow, thread_id)
+            rows = (
+                await conn.session.scalars(
+                    select(RuntimeEventRow).where(RuntimeEventRow.thread_id == thread_id)
+                )
+            ).all()
+            assert thread is not None and thread.event_pruned_through == 1
+            assert rows == []
+    finally:
+        await stop_pool()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("terminal_status", ["success", "error"])
 async def test_expired_event_pruning_is_bounded_and_preserves_active_state(
     monkeypatch, terminal_status: str

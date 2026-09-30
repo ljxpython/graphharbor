@@ -582,3 +582,35 @@ def test_filters_compile_as_bound_json_before_pagination():
     assert "jsonb_typeof" in sql and "@>" in sql and "::JSONB" in sql
     assert "alice" not in sql
     assert sql.index("WHERE") < sql.index("LIMIT")
+
+
+@pytest.mark.asyncio
+async def test_synchronous_auth_handler_is_supported():
+    auth = Auth()
+    auth._handlers[("threads", "read")] = [lambda ctx, value: {"owner": ctx.user.identity}]
+
+    user = {"identity": "alice", "permissions": []}
+    result = await authorize(auth, user, "threads", "read", {"thread_id": "test"})
+    assert result == {"owner": "alice"}
+
+
+@pytest.mark.asyncio
+async def test_store_get_requires_namespace():
+    import json
+
+    from starlette.requests import Request
+
+    from langhost.store_api import store_get
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/store/items",
+        "query_string": b"key=test",
+        "headers": [],
+    }
+    request = Request(scope)
+    res = await store_get(request)
+    assert res.status_code == 422
+    assert json.loads(res.body.decode()) == {"detail": "namespace is required"}
+

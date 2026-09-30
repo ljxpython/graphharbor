@@ -1,0 +1,25 @@
+{
+  "thread_id": "36fb6bbd-78fd-4273-8832-a1cf39306146",
+  "checks": [
+    {
+      "since": 0,
+      "namespace": null,
+      "events": 6,
+      "exact_match": true
+    },
+    {
+      "since": 13,
+      "namespace": null,
+      "events": 4,
+      "exact_match": true
+    },
+    {
+      "since": 0,
+      "namespace": [
+        "child:2193059f-4a66-cd0e-fd30-8bd424265e20"
+      ],
+      "events": 2,
+      "exact_match": true
+    }
+  ]
+}

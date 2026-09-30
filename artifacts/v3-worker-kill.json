@@ -1,0 +1,19 @@
+{
+  "thread_id": "21623b7f-f28b-4ed9-af3a-951575826aa6",
+  "run_id": "8db03f64-7a67-4cf5-a275-1895f197728c",
+  "killed_pid": 24545,
+  "observed_statuses": [
+    "running",
+    "pending",
+    "running",
+    "success"
+  ],
+  "phases": [
+    "running",
+    "running",
+    "running",
+    "completed"
+  ],
+  "final": "success",
+  "single_terminal": true
+}

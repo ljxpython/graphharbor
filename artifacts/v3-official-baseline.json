@@ -1,0 +1,458 @@
+{
+  "info": {
+    "version": "0.13.0",
+    "langgraph_py_version": "1.2.11",
+    "flags": {
+      "assistants": true,
+      "crons": true,
+      "langsmith": false,
+      "langsmith_tracing_replicas": true,
+      "langsmith_tracing_session_on_runs": true
+    },
+    "host": {
+      "kind": "self-hosted",
+      "project_id": null,
+      "host_revision_id": null,
+      "revision_id": null,
+      "tenant_id": null
+    }
+  },
+  "scenarios": [
+    {
+      "graph": "v3_edge",
+      "scenario": "completed",
+      "thread_id": "01a0a33a-f5ba-7190-ab41-55ce05ca4355",
+      "run_id": "01a0a33a-f5bf-71d0-a07b-2df287273d50",
+      "events": [
+        {
+          "type": "event",
+          "event_id": "synth:01a0a33a-f5bf-71d0-a07b-2df287273d50:lc||running",
+          "seq": 1,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789444946133,
+            "data": {
+              "event": "running",
+              "graph_name": "v3_edge"
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "1789444946126-0",
+          "seq": 4,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [
+              "child:fe1ebca2-7084-da79-b3b5-881a8b07d020"
+            ],
+            "timestamp": 1789444946133,
+            "data": {
+              "event": "started",
+              "namespace": [
+                "child:fe1ebca2-7084-da79-b3b5-881a8b07d020"
+              ],
+              "graph_name": "child",
+              "trigger_call_id": "fe1ebca2-7084-da79-b3b5-881a8b07d020"
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "synth:01a0a33a-f5bf-71d0-a07b-2df287273d50:lc|child:fe1ebca2-7084-da79-b3b5-881a8b07d020|completed",
+          "seq": 6,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [
+              "child:fe1ebca2-7084-da79-b3b5-881a8b07d020"
+            ],
+            "timestamp": 1789444946133,
+            "data": {
+              "event": "completed",
+              "graph_name": "child"
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "synth:01a0a33a-f5bf-71d0-a07b-2df287273d50:lc||completed",
+          "seq": 8,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789444946157,
+            "data": {
+              "event": "completed",
+              "graph_name": "v3_edge"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "graph": "v3_edge",
+      "scenario": "failed",
+      "thread_id": "01a0a33a-f8f3-7001-af3a-d772c07ef501",
+      "run_id": "01a0a33a-f8f9-7d02-90d6-950e419140a1",
+      "events": [
+        {
+          "type": "event",
+          "event_id": "synth:01a0a33a-f8f9-7d02-90d6-950e419140a1:lc||running",
+          "seq": 1,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789444947287,
+            "data": {
+              "event": "running",
+              "graph_name": "v3_edge"
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "1789444947293-0",
+          "seq": 4,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [
+              "child:539e04fa-2117-8108-e51d-948d39c4fbbe"
+            ],
+            "timestamp": 1789444947308,
+            "data": {
+              "event": "started",
+              "namespace": [
+                "child:539e04fa-2117-8108-e51d-948d39c4fbbe"
+              ],
+              "graph_name": "child",
+              "trigger_call_id": "539e04fa-2117-8108-e51d-948d39c4fbbe"
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "synth:01a0a33a-f8f9-7d02-90d6-950e419140a1:lc|child:539e04fa-2117-8108-e51d-948d39c4fbbe|failed",
+          "seq": 5,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [
+              "child:539e04fa-2117-8108-e51d-948d39c4fbbe"
+            ],
+            "timestamp": 1789444947308,
+            "data": {
+              "event": "failed",
+              "graph_name": "child",
+              "error": "v3 fixture failure"
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "synth:01a0a33a-f8f9-7d02-90d6-950e419140a1:lc||failed",
+          "seq": 6,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789444947308,
+            "data": {
+              "event": "failed",
+              "graph_name": "v3_edge",
+              "error": "v3 fixture failure"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "graph": "v3_edge",
+      "scenario": "interrupted",
+      "thread_id": "01a0a33a-fd71-7851-99a4-708acd4f7ccf",
+      "run_id": "01a0a33a-fd76-7d21-b4cb-1b25adf97072",
+      "events": [
+        {
+          "type": "event",
+          "event_id": "synth:01a0a33a-fd76-7d21-b4cb-1b25adf97072:lc||running",
+          "seq": 1,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789444948319,
+            "data": {
+              "event": "running",
+              "graph_name": "v3_edge"
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "1789444948309-0",
+          "seq": 4,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [
+              "child:4c0e5ae1-bdfb-399a-f430-1520dee521fe"
+            ],
+            "timestamp": 1789444948319,
+            "data": {
+              "event": "started",
+              "namespace": [
+                "child:4c0e5ae1-bdfb-399a-f430-1520dee521fe"
+              ],
+              "graph_name": "child",
+              "trigger_call_id": "4c0e5ae1-bdfb-399a-f430-1520dee521fe"
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "synth:01a0a33a-fd76-7d21-b4cb-1b25adf97072:lc||interrupted",
+          "seq": 6,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789444948319,
+            "data": {
+              "event": "interrupted",
+              "graph_name": "v3_edge"
+            }
+          }
+        }
+      ],
+      "resume": {
+        "run_id": "01a0a33b-0174-7f73-b48b-db02a2d8b888",
+        "status": "success",
+        "source_status": "success",
+        "source_run_preserved": true
+      }
+    },
+    {
+      "graph": "v3_send",
+      "scenario": "completed",
+      "thread_id": "01a0a33b-05c2-7d72-8efd-edc930096c4c",
+      "run_id": "01a0a33b-05c8-7413-9329-bf58fa4fad59",
+      "events": [
+        {
+          "type": "event",
+          "event_id": "synth:01a0a33b-05c8-7413-9329-bf58fa4fad59:lc||running",
+          "seq": 1,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789444950349,
+            "data": {
+              "event": "running",
+              "graph_name": "v3_send"
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "1789444950350-0",
+          "seq": 3,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [
+              "child:c5e53f6d-6c0c-bfb0-4cae-d431d81a2135"
+            ],
+            "timestamp": 1789444950369,
+            "data": {
+              "event": "started",
+              "namespace": [
+                "child:c5e53f6d-6c0c-bfb0-4cae-d431d81a2135"
+              ],
+              "graph_name": "child",
+              "trigger_call_id": "c5e53f6d-6c0c-bfb0-4cae-d431d81a2135"
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "1789444950351-0.1",
+          "seq": 5,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [
+              "child:7b89a65e-45be-7916-70fc-1c6aecf16ffe"
+            ],
+            "timestamp": 1789444950369,
+            "data": {
+              "event": "started",
+              "namespace": [
+                "child:7b89a65e-45be-7916-70fc-1c6aecf16ffe"
+              ],
+              "graph_name": "child",
+              "trigger_call_id": "7b89a65e-45be-7916-70fc-1c6aecf16ffe"
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "synth:01a0a33b-05c8-7413-9329-bf58fa4fad59:lc|child:c5e53f6d-6c0c-bfb0-4cae-d431d81a2135|completed",
+          "seq": 8,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [
+              "child:c5e53f6d-6c0c-bfb0-4cae-d431d81a2135"
+            ],
+            "timestamp": 1789444950369,
+            "data": {
+              "event": "completed",
+              "graph_name": "child"
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "synth:01a0a33b-05c8-7413-9329-bf58fa4fad59:lc|child:7b89a65e-45be-7916-70fc-1c6aecf16ffe|completed",
+          "seq": 9,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [
+              "child:7b89a65e-45be-7916-70fc-1c6aecf16ffe"
+            ],
+            "timestamp": 1789444950369,
+            "data": {
+              "event": "completed",
+              "graph_name": "child"
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "synth:01a0a33b-05c8-7413-9329-bf58fa4fad59:lc||completed",
+          "seq": 11,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789444950376,
+            "data": {
+              "event": "completed",
+              "graph_name": "v3_send"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "graph": "v3_tool",
+      "scenario": "completed",
+      "thread_id": "01a0a33b-096d-7032-9f2b-d3ccab0e0deb",
+      "run_id": "01a0a33b-0972-7343-a6a2-f8c4c9943246",
+      "events": [
+        {
+          "type": "event",
+          "event_id": "synth:01a0a33b-0972-7343-a6a2-f8c4c9943246:lc||running",
+          "seq": 1,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789444951367,
+            "data": {
+              "event": "running",
+              "graph_name": "v3_tool"
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "1789444951376-0",
+          "seq": 5,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [
+              "tools:6c9c49ba-a324-fada-33fc-d3f984355187"
+            ],
+            "timestamp": 1789444951388,
+            "data": {
+              "event": "started",
+              "namespace": [
+                "tools:6c9c49ba-a324-fada-33fc-d3f984355187"
+              ],
+              "graph_name": "named-child",
+              "trigger_call_id": "6c9c49ba-a324-fada-33fc-d3f984355187",
+              "cause": {
+                "type": "toolCall",
+                "tool_call_id": "dispatch-alpha"
+              }
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "1789444951378-0.1",
+          "seq": 7,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [
+              "tools:e2b44fd1-01fd-849a-f986-ac5f50621e3a"
+            ],
+            "timestamp": 1789444951388,
+            "data": {
+              "event": "started",
+              "namespace": [
+                "tools:e2b44fd1-01fd-849a-f986-ac5f50621e3a"
+              ],
+              "graph_name": "named-child",
+              "trigger_call_id": "e2b44fd1-01fd-849a-f986-ac5f50621e3a",
+              "cause": {
+                "type": "toolCall",
+                "tool_call_id": "dispatch-beta"
+              }
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "synth:01a0a33b-0972-7343-a6a2-f8c4c9943246:lc|tools:6c9c49ba-a324-fada-33fc-d3f984355187|completed",
+          "seq": 10,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [
+              "tools:6c9c49ba-a324-fada-33fc-d3f984355187"
+            ],
+            "timestamp": 1789444951388,
+            "data": {
+              "event": "completed",
+              "graph_name": "named-child"
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "synth:01a0a33b-0972-7343-a6a2-f8c4c9943246:lc|tools:e2b44fd1-01fd-849a-f986-ac5f50621e3a|completed",
+          "seq": 11,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [
+              "tools:e2b44fd1-01fd-849a-f986-ac5f50621e3a"
+            ],
+            "timestamp": 1789444951388,
+            "data": {
+              "event": "completed",
+              "graph_name": "named-child"
+            }
+          }
+        },
+        {
+          "type": "event",
+          "event_id": "synth:01a0a33b-0972-7343-a6a2-f8c4c9943246:lc||completed",
+          "seq": 13,
+          "method": "lifecycle",
+          "params": {
+            "namespace": [],
+            "timestamp": 1789444951392,
+            "data": {
+              "event": "completed",
+              "graph_name": "v3_tool"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "run_sse_v3": {
+    "status": 200,
+    "body": "event: metadata\r\ndata: {\"run_id\":\"01a0a33b-0d6c-70e3-a55b-6e368a07d6eb\",\"attempt\":1}\r\n\r\nevent: values\r\ndata: {\"label\":\"probe\",\"results\":[]}\r\n\r\nevent: values|child:0a919f08-afa5-3e9a-eafe-9be4228fabba\r\ndata: {\"results\":[]}\r\n\r\nevent: values|child:0a919f08-afa5-3e9a-eafe-9be4228fabba\r\ndata: {\"results\":[\"probe\"]}\r\n\r\nevent: values\r\ndata: {\"label\":\"probe\",\"results\":[\"probe\"]}\r\n\r\n"
+  }
+}

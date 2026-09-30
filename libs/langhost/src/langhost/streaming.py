@@ -158,7 +158,9 @@ async def _resumable_run_ids(run_ids: set[UUID]) -> set[UUID]:
         )
 
 
-async def _thread_frame(row: RuntimeEventRow, modes: set[str]) -> tuple[str, Any, str] | None:
+async def _thread_frame(
+    row: RuntimeEventRow, modes: set[str], *, attempts: dict[UUID, int] | None = None
+) -> tuple[str, Any, str] | None:
     event = row.payload
     name = str(event.get("event") or event.get("method") or "custom")
     if name == "lifecycle":
@@ -168,10 +170,13 @@ async def _thread_frame(row: RuntimeEventRow, modes: set[str]) -> tuple[str, Any
                 return None
             attempt = 1
             if row.run_id is not None:
-                async with connect() as conn:
-                    run = await conn.session.get(RunRow, row.run_id)
-                if run is not None:
-                    attempt = max(run.retry_count, 1)
+                if attempts is not None and row.run_id in attempts:
+                    attempt = attempts[row.run_id]
+                else:
+                    async with connect() as conn:
+                        run = await conn.session.get(RunRow, row.run_id)
+                    if run is not None:
+                        attempt = max(run.retry_count, 1)
             return "metadata", {"run_id": str(row.run_id), "attempt": attempt}, f"{row.sequence}-0"
         if status in _TERMINAL:
             if "lifecycle" not in modes and "run_modes" not in modes:
@@ -221,12 +226,26 @@ async def thread_stream(request: Request) -> JSONResponse | StreamingResponse:
     async def body() -> AsyncIterator[str]:
         nonlocal cursor_value
         queue = await manager.add_thread_stream(thread_id)
+        loop = asyncio.get_running_loop()
+        last_sent_at = loop.time()
+        last_auth_at = loop.time()
+
+        async def _check_authorized() -> bool:
+            nonlocal last_auth_at
+            now_ = loop.time()
+            if now_ - last_auth_at < 10.0:
+                return True
+            if (await _get_thread(request))[0] is None:
+                return False
+            last_auth_at = now_
+            return True
+
         try:
             if cursor_value < 0:
                 cursor_value = await _thread_event_sequence(thread_id)
             initial_replay = True
             while True:
-                if (await _get_thread(request))[0] is None:
+                if not await _check_authorized():
                     return
                 watermark, rows = await _thread_events(thread_id, cursor_value)
                 if (
@@ -240,23 +259,50 @@ async def thread_stream(request: Request) -> JSONResponse | StreamingResponse:
                     if initial_replay
                     else set()
                 )
+                running_run_ids = {
+                    row.run_id
+                    for row in rows
+                    if row.run_id is not None
+                    and (row.payload.get("event") or row.payload.get("method")) == "lifecycle"
+                    and row.payload.get("status") == RunStatus.RUNNING.value
+                }
+                attempts: dict[UUID, int] = {}
+                if running_run_ids:
+                    async with connect() as conn:
+                        run_rows = (
+                            await conn.session.scalars(
+                                select(RunRow).where(RunRow.run_id.in_(running_run_ids))
+                            )
+                        ).all()
+                        attempts = {r.run_id: max(r.retry_count, 1) for r in run_rows}
+                emitted = False
                 for row in rows:
-                    if (await _get_thread(request))[0] is None:
-                        return
                     cursor_value = row.sequence
                     if initial_replay and row.run_id is not None and row.run_id not in resumable:
                         continue
-                    frame = await _thread_frame(row, modes)
+                    frame = await _thread_frame(row, modes, attempts=attempts)
                     if frame is not None:
                         name, data, event_id = frame
                         yield _sse(name, data, event_id=event_id, event_id_last=True)
+                        last_sent_at = loop.time()
+                        emitted = True
                 initial_replay = False
+
+                if not emitted and (loop.time() - last_sent_at >= heartbeat):
+                    yield ": heartbeat\n\n"
+                    last_sent_at = loop.time()
+
+                now = loop.time()
+                remaining = max(0.1, heartbeat - (now - last_sent_at))
                 try:
-                    await asyncio.wait_for(queue.get(), timeout=heartbeat)
+                    await asyncio.wait_for(queue.get(), timeout=remaining)
                 except TimeoutError:
                     if await request.is_disconnected():
                         return
+                    if not await _check_authorized():
+                        return
                     yield ": heartbeat\n\n"
+                    last_sent_at = loop.time()
         finally:
             await manager.remove_thread_stream(thread_id, queue)
 
@@ -264,7 +310,7 @@ async def thread_stream(request: Request) -> JSONResponse | StreamingResponse:
         body(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-store",
+            "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
@@ -458,39 +504,63 @@ async def _run_sse(
                 metric_inc("graphharbor_sse_events_total", labels={"version": version})
                 yield _sse(name, data, event_id=sequence if resumable else None)
 
-            for envelope in replay:
+            loop = asyncio.get_running_loop()
+            last_sent_at = loop.time()
+            last_auth_at = loop.time()
+
+            async def _check_authorized() -> bool:
+                nonlocal last_auth_at
+                now_ = loop.time()
+                if now_ - last_auth_at < 10.0:
+                    return True
                 if await _run_snapshot(request, run_id) is None:
-                    return
+                    return False
+                last_auth_at = now_
+                return True
+
+            for envelope in replay:
                 async for frame in emit_envelope(envelope):
                     yield frame
+                    last_sent_at = loop.time()
             snapshot = await _run_snapshot(request, run_id)
             if snapshot is None or snapshot.status in _TERMINAL:
                 return
 
-            started = asyncio.get_running_loop().time()
-            while asyncio.get_running_loop().time() - started < timeout:
+            started = loop.time()
+            while loop.time() - started < timeout:
+                now = loop.time()
+                remaining = max(0.1, heartbeat - (now - last_sent_at))
                 try:
-                    message = await asyncio.wait_for(queue.get(), timeout=heartbeat)
+                    message = await asyncio.wait_for(queue.get(), timeout=remaining)
                 except TimeoutError:
-                    snapshot = await _run_snapshot(request, run_id)
-                    if snapshot is None:
+                    if not await _check_authorized():
                         return
                     yield ": heartbeat\n\n"
-                    if snapshot.status in _TERMINAL:
+                    last_sent_at = loop.time()
+                    snapshot = await _run_snapshot(request, run_id)
+                    if snapshot is not None and snapshot.status in _TERMINAL:
                         for envelope in await _load_events(run_id, after=max(seen or {cursor})):
-                            if await _run_snapshot(request, run_id) is None:
-                                return
                             async for frame in emit_envelope(envelope):
                                 yield frame
+                                last_sent_at = loop.time()
                         return
                     continue
                 live_envelope = _message_envelope(message)
                 if live_envelope is None:
+                    if loop.time() - last_sent_at >= heartbeat:
+                        yield ": heartbeat\n\n"
+                        last_sent_at = loop.time()
                     continue
-                if await _run_snapshot(request, run_id) is None:
+                if not await _check_authorized():
                     return
+                emitted = False
                 async for frame in emit_envelope(live_envelope):
                     yield frame
+                    last_sent_at = loop.time()
+                    emitted = True
+                if not emitted and (loop.time() - last_sent_at >= heartbeat):
+                    yield ": heartbeat\n\n"
+                    last_sent_at = loop.time()
                 event = live_envelope.get("event")
                 if isinstance(event, dict) and event.get("event") == "lifecycle":
                     status = str(event.get("status", ""))
@@ -502,7 +572,7 @@ async def _run_sse(
             await manager.remove_queue(run_id, thread_id, queue)
 
     headers = {
-        "Cache-Control": "no-cache",
+        "Cache-Control": "no-cache, no-transform",
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",
     }

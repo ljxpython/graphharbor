@@ -1,0 +1,196 @@
+{
+  "nested": {
+    "graph": "v3_nested",
+    "scenario": "completed",
+    "thread_id": "01a0a354-4fe8-73d1-8ee2-1bb50e8eeea0",
+    "run_id": "01a0a354-4ff0-78a3-9716-788c247175d9",
+    "events": [
+      {
+        "type": "event",
+        "event_id": "synth:01a0a354-4ff0-78a3-9716-788c247175d9:lc||running",
+        "seq": 1,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [],
+          "timestamp": 1789446607607,
+          "data": {
+            "event": "running",
+            "graph_name": "v3_nested"
+          }
+        }
+      },
+      {
+        "type": "event",
+        "event_id": "1789446607615-0",
+        "seq": 4,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [
+            "outer:260d6676-73a9-9e3a-2694-28361651be8b"
+          ],
+          "timestamp": 1789446607628,
+          "data": {
+            "event": "started",
+            "namespace": [
+              "outer:260d6676-73a9-9e3a-2694-28361651be8b"
+            ],
+            "graph_name": "outer",
+            "trigger_call_id": "260d6676-73a9-9e3a-2694-28361651be8b"
+          }
+        }
+      },
+      {
+        "type": "event",
+        "event_id": "1789446607617-0",
+        "seq": 6,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [
+            "outer:260d6676-73a9-9e3a-2694-28361651be8b",
+            "child:1b365a74-24d1-fe52-1306-b835fa42d813"
+          ],
+          "timestamp": 1789446607628,
+          "data": {
+            "event": "started",
+            "namespace": [
+              "outer:260d6676-73a9-9e3a-2694-28361651be8b",
+              "child:1b365a74-24d1-fe52-1306-b835fa42d813"
+            ],
+            "graph_name": "child",
+            "trigger_call_id": "1b365a74-24d1-fe52-1306-b835fa42d813"
+          }
+        }
+      },
+      {
+        "type": "event",
+        "event_id": "synth:01a0a354-4ff0-78a3-9716-788c247175d9:lc|outer:260d6676-73a9-9e3a-2694-28361651be8b\ufffdchild:1b365a74-24d1-fe52-1306-b835fa42d813|completed",
+        "seq": 8,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [
+            "outer:260d6676-73a9-9e3a-2694-28361651be8b",
+            "child:1b365a74-24d1-fe52-1306-b835fa42d813"
+          ],
+          "timestamp": 1789446607628,
+          "data": {
+            "event": "completed",
+            "graph_name": "child"
+          }
+        }
+      },
+      {
+        "type": "event",
+        "event_id": "synth:01a0a354-4ff0-78a3-9716-788c247175d9:lc|outer:260d6676-73a9-9e3a-2694-28361651be8b|completed",
+        "seq": 10,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [
+            "outer:260d6676-73a9-9e3a-2694-28361651be8b"
+          ],
+          "timestamp": 1789446607628,
+          "data": {
+            "event": "completed",
+            "graph_name": "outer"
+          }
+        }
+      },
+      {
+        "type": "event",
+        "event_id": "synth:01a0a354-4ff0-78a3-9716-788c247175d9:lc||completed",
+        "seq": 12,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [],
+          "timestamp": 1789446607659,
+          "data": {
+            "event": "completed",
+            "graph_name": "v3_nested"
+          }
+        }
+      }
+    ]
+  },
+  "caught": {
+    "graph": "v3_caught",
+    "scenario": "completed",
+    "thread_id": "01a0a354-5332-7d20-953e-798f05bb1992",
+    "run_id": "01a0a354-5337-7ee2-b43e-5972336dce2d",
+    "events": [
+      {
+        "type": "event",
+        "event_id": "synth:01a0a354-5337-7ee2-b43e-5972336dce2d:lc||running",
+        "seq": 1,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [],
+          "timestamp": 1789446608652,
+          "data": {
+            "event": "running",
+            "graph_name": "v3_caught"
+          }
+        }
+      },
+      {
+        "type": "event",
+        "event_id": "1789446608634-0",
+        "seq": 3,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [
+            "catch:2f8b53d4-34f7-e9b3-7961-80e3bced0303"
+          ],
+          "timestamp": 1789446608652,
+          "data": {
+            "event": "started",
+            "namespace": [
+              "catch:2f8b53d4-34f7-e9b3-7961-80e3bced0303"
+            ],
+            "graph_name": "catch",
+            "trigger_call_id": "2f8b53d4-34f7-e9b3-7961-80e3bced0303"
+          }
+        }
+      },
+      {
+        "type": "event",
+        "event_id": "synth:01a0a354-5337-7ee2-b43e-5972336dce2d:lc|catch:2f8b53d4-34f7-e9b3-7961-80e3bced0303|completed",
+        "seq": 4,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [
+            "catch:2f8b53d4-34f7-e9b3-7961-80e3bced0303"
+          ],
+          "timestamp": 1789446608652,
+          "data": {
+            "event": "completed",
+            "graph_name": "catch"
+          }
+        }
+      },
+      {
+        "type": "event",
+        "event_id": "synth:01a0a354-5337-7ee2-b43e-5972336dce2d:lc||completed",
+        "seq": 6,
+        "method": "lifecycle",
+        "params": {
+          "namespace": [],
+          "timestamp": 1789446608663,
+          "data": {
+            "event": "completed",
+            "graph_name": "v3_caught"
+          }
+        }
+      }
+    ]
+  },
+  "multi": {
+    "thread_id": "01a0a354-572a-7ae2-8e22-b7de1328fdc4",
+    "runs": [
+      "01a0a354-5b7c-7371-90a2-a438a42d35de",
+      "01a0a354-5f63-7741-8650-a4a2db349eea"
+    ],
+    "results": [
+      "alpha:ALPHA",
+      "beta:BETA"
+    ]
+  }
+}

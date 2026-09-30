@@ -189,6 +189,12 @@ async def protocol_commands(request: Request) -> JSONResponse:
                     key: value for key, value in persisted.interrupts.items() if key != interrupt_id
                 }
                 persisted.status = "busy"
+            old_run = await conn.session.get(RunRow, latest.run_id)
+            if old_run is not None:
+                old_kwargs = dict(old_run.kwargs or {})
+                if old_kwargs.get("stream_resumable") is True:
+                    old_kwargs["stream_resumable"] = False
+                    old_run.kwargs = old_kwargs
         return JSONResponse(
             {
                 "id": command_id,
@@ -258,10 +264,15 @@ async def _load_protocol_events(thread_id: UUID, since: int) -> tuple[int, list[
 
 
 def _wire_matches(wire: dict[str, Any], body: dict[str, Any]) -> bool:
-    method = str(wire.get("method", ""))
-    params = wire.get("params") or {}
+    if not isinstance(wire, dict):
+        return False
+    method = str(wire.get("method") or "")
+    params = wire.get("params")
+    params_dict = params if isinstance(params, dict) else {}
+    ns = params_dict.get("namespace")
+    ns_list = list(ns) if isinstance(ns, (list, tuple)) else []
     return _channel_matches(method, body.get("channels")) and _namespace_matches(
-        list(params.get("namespace") or []), body.get("namespaces"), body.get("depth")
+        ns_list, body.get("namespaces"), body.get("depth")
     )
 
 
@@ -269,6 +280,15 @@ def _frame(wire: dict[str, Any]) -> str:
     seq = wire.get("seq")
     data = json.dumps(wire, ensure_ascii=False, separators=(",", ":"))
     return f"id: {seq}\nevent: event\ndata: {data}\n\n"
+
+
+def _safe_uuid(value: Any) -> UUID | None:
+    if not value:
+        return None
+    try:
+        return UUID(str(value))
+    except (ValueError, TypeError):
+        return None
 
 
 async def protocol_event_stream(request: Request) -> JSONResponse | StreamingResponse:
@@ -300,67 +320,135 @@ async def protocol_event_stream(request: Request) -> JSONResponse | StreamingRes
     queue = await manager.add_thread_stream(thread_id)
     try:
         watermark, replay = await _load_protocol_events(thread_id, since)
+        if since and since < watermark:
+            await manager.remove_thread_stream(thread_id, queue)
+            return JSONResponse(
+                {"code": "cursor_expired", "detail": "cursor_expired", "recovery": "thread_snapshot"},
+                status_code=410,
+            )
+        parsed_run_ids: set[UUID] = set()
+        for wire in replay:
+            if isinstance(wire, dict):
+                params = wire.get("params")
+                if isinstance(params, dict):
+                    uid = _safe_uuid(params.get("run_id"))
+                    if uid is not None:
+                        parsed_run_ids.add(uid)
+        resumable = await _resumable_run_ids(parsed_run_ids)
+        active_interrupt_ids = (
+            set(thread.interrupts.keys()) if isinstance(thread.interrupts, dict) else set()
+        )
+
+        def _is_active_protocol_event(w: Any) -> bool:
+            if not isinstance(w, dict):
+                return True
+            method = str(w.get("method") or "")
+            params = w.get("params")
+            params_dict = params if isinstance(params, dict) else {}
+            data = params_dict.get("data")
+            data_dict = data if isinstance(data, dict) else {}
+            data_event = str(data_dict.get("event") or "")
+
+            is_input_req = (
+                method == "input.requested"
+                or (method == "input" and data_event == "requested")
+                or data_event == "input.requested"
+            )
+            if is_input_req:
+                iid = str(data_dict.get("interrupt_id") or params_dict.get("interrupt_id") or "")
+                if iid and iid not in active_interrupt_ids:
+                    return False
+            return True
+
+        def _is_resumable(wire: Any) -> bool:
+            if not isinstance(wire, dict):
+                return True
+            params = wire.get("params")
+            if isinstance(params, dict):
+                uid = _safe_uuid(params.get("run_id"))
+                if uid is not None and uid not in resumable:
+                    return False
+            return True
+
+        replay = [
+            wire
+            for wire in replay
+            if _is_resumable(wire) and _is_active_protocol_event(wire)
+        ]
     except Exception:
         await manager.remove_thread_stream(thread_id, queue)
         raise
-    if since and since < watermark:
-        await manager.remove_thread_stream(thread_id, queue)
-        return JSONResponse(
-            {"code": "cursor_expired", "detail": "cursor_expired", "recovery": "thread_snapshot"},
-            status_code=410,
-        )
-    resumable = await _resumable_run_ids(
-        {UUID(wire["params"]["run_id"]) for wire in replay if wire.get("params", {}).get("run_id")}
-    )
-    replay = [
-        wire
-        for wire in replay
-        if not wire.get("params", {}).get("run_id") or UUID(wire["params"]["run_id"]) in resumable
-    ]
 
     async def stream() -> AsyncIterator[str]:
         metric_inc("graphharbor_protocol_connections_opened_total")
         if since:
             metric_inc("graphharbor_protocol_replays_total")
         seen: set[int] = set()
-        try:
+        loop = asyncio.get_running_loop()
+        last_sent_at = loop.time()
+        last_auth_at = loop.time()
+
+        async def _check_authorized() -> bool:
+            nonlocal last_auth_at
+            now_ = loop.time()
+            if now_ - last_auth_at < 10.0:
+                return True
             if await _thread(request, thread_id) is None:
+                return False
+            last_auth_at = now_
+            return True
+
+        try:
+            if not await _check_authorized():
                 return
             for wire in replay:
-                if await _thread(request, thread_id) is None:
-                    return
                 seq = wire.get("seq")
                 if isinstance(seq, int) and seq not in seen and _wire_matches(wire, body):
                     seen.add(seq)
                     metric_inc("graphharbor_protocol_events_total")
                     yield _frame(wire)
-            started = asyncio.get_running_loop().time()
-            while asyncio.get_running_loop().time() - started < timeout:
+                    last_sent_at = loop.time()
+            started = loop.time()
+            while loop.time() - started < timeout:
+                now = loop.time()
+                remaining = max(0.1, heartbeat - (now - last_sent_at))
                 try:
-                    message = await asyncio.wait_for(queue.get(), timeout=heartbeat)
+                    message = await asyncio.wait_for(queue.get(), timeout=remaining)
                 except TimeoutError:
                     if await request.is_disconnected():
                         return
-                    if await _thread(request, thread_id) is None:
+                    if not await _check_authorized():
                         return
                     yield ": heartbeat\n\n"
+                    last_sent_at = loop.time()
                     continue
-                if await _thread(request, thread_id) is None:
+                if not await _check_authorized():
                     return
                 try:
-                    wire = json.loads(message.data)
+                    payload = json.loads(message.data)
                 except (TypeError, ValueError, json.JSONDecodeError):
+                    payload = None
+                if not isinstance(payload, dict):
+                    if loop.time() - last_sent_at >= heartbeat:
+                        yield ": heartbeat\n\n"
+                        last_sent_at = loop.time()
                     continue
-                if not isinstance(wire, dict):
-                    continue
+                wire = payload
                 seq = wire.get("seq")
-                if not isinstance(seq, int) or seq <= since or seq in seen:
-                    continue
-                if not _wire_matches(wire, body):
+                if (
+                    not isinstance(seq, int)
+                    or seq <= since
+                    or seq in seen
+                    or not _wire_matches(wire, body)
+                ):
+                    if loop.time() - last_sent_at >= heartbeat:
+                        yield ": heartbeat\n\n"
+                        last_sent_at = loop.time()
                     continue
                 seen.add(seq)
                 metric_inc("graphharbor_protocol_events_total")
                 yield _frame(wire)
+                last_sent_at = loop.time()
             yield ": stream timeout\n\n"
         finally:
             metric_inc("graphharbor_protocol_connections_closed_total")
@@ -369,7 +457,11 @@ async def protocol_event_stream(request: Request) -> JSONResponse | StreamingRes
     return StreamingResponse(
         stream(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

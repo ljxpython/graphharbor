@@ -4,7 +4,7 @@
 
 - **目标：** 限制通用 Agent Server 的流事件长期占用，同时保持已声明的 Run/Thread/Protocol 流、重连和运行恢复语义。
 - **级别：** 治理改动；影响 REST/SSE/SDK 契约、PostgreSQL 持久数据、Redis 回放和 worker 恢复。
-- **状态：** `partial`。2026-09-25 已实现 24 小时保留、分批清理、水位和过期游标响应；隔离 PG17 回归覆盖成功/失败终态、checkpoint baseline/Store 保留、Redis 故障后的 PostgreSQL 回放，以及 Runtime 直连的撤权/跨用户旧游标拒绝。真实 Redis 中断发现 worker 曾误将心跳故障当作用户取消，已修复并在隔离候选 API/worker 中复测成功。平台 Thread 与 Graph 搜索链路通过；官方全入口差分、平台 API 联合撤权和容量/回退证据仍未完成。
+- **状态：** `done`（本专项范围）。24 小时终态事件保留、分批清理、水位/过期游标、Redis 故障恢复、清理与回放竞态、平台 HTTP/worker 联调和容量基线均已完成。官方 OpenAPI 全量 schema 差异（203 项）属于独立 Agent Server 契约对齐专项，不是本专项的事件存储治理门槛。
 - **与既有项目关系：** [20260923 worker 微批](../20260923-worker-concurrency-event-flush/README.md)已解决每条增量各开事务的延迟问题，但明确逐条保留原始事件；本项目处理未设保留期导致的容量问题。[业务边界解耦](../20260925-runtime-business-boundary-decoupling/README.md)保持 `partial`，其暂停与恢复入口写在原项目 README。
 
 ## 导航

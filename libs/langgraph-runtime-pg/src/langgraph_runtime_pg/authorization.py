@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Mapping
 from typing import Any, cast
 
@@ -59,7 +60,8 @@ async def authorize(
         action=cast(Any, action),
     )
     try:
-        result = await handler(ctx=ctx, value=value)
+        raw_result = handler(ctx=ctx, value=value)
+        result: Any = await raw_result if inspect.isawaitable(raw_result) else raw_result
     except Auth.exceptions.HTTPException as exc:
         raise HTTPException(exc.status_code, exc.detail, headers=exc.headers) from exc
     except AssertionError as exc:

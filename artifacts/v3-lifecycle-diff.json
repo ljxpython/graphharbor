@@ -1,0 +1,209 @@
+[
+  {
+    "path": "lifecycle[0].events[0].data.status",
+    "official": "<missing>",
+    "graphharbor": "running"
+  },
+  {
+    "path": "lifecycle[0].events[2].data.namespace",
+    "official": "<missing>",
+    "graphharbor": [
+      "child:runtime-1"
+    ]
+  },
+  {
+    "path": "lifecycle[0].events[3].data.output",
+    "official": "<missing>",
+    "graphharbor": {
+      "scenario": "completed",
+      "results": [
+        "done"
+      ]
+    }
+  },
+  {
+    "path": "lifecycle[0].events[3].data.reason",
+    "official": "<missing>",
+    "graphharbor": "completed"
+  },
+  {
+    "path": "lifecycle[0].events[3].data.status",
+    "official": "<missing>",
+    "graphharbor": "success"
+  },
+  {
+    "path": "lifecycle[1].events[0].data.status",
+    "official": "<missing>",
+    "graphharbor": "running"
+  },
+  {
+    "path": "lifecycle[1].events[2].data.namespace",
+    "official": "<missing>",
+    "graphharbor": [
+      "child:runtime-1"
+    ]
+  },
+  {
+    "path": "lifecycle[1].events[3].data.reason",
+    "official": "<missing>",
+    "graphharbor": "business_error"
+  },
+  {
+    "path": "lifecycle[1].events[3].data.status",
+    "official": "<missing>",
+    "graphharbor": "error"
+  },
+  {
+    "path": "lifecycle[2].events[0].data.status",
+    "official": "<missing>",
+    "graphharbor": "running"
+  },
+  {
+    "path": "lifecycle[2].events[2].data.graph_name",
+    "official": "v3_edge",
+    "graphharbor": "child"
+  },
+  {
+    "path": "lifecycle[2].events[2].data.namespace",
+    "official": "<missing>",
+    "graphharbor": [
+      "child:runtime-1"
+    ]
+  },
+  {
+    "path": "lifecycle[2].events[2].namespace.length",
+    "official": 0,
+    "graphharbor": 1
+  },
+  {
+    "path": "lifecycle[2].events.length",
+    "official": 3,
+    "graphharbor": 4
+  },
+  {
+    "path": "lifecycle[3].events[0].data.status",
+    "official": "<missing>",
+    "graphharbor": "running"
+  },
+  {
+    "path": "lifecycle[3].events[3].data.namespace",
+    "official": "<missing>",
+    "graphharbor": [
+      "child:runtime-1"
+    ]
+  },
+  {
+    "path": "lifecycle[3].events[4].data.namespace",
+    "official": "<missing>",
+    "graphharbor": [
+      "child:runtime-2"
+    ]
+  },
+  {
+    "path": "lifecycle[3].events[5].data.output",
+    "official": "<missing>",
+    "graphharbor": {
+      "results": [
+        "alpha",
+        "beta"
+      ]
+    }
+  },
+  {
+    "path": "lifecycle[3].events[5].data.reason",
+    "official": "<missing>",
+    "graphharbor": "completed"
+  },
+  {
+    "path": "lifecycle[3].events[5].data.status",
+    "official": "<missing>",
+    "graphharbor": "success"
+  },
+  {
+    "path": "lifecycle[4].events[0].data.status",
+    "official": "<missing>",
+    "graphharbor": "running"
+  },
+  {
+    "path": "lifecycle[4].events[3].data.namespace",
+    "official": "<missing>",
+    "graphharbor": [
+      "tools:runtime-1"
+    ]
+  },
+  {
+    "path": "lifecycle[4].events[4].data.namespace",
+    "official": "<missing>",
+    "graphharbor": [
+      "tools:runtime-2"
+    ]
+  },
+  {
+    "path": "lifecycle[4].events[5].data.output",
+    "official": "<missing>",
+    "graphharbor": {
+      "messages": [
+        {
+          "content": "",
+          "additional_kwargs": {},
+          "response_metadata": {},
+          "type": "ai",
+          "name": null,
+          "id": "runtime-3",
+          "tool_calls": [
+            {
+              "name": "delegate",
+              "args": {
+                "label": "alpha"
+              },
+              "id": "dispatch-alpha",
+              "type": "tool_call"
+            },
+            {
+              "name": "delegate",
+              "args": {
+                "label": "beta"
+              },
+              "id": "dispatch-beta",
+              "type": "tool_call"
+            }
+          ],
+          "invalid_tool_calls": [],
+          "usage_metadata": null
+        },
+        {
+          "content": "child-result",
+          "additional_kwargs": {},
+          "response_metadata": {},
+          "type": "tool",
+          "name": "delegate",
+          "id": "runtime-4",
+          "tool_call_id": "dispatch-alpha",
+          "artifact": null,
+          "status": "success"
+        },
+        {
+          "content": "child-result",
+          "additional_kwargs": {},
+          "response_metadata": {},
+          "type": "tool",
+          "name": "delegate",
+          "id": "runtime-5",
+          "tool_call_id": "dispatch-beta",
+          "artifact": null,
+          "status": "success"
+        }
+      ]
+    }
+  },
+  {
+    "path": "lifecycle[4].events[5].data.reason",
+    "official": "<missing>",
+    "graphharbor": "completed"
+  },
+  {
+    "path": "lifecycle[4].events[5].data.status",
+    "official": "<missing>",
+    "graphharbor": "success"
+  }
+]

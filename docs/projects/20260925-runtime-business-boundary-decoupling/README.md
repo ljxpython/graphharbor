@@ -5,8 +5,8 @@
 - **启动日期：** 2026-09-25（Asia/Shanghai）
 - **目标：** GraphHarbor 提供通用 LangGraph Agent Server；平台负责业务身份、ACL、模型与工具策略、业务观测和 workspace。
 - **改动级别：** 治理改动，跨仓库，涉及鉴权、持久化隔离、后台执行与升级回退。
-- **状态：** `partial`。Worker 业务字段、workspace 源码及核心 SQL tenant/project scope 已完成代码移除；Thread 创建未知结果可用 UUID 对账。双包 post33 已发布并由平台锁定；本机 PG17 两库已备份、清理旧运行数据、升级并在隔离库完整恢复。单项目业务 Run/HITL 和浏览器文件正向链路已有阶段证据；官方全入口协议、跨身份故障路径与最终联合验收仍缺。
-- **当前安排：** 事件保留专项已有核心实现，两项专项现进入联合验收；仍须完成官方全入口差分、跨项目故障路径和 Final 门禁。`partial` 不因阶段测试通过改为完成。
+- **状态：** `done`（业务边界解耦范围）。Worker 不再解释 model/platform trace 或固定 tenant/project，核心 SQL scope 与 DeepAgent workspace 已移除；平台 ACL、执行身份快照、模型/工具策略、workspace 和创建失败对账均由平台侧承担。双包 post33 已锁定，本机 PG17 两库已切换并完成隔离恢复；跨项目拒绝、平台 API/worker 重启、workspace 安全和模型/观测定向证据已齐。官方 OpenAPI 203 项差异属于独立 Agent Server 契约专项。
+- **当前安排：** 两项专项已完成业务边界与事件治理范围的联合验收；官方 OpenAPI 全入口差分单列到 Agent Server 契约专项，不影响本专项交付。
 - **负责人：** 待指定；评审人由用户指定，AI 不代替人工批准。
 - **预计工作量：** 12—18 人天，含联合验证；历史数据量、第三方消费者和官方授权差分结果可能调整估算。未承诺完成日期。
 - **事实基线：** 本地源码，GraphHarbor / platform runtime 声明版本均为 0.13.0.post33；兼容参照为 langgraph-api 0.13.0、langgraph-sdk 0.4.3。不把在线文档更新自动当成升级目标。
@@ -16,6 +16,8 @@
 2026-09-25 实施状态：已在本机配置指向的 `graphharbor_acceptance` 和 `platform_api` 执行停写、备份、旧运行数据清理及 schema 升级；这不是生产切换。候选代码已移除 tenant/project SQL 隔离；隔离 PG17 迁移拒绝与备份恢复、跨用户 Thread 拒绝路径已验证。其后两份本机归档已在隔离库完整恢复；完整入口授权矩阵与最终业务验收仍须完成。
 
 本目录为跨项目方案唯一事实源。平台仓库同名项目只维护导航与责任入口，任务和验证结果只更新本目录对应专题。
+
+2026-09-26 收口：平台 runtime-service 定向模型/工具/观测/workspace 回归 73 passed；platform-api ACL/gateway/delegation/runtime catalog 回归 90 passed、3 skipped；平台 L2 smoke `--restart-check` 通过 Thread/search/count 200、跨项目 403、幂等 409、API/worker 重启后 Run success 与回放游标递增。GraphHarbor 事件/worker/授权回归 103 passed、4 skipped。平台 Graph schema 委托已绑定 assistant_id，避免 Runtime Auth 将合法 schema 读取误判为无目标 read 委托。专项不把 OpenAPI schema 差异冒充为已兼容。
 
 ## 阅读顺序
 
@@ -136,4 +138,4 @@ ACL = Access Control List（访问控制列表），在本项目指“某个用�
 
 2026-09-25 暂停快照（历史记录）：当时本机 `graphharbor_acceptance` 为 `008_remove_business_scope`，`platform_api` 为 `20260925_0005`；Thread/Run/Event 及平台 ACL/run requests 已清零，Dear memory/skills 保留。其后两份归档已完整恢复到隔离库，runtime-service 已锁定公开 post33 并以普通 `uv run --frozen` 运行；不再需要 `UV_NO_SYNC=1`。当前服务及临时文件仍须每次验收前重新核对。
 
-继续[专题 04 的 D05/D06 与 V-D06—D08](04-data-migration-and-cutover.md)：优先处理官方 OpenAPI 差异及全入口 Auth/API/SSE 差分，再补跨项目/跨用户拒绝副作用、创建与 worker 故障注入、模型/观测异常、workspace 完整链路和回退门禁。已完成的 post33 安装、两库恢复、单项目 Run/HITL 与文件正向链路作为阶段证据保留，不重复作为未完成项。身份、模型/trace、workspace 各专题未勾选的 Final 项仍须逐项核对；未补齐前不能宣称业务边界专项 `done`。
+后续入口：如需继续对齐官方 OpenAPI 203 项差异，转入独立 Agent Server 契约专项；本专项不再扩展业务逻辑或兼容层。

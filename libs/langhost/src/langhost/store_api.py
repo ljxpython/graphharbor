@@ -31,13 +31,13 @@ def _namespace_error(namespace: Sequence[str]) -> Response | None:
     return None
 
 
-def _namespace(request: Request, value: Any) -> tuple[str, ...] | None:
+def _namespace(value: Any, request: Request | None = None) -> tuple[str, ...] | None:
     if not isinstance(value, list) or not all(isinstance(label, str) for label in value):
         return None
     return tuple(value)
 
 
-def _public_namespace(request: Request, value: Sequence[str]) -> list[str]:
+def _public_namespace(value: Sequence[str], request: Request | None = None) -> list[str]:
     return list(value)
 
 
@@ -61,7 +61,7 @@ async def _authorize_store(request: Request, action: str, value: dict[str, Any])
 
 def _item(request: Request, value: Any) -> dict[str, Any]:
     data = value.dict()
-    data["namespace"] = _public_namespace(request, data["namespace"])
+    data["namespace"] = _public_namespace(data["namespace"])
     return data
 
 
@@ -77,10 +77,10 @@ async def store_put(request: Request) -> Response:
     payload = await _body(request)
     if payload is None or "key" not in payload or "value" not in payload:
         return JSONResponse({"detail": "namespace, key and value are required"}, status_code=422)
-    namespace = _namespace(request, payload.get("namespace"))
+    namespace = _namespace(payload.get("namespace"))
     if namespace is None:
         return JSONResponse({"detail": "namespace must be an array of strings"}, status_code=422)
-    if error := _namespace_error(namespace[-len(payload["namespace"]) :]):
+    if error := _namespace_error(namespace):
         return error
     if not isinstance(payload["key"], str) or not isinstance(payload["value"], dict):
         return JSONResponse(
@@ -110,8 +110,11 @@ async def store_put(request: Request) -> Response:
 
 
 async def store_get(request: Request) -> JSONResponse | Response:
-    labels = request.query_params.get("namespace", "").split(".")
-    namespace = _namespace(request, labels)
+    raw_namespace = request.query_params.get("namespace")
+    if not raw_namespace:
+        return JSONResponse({"detail": "namespace is required"}, status_code=422)
+    labels = raw_namespace.split(".")
+    namespace = _namespace(labels)
     if namespace is None:
         return JSONResponse({"detail": "namespace must be an array of strings"}, status_code=422)
     if error := _namespace_error(labels):
@@ -133,10 +136,10 @@ async def store_delete(request: Request) -> JSONResponse | Response:
     payload = await _body(request)
     if payload is None or "key" not in payload:
         return JSONResponse({"detail": "namespace and key are required"}, status_code=422)
-    namespace = _namespace(request, payload.get("namespace"))
+    namespace = _namespace(payload.get("namespace"))
     if namespace is None:
         return JSONResponse({"detail": "namespace must be an array of strings"}, status_code=422)
-    if error := _namespace_error(namespace[-len(payload["namespace"]) :]):
+    if error := _namespace_error(namespace):
         return error
     if not isinstance(payload["key"], str):
         return JSONResponse({"detail": "key must be a string"}, status_code=422)
@@ -150,7 +153,7 @@ async def store_search(request: Request) -> JSONResponse | Response:
     if payload is None:
         return JSONResponse({"detail": "request body must be an object"}, status_code=422)
     labels = payload.get("namespace_prefix")
-    namespace = _namespace(request, labels)
+    namespace = _namespace(labels)
     if namespace is None:
         return JSONResponse(
             {"detail": "namespace_prefix must be an array of strings"}, status_code=422
@@ -222,7 +225,7 @@ async def store_list_namespaces(request: Request) -> JSONResponse | Response:
         limit=authorized.get("limit", 100),
         offset=authorized.get("offset", 0),
     )
-    return JSONResponse({"namespaces": [_public_namespace(request, item) for item in namespaces]})
+    return JSONResponse({"namespaces": [_public_namespace(item) for item in namespaces]})
 
 
 __all__ = ["store_delete", "store_get", "store_list_namespaces", "store_put", "store_search"]

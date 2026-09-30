@@ -8,40 +8,29 @@ import os
 import pathlib
 import sys
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 import uvicorn
 from langgraph_cli.config import validate_config_file
-from sqlalchemy import func, select
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Mount, Route
 
 from langgraph_runtime_pg.auth import (
     PrincipalMiddleware,
-    in_principal_scope,
     principal_from_scope,
-    scoped_idempotency_key,
 )
 from langgraph_runtime_pg.checkpoint import get_checkpointer
-from langgraph_runtime_pg.database import connect, pool_stats
+from langgraph_runtime_pg.database import pool_stats
 from langgraph_runtime_pg.graph_registry import GraphRegistry, resolve_within_base_dir
 from langgraph_runtime_pg.metrics import prometheus_text, set_gauge
-from langgraph_runtime_pg.models import (
-    AssistantRow,
-    AssistantVersionRow,
-    RunRow,
-    ThreadRow,
-)
 from langgraph_runtime_pg.production import RuntimeReadiness, lifespan as runtime_lifespan
 from langgraph_runtime_pg.protocol import official_info_document
-from langgraph_runtime_pg.redis_stream import wake_run_queue
-from langgraph_runtime_pg.run_store import RunRepository
 from langhost.core_api import (
     assistants_count,
     assistants_create,
@@ -360,137 +349,6 @@ async def _metrics(_: Request):
     return PlainTextResponse(prometheus_text(), media_type="text/plain; version=0.0.4")
 
 
-def _no_content() -> Response:
-    return Response(status_code=204)
-
-
-async def _capability_unavailable(request: Request) -> JSONResponse:
-    capability = request.path_params.get("capability", "stream_v2")
-    return JSONResponse(
-        {
-            "detail": f"capability {capability!r} is not enabled in the foundation profile",
-            "capability": capability,
-            "status": 501,
-        },
-        status_code=501,
-    )
-
-
-def _scope_query(query: Any, model: Any, principal: Any) -> Any:
-    return query
-
-
-def _metadata_query(query: Any, model: Any, metadata: Any) -> Any:
-    if isinstance(metadata, dict) and metadata:
-        query = query.where(model.metadata_.contains(metadata))
-    return query
-
-
-def _request_limit_offset(request: Request) -> tuple[int, int]:
-    try:
-        limit = max(1, min(int(request.query_params.get("limit", "10")), 1000))
-        offset = max(0, int(request.query_params.get("offset", "0")))
-    except ValueError as exc:
-        raise ValueError("limit and offset must be integers") from exc
-    return limit, offset
-
-
-async def _assistant_search(request: Request) -> JSONResponse:
-    principal = _principal(request)
-    payload = await request.json()
-    try:
-        limit, offset = _request_limit_offset(request)
-    except ValueError as exc:
-        return JSONResponse({"detail": str(exc)}, status_code=422)
-    query = select(AssistantRow).order_by(AssistantRow.created_at.desc())
-    query = _scope_query(query, AssistantRow, principal)
-    query = _metadata_query(query, AssistantRow, payload.get("metadata"))
-    if payload.get("graph_id"):
-        query = query.where(AssistantRow.graph_id == str(payload["graph_id"]))
-    if payload.get("name"):
-        query = query.where(AssistantRow.name.ilike(f"%{payload['name']}%"))
-    async with connect() as conn:
-        rows = (await conn.session.execute(query.limit(limit).offset(offset))).scalars().all()
-        values = [_assistant_payload(row) for row in rows]
-    if payload.get("response_format") == "object":
-        return JSONResponse({"assistants": values, "next": None})
-    return JSONResponse(values)
-
-
-async def _assistant_count(request: Request) -> JSONResponse:
-    principal = _principal(request)
-    payload = await request.json()
-    query = select(func.count()).select_from(AssistantRow)
-    query = _scope_query(query, AssistantRow, principal)
-    query = _metadata_query(query, AssistantRow, payload.get("metadata"))
-    if payload.get("graph_id"):
-        query = query.where(AssistantRow.graph_id == str(payload["graph_id"]))
-    if payload.get("name"):
-        query = query.where(AssistantRow.name.ilike(f"%{payload['name']}%"))
-    async with connect() as conn:
-        count = int(await conn.session.scalar(query) or 0)
-    return JSONResponse(count)
-
-
-async def _assistant_update(request: Request) -> JSONResponse:
-    principal = _principal(request)
-    try:
-        assistant_id = UUID(request.path_params["assistant_id"])
-    except ValueError:
-        return JSONResponse({"detail": "assistant not found"}, status_code=404)
-    payload = await request.json()
-    async with connect() as conn:
-        query = _scope_query(
-            select(AssistantRow).where(AssistantRow.assistant_id == assistant_id),
-            AssistantRow,
-            principal,
-        )
-        row = (await conn.session.execute(query)).scalar_one_or_none()
-        if row is None:
-            return JSONResponse({"detail": "assistant not found"}, status_code=404)
-        for field in ("graph_id", "name", "description", "config", "context"):
-            if field in payload:
-                setattr(row, field, payload[field])
-        if isinstance(payload.get("metadata"), dict):
-            row.metadata_ = {**row.metadata_, **payload["metadata"]}
-        row.version += 1
-        row.updated_at = datetime.now(UTC)
-        conn.session.add(
-            AssistantVersionRow(
-                assistant_id=row.assistant_id,
-                version=row.version,
-                graph_id=row.graph_id,
-                config=row.config,
-                context=row.context,
-                metadata_=row.metadata_,
-                name=row.name,
-                description=row.description,
-            )
-        )
-        await conn.session.flush()
-        return JSONResponse(_assistant_payload(row))
-
-
-async def _assistant_delete(request: Request) -> JSONResponse | Response:
-    principal = _principal(request)
-    try:
-        assistant_id = UUID(request.path_params["assistant_id"])
-    except ValueError:
-        return _no_content()
-    async with connect() as conn:
-        query = _scope_query(
-            select(AssistantRow).where(AssistantRow.assistant_id == assistant_id),
-            AssistantRow,
-            principal,
-        )
-        row = (await conn.session.execute(query)).scalar_one_or_none()
-        if row is None:
-            return _no_content()
-        await conn.session.delete(row)
-        await conn.session.flush()
-    return _no_content()
-
-
 async def _assistants(request: Request) -> JSONResponse:
     request._json = dict(request.query_params)
     return await assistants_search(request)
@@ -499,152 +357,6 @@ async def _assistants(request: Request) -> JSONResponse:
 async def _threads(request: Request) -> JSONResponse:
     request._json = dict(request.query_params)
     return await threads_search(request)
-
-
-async def _assistant_get(request: Request) -> JSONResponse:
-    try:
-        assistant_id = UUID(request.path_params["assistant_id"])
-    except ValueError:
-        return JSONResponse({"detail": "assistant not found"}, status_code=404)
-    async with connect() as conn:
-        query = select(AssistantRow).where(AssistantRow.assistant_id == assistant_id)
-        row = (await conn.session.execute(query)).scalar_one_or_none()
-        if row is None:
-            return JSONResponse({"detail": "assistant not found"}, status_code=404)
-        return JSONResponse(_assistant_payload(row))
-
-
-async def _thread_get(request: Request) -> JSONResponse:
-    principal = _principal(request)
-    try:
-        thread_id = UUID(request.path_params["thread_id"])
-    except ValueError:
-        return JSONResponse({"detail": "thread not found"}, status_code=404)
-    async with connect() as conn:
-        row = await conn.session.get(ThreadRow, thread_id)
-        if row is None or not in_principal_scope(row, principal):
-            return JSONResponse({"detail": "thread not found"}, status_code=404)
-        return JSONResponse(_thread_payload(row))
-
-
-async def _resolve_assistant(
-    session: Any, assistant_value: str, principal: Any
-) -> AssistantRow | None:
-    try:
-        assistant_id = UUID(assistant_value)
-        query = select(AssistantRow).where(AssistantRow.assistant_id == assistant_id)
-    except ValueError:
-        query = select(AssistantRow).where(AssistantRow.graph_id == assistant_value)
-    return (await session.execute(query.limit(1))).scalar_one_or_none()
-
-
-async def _run_create(request: Request) -> JSONResponse:
-    principal = _principal(request)
-    payload = await request.json()
-    assistant_value = str(payload.get("assistant_id", ""))
-    thread_value = request.path_params.get("thread_id")
-    if not assistant_value:
-        return JSONResponse({"detail": "assistant_id is required"}, status_code=422)
-    async with connect() as conn:
-        assistant = await _resolve_assistant(conn.session, assistant_value, principal)
-        if assistant is None:
-            return JSONResponse({"detail": "assistant not found"}, status_code=404)
-        thread = None
-        thread_id = UUID(str(thread_value)) if thread_value else None
-        if thread_id is not None:
-            thread = await conn.session.get(ThreadRow, thread_id)
-            if thread is None or not in_principal_scope(thread, principal):
-                return JSONResponse({"detail": "thread not found"}, status_code=404)
-        raw_idempotency_key = request.headers.get("idempotency-key") or payload.get(
-            "idempotency_key"
-        )
-        idempotency_key = scoped_idempotency_key(principal, raw_idempotency_key)
-        run = await RunRepository().create(
-            conn.session,
-            assistant_id=assistant.assistant_id,
-            thread_id=thread_id,
-            kwargs=payload,
-            metadata=payload.get("metadata") or {},
-            idempotency_key=idempotency_key,
-        )
-        await conn.session.refresh(run)
-        conn.schedule_after_commit(wake_run_queue)
-        return JSONResponse(_run_payload(run), status_code=201)
-
-
-async def _run_get(request: Request) -> JSONResponse:
-    principal = _principal(request)
-    run_id = UUID(request.path_params["run_id"])
-    thread_id = UUID(request.path_params["thread_id"])
-    async with connect() as conn:
-        run = await conn.session.get(RunRow, run_id)
-        if run is None or run.thread_id != thread_id or not in_principal_scope(run, principal):
-            return JSONResponse({"detail": "run not found"}, status_code=404)
-        return JSONResponse(_run_payload(run))
-
-
-async def _run_list(request: Request) -> JSONResponse:
-    thread_id = UUID(request.path_params["thread_id"])
-    async with connect() as conn:
-        query = (
-            select(RunRow).where(RunRow.thread_id == thread_id).order_by(RunRow.created_at.desc())
-        )
-        rows = (await conn.session.execute(query)).scalars().all()
-        return JSONResponse([_run_payload(row) for row in rows])
-
-
-async def _run_cancel(request: Request) -> JSONResponse:
-    return await runs_cancel(request)
-
-
-def _assistant_payload(row: AssistantRow) -> dict[str, Any]:
-    return _plain(
-        {
-            "assistant_id": row.assistant_id,
-            "graph_id": row.graph_id,
-            "name": row.name,
-            "description": row.description,
-            "config": row.config,
-            "context": row.context,
-            "metadata": row.metadata_,
-            "version": row.version,
-            "created_at": row.created_at,
-            "updated_at": row.updated_at,
-        }
-    )
-
-
-def _thread_payload(row: ThreadRow) -> dict[str, Any]:
-    return _plain(
-        {
-            "thread_id": row.thread_id,
-            "status": row.status,
-            "metadata": row.metadata_,
-            "config": row.config,
-            "values": row.values_,
-            "interrupts": row.interrupts,
-            "error": row.error,
-            "created_at": row.created_at,
-            "updated_at": row.updated_at,
-            "state_updated_at": row.state_updated_at,
-        }
-    )
-
-
-def _run_payload(row: RunRow) -> dict[str, Any]:
-    return _plain(
-        {
-            "run_id": row.run_id,
-            "thread_id": row.thread_id,
-            "assistant_id": row.assistant_id,
-            "status": row.status,
-            "metadata": row.metadata_,
-            "kwargs": row.kwargs,
-            "multitask_strategy": row.multitask_strategy,
-            "created_at": row.created_at,
-            "updated_at": row.updated_at,
-        }
-    )
 
 
 def create_app(

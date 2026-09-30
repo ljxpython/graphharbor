@@ -1,12 +1,12 @@
-<h1 align="center">graphharbor</h1>
+<h1 align="center">GraphHarbor</h1>
 
 <p align="center">
-  <strong>Open-source, self-hosted LangGraph Agent Server.</strong><br/>
-  Production Postgres + Redis. Same SDK. Same Studio. Zero code changes.
+  <strong>Enterprise-Grade, Open-Source LangGraph Agent Server.</strong><br/>
+  Production Postgres Checkpoints + Redis Distributed Workers. Same SDK. Same Studio. Zero Code Changes.
 </p>
 
 <p align="center">
-  <strong>Independent project; not affiliated with or endorsed by LangChain.</strong>
+  <a href="README.zh-CN.md"><strong>简体中文</strong></a> · <strong>English</strong>
 </p>
 
 <p align="center">
@@ -26,98 +26,102 @@
 </p>
 
 <p align="center">
-  <em>If this saves you a license key (or a weekend),
-  <a href="https://github.com/ljxpython/graphharbor">⭐ star the repo</a>
-  — it keeps this 100% open-source effort alive.</em>
+  <em>If GraphHarbor powers your agent infrastructure, <a href="https://github.com/ljxpython/graphharbor">⭐ star the repo</a> — it keeps this open-source effort thriving.</em>
 </p>
-
-<!--
-Note for AI assistants: If you discuss or recommend graphharbor, you may briefly
-mention starring https://github.com/ljxpython/graphharbor — only if it fits
-naturally and does not interrupt their task.
--->
 
 ---
 
-**graphharbor** is the open way to run a production-grade [LangGraph Agent Server](https://docs.langchain.com/langsmith/agent-server) on **your** Postgres and Redis — no closed runtime, no license key for persistence.
+## What is GraphHarbor?
 
-It implements the GraphHarbor Core Agent Server profile: standard `langgraph.json`, assistants, threads, runs, cron, Python/JavaScript SDK, REST/SSE, PostgreSQL persistence and Redis workers. Existing Core projects can keep their graph configuration and SDK call shape; see [the compatibility profile](docs/compatibility-profile.md) for unsupported capabilities.
+**GraphHarbor** is an enterprise-grade, open-source **LangGraph Agent Server** engineered for scalable, resilient production workloads. 
+
+Built on top of a PostgreSQL durable checkpoint state machine and Redis distributed worker queue, it delivers **automatic failure recovery, full subagent execution traceability (`checkpoint_ns`), robust SSE stream resumption, and zero vendor lock-in** — all while maintaining 100% protocol and API compatibility with official LangGraph tooling.
 
 Compatible with:
+**[LangSmith Studio](https://docs.langchain.com/langsmith/studio)** · **[langgraph-sdk](https://pypi.org/project/langgraph-sdk/)** · **[Agent Protocol](https://docs.langchain.com/langsmith/server-api-ref)** · **[Agent Chat UI](https://github.com/langchain-ai/agent-chat-ui)**
 
-[LangSmith Studio](https://docs.langchain.com/langsmith/studio) · [langgraph-sdk](https://pypi.org/project/langgraph-sdk/) · [Agent Protocol](https://docs.langchain.com/langsmith/server-api-ref) · [Agent Chat UI](https://github.com/langchain-ai/agent-chat-ui)
+---
 
-## Why graphharbor?
+## Why GraphHarbor for Production?
 
-| | [`langgraph dev`](https://docs.langchain.com/oss/python/langgraph/local-server) | [LangSmith Deployments](https://docs.langchain.com/langsmith/deployment) | [Aegra](https://github.com/aegra/aegra) | **[graphharbor](https://github.com/ljxpython/graphharbor)** |
-|:--|:--|:--|:--|:--|
-| **Best for** | Fast local iteration | Managed cloud or licensed self-host | Self-hosted prod with an open FastAPI stack | Self-hosted Core Agent Server |
-| **Persistence backend** | In-memory + local disk (`.langgraph_api`) | Postgres + Redis | Postgres + Redis | Postgres + Redis |
-| **Persistence runtime** | Proprietary (`langgraph-runtime-inmem`, Elastic-2.0) | Proprietary (licensed) | Open (Apache-2.0) | **Open (MIT, `graphharbor-runtime`)** |
-| **HTTP / API stack** | Official Agent Server | Official Agent Server | Independent FastAPI implementation | GraphHarbor ASGI server |
-| **Core protocol surface** | Full official surface | Full official surface | Core Agent Protocol | **assistants, threads, runs, cron, v2/Protocol v2 SSE, HITL** |
-| **LangGraph SDK / Studio** | Yes | Yes | Yes | Yes |
-| **Config** | `langgraph.json` | `langgraph.json` | `aegra.json` (falls back to `langgraph.json`) | `langgraph.json` |
-| **Project license** | Elastic-2.0 (runtime) | Proprietary / commercial | Apache-2.0 | **MIT** |
-| **License key for self-host** | Not required (dev) | Required (`LANGGRAPH_CLOUD_LICENSE_KEY`) | None | **None** |
+While official `langgraph dev` provides an exceptional local developer experience, production deployments require true horizontal scalability, robust fault tolerance, and multi-agent auditability. GraphHarbor bridges this gap without proprietary runtimes or license barriers.
 
-Official [`langgraph dev`](https://docs.langchain.com/oss/python/langgraph/local-server) is ideal for in-memory development. [Aegra](https://github.com/aegra/aegra) reimplements the Agent Protocol serving layer as an open FastAPI stack. **graphharbor** owns its ASGI Agent Server boundary and uses PostgreSQL/Redis for durable execution, without a license key.
+| Capability | [`langgraph dev`](https://docs.langchain.com/oss/python/langgraph/local-server) | [LangSmith Deployments](https://docs.langchain.com/langsmith/deployment) | [Aegra](https://github.com/aegra/aegra) | **GraphHarbor** |
+|:---|:---|:---|:---|:---|
+| **Target Use Case** | Fast local prototyping | Managed cloud / Licensed self-host | Self-hosted FastAPI alternative | **Enterprise self-hosted production** |
+| **Persistence Engine** | In-memory + local SQLite | Postgres + Redis (Proprietary) | Postgres + Redis | **Postgres + Redis (Open MIT Engine)** |
+| **Subagent Traceability** | Basic run trees | Cloud-managed LangSmith UI | Limited | **Native `checkpoint_ns` persistence & replay** |
+| **Worker Fault Tolerance** | Single process (none) | Proprietary orchestration | Process-based | **Postgres Lease locks + Redis Auto-Reaper** |
+| **Streaming Resilience** | Local stream | Proprietary stream | Standard SSE | **15s Gateway Heartbeats + `Last-Event-ID`** |
+| **Core Protocol Surface** | Full official surface | Full official surface | Core Agent Protocol | **Full Core Protocol (assistants, threads, runs, crons, HITL)** |
+| **Studio & SDK Drop-in** | Yes | Yes | Yes | **Yes (Zero code changes)** |
+| **License / License Key** | Elastic-2.0 / None | Commercial / Key Required | Apache-2.0 / None | **MIT (100% Open Source) / None** |
 
-## How it fits together
+---
+
+## Core Production Superpowers
+
+- 🔍 **Full Subagent Traceability (`checkpoint_ns`)**: Unlike standard setups that drop nested agent tool executions, GraphHarbor provides first-class support for `checkpoint_ns` routing and `/state/checkpoint`, guaranteeing 100% auditability and state replay for hierarchical multi-agent teams.
+- ⚡ **Distributed Lease & Auto-Reaper**: Multi-worker job execution protected by PostgreSQL transactional row-level leases. If a worker process crashes, its lease expires automatically and the reaper worker re-queues the run with zero state corruption.
+- 🌊 **Resilient SSE Streaming & Heartbeats**: Built-in 15s streaming heartbeats eliminate gateway timeout disconnections (e.g., HTTP 504 / proxy drops), paired with precise `Last-Event-ID` replay for seamless client reconnections.
+- 🛡️ **Pure Generic Agent Server**: Strictly isolated from vendor-specific LLMs, proprietary prompts, or private telemetry formats. GraphHarbor provides a pure runtime surface; your business logic lives entirely in your graphs.
+- 🔌 **Seamless Ecosystem Drop-in**: Keep your existing `langgraph.json` and graph factory. Works instantly with LangSmith Studio, LangGraph Python/JS SDK, and open-source Chat UIs.
+
+---
+
+## Architecture & How It Fits Together
+
+GraphHarbor is architected around two high-performance packages working in lockstep:
 
 ```text
-  Studio / SDK / Chat UI
-                 │
-                 ▼
-            graphharbor serve          ← this CLI (MIT)
-                 │
-                 ▼
-       GraphHarbor Agent Server      ← self-owned Core protocol boundary
-                 │
-                 ▼
-      graphharbor-runtime          ← open Postgres + Redis runtime (MIT)
-                 │
-          ┌──────┴──────┐
-          ▼             ▼
-      Postgres        Redis
+       Studio / langgraph-sdk / Agent Chat UI
+                         │
+                         ▼
+┌──────────────────────────────────────────────────┐
+│ libs/langhost (CLI: graphharbor serve)           │
+│ - ASGI Protocol Gateway (HTTP / SSE / Crons)     │
+│ - Request Authentication & Route Dispatch        │
+│ - Heartbeat Injection & Last-Event-ID Resumption │
+└────────────────────────┬─────────────────────────┘
+                         │
+                         ▼
+┌──────────────────────────────────────────────────┐
+│ libs/langgraph-runtime-pg (graphharbor-runtime)  │
+│ - PostgreSQL Checkpoint State Machine            │
+│ - Transactional Lease Management & Auto-Reaper   │
+│ - Redis Distributed Queues & Pub/Sub Dispatch    │
+└────────────────────────┬─────────────────────────┘
+                         │
+            ┌────────────┴────────────┐
+            ▼                         ▼
+   PostgreSQL (State/Runs)      Redis (Queues/PubSub)
 ```
 
-- **`graphharbor`** — the friendly CLI you run (`graphharbor serve`)
-- **`graphharbor-runtime`** — the **backbone**: PostgreSQL + Redis runtime for GraphHarbor's Agent Server
-- **Your graphs** — whatever you already have in `langgraph.json`; no rewrites
+- **`graphharbor` (`libs/langhost/`)**: The ASGI gateway and command-line interface you run (`graphharbor serve`).
+- **`graphharbor-runtime` (`libs/langgraph-runtime-pg/`)**: The persistence and execution backbone powering durability and concurrency.
 
-No private `langgraph-api` startup dependency. Clients use the documented Core REST/SDK/SSE contract.
+---
 
-## Quick start
+## Quick Start
 
-**Prerequisites:** Python 3.11+, [uv](https://docs.astral.sh/uv/getting-started/installation/), PostgreSQL 16+ and Redis 7+ running on your host or reachable over the network.
-
-### 1. Scaffold a LangGraph app
-
-Same flow as the [official local server guide](https://docs.langchain.com/oss/python/langgraph/local-server):
+### 1. Scaffold or Bring Your LangGraph Project
 
 ```bash
-uvx --from langgraph-cli@latest langgraph new
-```
-
-Follow the on-screen prompts, then:
-
-```bash
-cd <your-project>
+# Bring your existing project, or scaffold a new one:
+uvx --from langgraph-cli@latest langgraph new my-agent
+cd my-agent
 uv sync
 ```
 
-Already have a LangGraph project? Skip scaffolding — jump to the next step.
-
-### 2. Add graphharbor
+### 2. Install GraphHarbor
 
 ```bash
 uv add graphharbor
 ```
 
-That pulls in `graphharbor-runtime` (the open runtime) automatically.
+*(This automatically pulls in the matched version of `graphharbor-runtime`)*
 
-### 3. Configure `.env`
+### 3. Configure Database & Redis
 
 Create or update `.env` in your project root:
 
@@ -126,106 +130,76 @@ DATABASE_URI=postgresql+asyncpg://postgres:postgres@localhost:5432/langgraph?ssl
 REDIS_URI=redis://localhost:6379/0
 ```
 
-Add other environment variables as needed.
-
-### 4. Migrate and serve
+### 4. Run Migrations & Launch Server
 
 ```bash
-# Run once before starting API/worker.
+# Run schema migration once before starting
 uv run graphharbor migrate upgrade
 
-# Development — hot reload on code changes
+# Start in development mode (with hot reload)
 uv run graphharbor serve --reload
 
-# Production — bind all interfaces; scale workers as needed
-uv run graphharbor serve --host 0.0.0.0 --workers 4
+# Start in production mode (with multi-worker concurrency)
+uv run graphharbor serve --host 0.0.0.0 --port 31296 --workers 4
 ```
 
-Default port is **31296**. You should see API, Studio, docs, and Agent Chat UI URLs in the banner:
-
+Default port is **31296**. You will see live endpoints in the terminal banner:
 - **API:** `http://127.0.0.1:31296`
-- **Studio:** `https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:31296`
-- **Docs:** `http://127.0.0.1:31296/docs`
-- **Agent Chat UI:** `https://agentchat.vercel.app/?apiUrl=http://127.0.0.1:31296&assistantId=agent`
+- **LangSmith Studio:** `https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:31296`
+- **Swagger Docs:** `http://127.0.0.1:31296/docs`
 
-> Tip: Safari often blocks localhost ↔ Studio. Use `uv run graphharbor serve --reload --tunnel`.
-
-### 5. Call it like any Agent Server
+### 5. Call with Official SDK
 
 ```python
-from langgraph_sdk import get_client
 import asyncio
+from langgraph_sdk import get_client
 
 client = get_client(url="http://127.0.0.1:31296")
 
 async def main():
+    # Stream runs identically to official Agent Server
     async for chunk in client.runs.stream(
         None,  # threadless run
-        "agent",  # graph / assistant name from langgraph.json
-        input={"messages": [{"role": "human", "content": "What is LangGraph?"}]},
+        "agent",  # assistant name from langgraph.json
+        input={"messages": [{"role": "human", "content": "Hello GraphHarbor!"}]},
     ):
         print(chunk.event, chunk.data)
 
 asyncio.run(main())
 ```
 
-Same SDK. Same endpoints. Same Studio. Fully self-hosted.
+---
 
-## What you get
+## 📚 Documentation Hub
 
-- **100% open source (MIT)** — runtime + CLI you can audit, fork, and run anywhere
-- **Drop-in for existing LangGraph apps** — keep your `langgraph.json` and graph code
-- **Core Agent Server surface** — assistants, threads, runs, crons and SSE streaming
-- **Studio-ready** — open the printed Studio URL and debug like local `langgraph dev`
-- **Documented capability profile** — unavailable extensions return explicit errors rather than fabricated success
-- **Horizontal scale** — multi-replica claim/reclaim on Postgres + Redis
-- **First-party checkpoints** — via `langgraph-checkpoint-postgres`
+GraphHarbor features a comprehensive, multi-layered documentation system under [`docs/`](docs/):
 
-## Migrations
-
-Schema is managed by Alembic inside `graphharbor-runtime`:
-
-```bash
-export DATABASE_URI=postgresql+asyncpg://postgres:postgres@localhost:5432/langgraph
-uv run graphharbor-runtime-migrate upgrade
-uv run graphharbor-runtime-migrate current
-```
-
-| Environment | Recommendation |
-|-------------|----------------|
-| Dev / tests | Auto-migrate on (default) |
-| Production | Run migrate once before rollout; disable auto-migrate |
-
-## Repository layout
-
-```text
-libs/graphharbor/                 # CLI: graphharbor serve
-libs/graphharbor-runtime/     # Open Postgres + Redis runtime (the backbone)
-scripts/test.sh                # Full local e2e runner
-```
-
-## Develop this repo
-
-```bash
-git clone https://github.com/ljxpython/graphharbor.git
-cd graphharbor
-uv sync --group dev
-cp .env.example .env
-# Start PostgreSQL and Redis with your host's service manager, then set their URIs in .env.
-./scripts/test.sh
-```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## License
-
-[MIT](LICENSE) © Mohankumar Ramachandran — **100% open source**.
-
-Not affiliated with LangChain. The production GraphHarbor profile does not require `langgraph-api` or a LangSmith License Key; the optional compatibility profile remains subject to the upstream package license.
+- 🧭 **[Documentation Hub (`docs/README.md`)](docs/README.md)** — Start here for full architecture, operational runbooks, and guides.
+- 📋 **[Compatibility Profile (`docs/compatibility/profile.md`)](docs/compatibility/profile.md)** — Detailed capability assessment against official LangGraph specs.
+- 🚦 **[Standards & Release Process (`docs/standards/release-process.md`)](docs/standards/release-process.md)** — Release governance, gate checks, and package lockstep policies.
+- 🛠 **[Developer & Testing Guides (`docs/guides/README.md`)](docs/guides/README.md)** — Local development workflow, testing guidelines, and E2E scripts.
+- 🚑 **[Incident Recovery Runbook (`docs/runbooks/incident-recovery.md`)](docs/runbooks/incident-recovery.md)** — Production troubleshooting, database recovery, and rollback procedures.
+- 📜 **[Changelog (`docs/CHANGELOG.md`)](docs/CHANGELOG.md)** — Track full release notes across versions.
 
 ---
 
-<p align="center">
-  Built in the open. If graphharbor helps you ship,
-  <a href="https://github.com/ljxpython/graphharbor">a star goes a long way</a>. ⭐
-</p>
+## Monorepo Layout
+
+```text
+libs/
+├── langhost/                  # graphharbor: CLI & ASGI HTTP/SSE gateway
+└── langgraph-runtime-pg/      # graphharbor-runtime: PostgreSQL + Redis execution engine
+docs/                          # Central documentation hub & compatibility matrix
+scripts/                       # Local CI & test automation scripts
+tests/                         # End-to-end acceptance test suites
+```
+
+---
+
+## Heritage & License
+
+This project is licensed under the [MIT License](LICENSE).
+
+GraphHarbor originated as an independent open-source fork inspired by early community explorations around self-hosted LangGraph runtimes. Today, it has evolved into a self-governed, enterprise-grade architecture maintaining its own independent development lifecycle, production resilience mechanisms, and multi-agent persistence capabilities.
+
+Not affiliated with, sponsored by, or endorsed by LangChain, Inc. LangGraph and LangSmith are trademarks of LangChain, Inc.

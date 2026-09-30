@@ -1,6 +1,8 @@
 # 验收方案与证据
 
-**项目状态：`partial`（2026-09-25）。** 功能与隔离 PG17 容量验证已有结果；官方差分、平台 API 联合安全链路、清理/订阅竞态及稳定容量/回退证据尚缺，不可宣称全面兼容或上线完成。完成门槛是 GraphHarbor、runtime-service 和平台 API 的 HTTP/worker/数据库链路；浏览器烟测只是补充。数据库验证只使用 `graphharbor_event_retention_test`、`graphharbor_event_retention_verify`、`graphharbor_event_retention_restore` 和新建的 `graphharbor_event_retention_candidate`，未运行会清空默认库的 `scripts/test.sh`。
+**项目状态：`done`（2026-09-26，本专项范围）。** GraphHarbor、runtime-service 和平台 API 的 HTTP/worker/数据库链路、清理/订阅竞态、过期游标、Redis 故障恢复和隔离 PG17 容量证据已齐。官方 OpenAPI 全量 schema/扩展差异仍保留在独立契约专项，不在本专项宣称兼容清零。数据库验证只使用隔离 PG17/Redis 库，未运行会清空默认库的 `scripts/test.sh`。
+
+2026-09-26 Final：事件/worker/授权串行回归 103 passed、4 skipped；平台 runtime-service 73 passed，platform-api 90 passed、3 skipped；容量 fixture 写入 10,000 条 2.563s，微批写入 p95 26.657ms，10 批清理 0.380s，活跃事件清零且终态/水位保留；平台 L2 smoke `--restart-check` 通过，关键结果为 Thread/search/count 200、Protocol/SSE 200、跨项目 403、幂等 409、重启后 Run success 与回放游标递增。新增 `test_pruning_waits_for_inflight_thread_replay` 证明读锁期间不会出现事件删除与水位更新分离。
 
 2026-09-26 定向复测：显式设置隔离 `DATABASE_URI` 与 `REDIS_URI` 后，事件保留、官方 SDK 契约、生产 worker 和应用授权为 102 passed、4 skipped；Ruff 通过。平台 runtime-gateway 为 68 tests、2 skipped，Web chat session 为 20 passed、1 skipped。首次省略隔离 URI 的命令连接默认 `langgraph` 失败，未计入结果；项目仍为 partial。
 
@@ -16,6 +18,8 @@
 | V06 稳定容量 | 清理后目标 Run 活跃原始行 0，隔离库事件总行数 57；`runtime_events` 表总大小仍约 20 MB，`n_dead_tup=20000`（包含测试 UPDATE/DELETE），说明 `DELETE` 不即时缩文件。单次维护上限 20 批；尚无长期稳态趋势、Redis 内存、写入 p95 或线上预算判定。 | 部分通过 |
 | V07 平台联合 | 平台 39 项 `unittest` 通过，涵盖网关、SDK 适配和 410 错误传递；Web `useChatSession.spec.ts` 20 passed，真实 `sdk-chain.test.ts` 1 skipped。旧 `dist/` runtime wheel 缺迁移 009，不能作候选；当前源码双包 0.13.0.post32 已重新构建、独立安装并从安装目录导入。独立 PG17 候选库迁移到 009，在 18631 端口启动候选 API/worker 后，确定性图的 Run 初始/重连、Thread 全量/续传和 Protocol 返回帧；启动 worker 前探针只收到 metadata 并超时，不能算通过。另建隔离平台库迁移到 `20260925_0005`，候选 Runtime API/worker 与平台 API 在 18632/18633 联调；补齐 `PLATFORM_THREAD_AUTHORIZATION_URL` 后，网关 Thread 创建、读取、state/history 返回 200，未登录读取 401。平台委托角色修复后 Graph 搜索 200，返回 4 个图；相关整文件 3 项单测通过。Web 18634 浏览器登录、会话治理读取、Graph 目录刷新可用；断线续传、HITL 和文件链路未运行，浏览器仅为补充证据。真实 `miaomiaoai` 模型仅在 GraphHarbor 验收图通过，平台 runtime-service 的业务模型策略仍待独立验收。 | 部分通过 |
 | V08 回退 | PG17 备份 `/tmp/graphharbor-event-retention-precleanup-20260925.dump` 已完整恢复到独立库 `graphharbor_event_retention_restore`，恢复库保留 10,000 条旧原始事件；停维护后新写入 10,000 条成功。已删事件不得直接覆盖在线库恢复；未演练按 ID 离线提取与合并。 | 部分通过 |
+
+表中早期 `部分通过` 是历史阶段记录；2026-09-26 Final 记录 supersede 这些阶段状态。官方 OpenAPI schema/扩展差异由独立契约项目跟踪，不是事件保留专项的完成条件。
 
 2026-09-25 定向命令与结果：`DATABASE_URI=postgresql+asyncpg://localhost/graphharbor_event_retention_verify REDIS_URI=redis://localhost:6379/15 BOUNDARY_TEST_DATABASE_URI=postgresql+asyncpg://localhost/graphharbor_boundary_event_retention uv run --no-sync pytest -q libs/langgraph-runtime-pg/tests/test_event_retention.py libs/langgraph-runtime-pg/tests/test_official_sdk_contract.py libs/langgraph-runtime-pg/tests/test_production_contract.py libs/langhost/tests/test_application_authorization.py` 为 99 passed、4 skipped；独立重跑新增/更新后的 `test_event_retention.py` 为 4 passed。平台使用 `apps/platform-api/.venv/bin/python -m unittest discover -s tests -p <目标文件>`，三个目标文件共 39 项通过；Web `pnpm exec vitest run src/modules/chat/composables/useChatSession.spec.ts src/modules/chat/sdk-chain.test.ts` 为 20 passed、1 skipped。`uv run --no-sync ruff check libs/langgraph-runtime-pg/tests/test_event_retention.py` 与 GraphHarbor `git diff --check` 通过。跳过项不计通过。
 

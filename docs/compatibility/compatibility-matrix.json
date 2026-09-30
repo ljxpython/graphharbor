@@ -1,0 +1,26 @@
+{
+  "graphharbor": "0.13.0.post20",
+  "graphharbor-runtime": "0.13.0.post20",
+  "langgraph": "1.2.11",
+  "langgraph-sdk": "0.4.3",
+  "langgraph-cli": "0.4.31",
+  "langgraph-checkpoint": "4.2.0",
+  "langgraph-checkpoint-postgres": "3.1.2",
+  "official-agent-server": "langgraph-api==0.13.0 via langgraph dev",
+  "protocol-comparison": "required before any LangGraph dependency upgrade",
+  "official-protocol-status": "passed with documented core-profile exclusions",
+  "mcp-transport": "Streamable HTTP /mcp/ local discovery/call and outbound MCP fixture passed; production auth, tenant isolation, and remote failure acceptance pending",
+  "p0-graph-pair-status": "five acceptance P0 fixtures passed against pinned langgraph dev on 2026-08-28; real Agent projections compare ordered tool traces and Deep Agent task delegation phases, not natural-language text; this does not prove an unavailable external runtime_service graph set",
+  "official-protocol-verified-at": "2026-08-25",
+  "protocol-exclusions": "docs/compatibility-exclusions.json",
+  "v3-lifecycle-alignment": {
+    "date": "2026-09-15",
+    "status": "backend-verified-with-documented-differences",
+    "official-baseline": "langgraph-api 0.13.0 / langgraph 1.2.11",
+    "evidence": "docs/release-notes-0.13.0.post30.md; docs/release-notes-0.13.0.post29.md; artifacts/v3-matrix-post30.json; artifacts/v3-worker-kill.json; artifacts/v3-performance.json",
+    "covered": "five lifecycle phases and fields; nested scope filtering; durable cursor replay; API/Worker restart; parallel interrupt resume; actual wheel HTTP/JS SDK; commit failure and 159-test regression",
+    "remaining": "frontend/consumer acceptance; strict payload additions; SDK1.9.28 duplicate tool handles also present on official Server; official reference subscription lacks checkpoints/custom",
+    "run-sse-v3": "GraphHarbor extension; pinned official Run SSE ignores version=v3 and returns legacy frames",
+    "release": "0.13.0.post30"
+  }
+}

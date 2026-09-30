@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -51,21 +52,18 @@ async def test_deepagent_factory_scopes_backend_and_subagent(monkeypatch, tmp_pa
 
     monkeypatch.setattr(p0_graphs, "create_deep_agent", fake_create_deep_agent)
     monkeypatch.setenv("GRAPHHARBOR_WORKSPACE_ROOT", str(tmp_path))
+    thread_id = str(uuid4())
     result = await p0_graphs.deepagent_demo(
         {
             "configurable": {
-                "thread_id": "thread-1",
-                "__graphharbor_runtime_context": {
-                    "tenant_id": "tenant-1",
-                    "project_id": "project-1",
-                },
+                "thread_id": thread_id,
             }
         }
     )
 
     assert result is not None
     backend = captured["backend"]
-    assert backend.cwd == tmp_path / "tenant-1" / "project-1" / "thread-1"
+    assert backend.cwd == tmp_path / thread_id
     assert captured["skills"] == ["/skills/project/guardrails/"]
     assert len(captured["permissions"]) == 1
     assert captured["subagents"][0]["tools"]
