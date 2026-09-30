@@ -4,6 +4,12 @@
 
 所有包版本严格遵循**双包锁步发版（Lockstep Release）**原则。细分发版说明见 [releases/](releases/) 目录。
 
+## [Unreleased]
+
+- **Bug 修复**：修复 `input.respond` 恢复 Run 时恶意篡改前序 Run `stream_resumable=False` 导致 SSE 重放丢失 `values` 事件的问题。
+- **Bug 修复**：修复 `FencedPostgresSaver._writer` 在无 `checkpoint_writer` 上下文时将当前运行中的 Run 误判为外部并发冲突的问题。
+- **规范治理**：忽略中文标点歧义告警（RUF001/002/003），格式化所有未对齐代码。
+
 ---
 
 ## 🚀 活跃与近期发布

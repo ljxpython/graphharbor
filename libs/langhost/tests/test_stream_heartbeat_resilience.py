@@ -432,5 +432,3 @@ async def test_protocol_stream_replay_with_non_dict_data_payloads(monkeypatch):
     all_output = "".join(frames)
     assert "evt-list" in all_output
     assert "evt-str" in all_output
-
-

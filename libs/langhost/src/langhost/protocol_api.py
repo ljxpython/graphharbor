@@ -173,6 +173,7 @@ async def protocol_commands(request: Request) -> JSONResponse:
             "idempotency_key": resume_key,
             "if_not_exists": "reject",
             "version": latest.kwargs.get("version", "v2"),
+            "stream_resumable": bool(latest.kwargs.get("stream_resumable", False)),
         }
         result = await runs_create(request, thread_value=str(thread_id), payload=payload)
         if result.status_code >= 300:
@@ -189,12 +190,6 @@ async def protocol_commands(request: Request) -> JSONResponse:
                     key: value for key, value in persisted.interrupts.items() if key != interrupt_id
                 }
                 persisted.status = "busy"
-            old_run = await conn.session.get(RunRow, latest.run_id)
-            if old_run is not None:
-                old_kwargs = dict(old_run.kwargs or {})
-                if old_kwargs.get("stream_resumable") is True:
-                    old_kwargs["stream_resumable"] = False
-                    old_run.kwargs = old_kwargs
         return JSONResponse(
             {
                 "id": command_id,
@@ -323,7 +318,11 @@ async def protocol_event_stream(request: Request) -> JSONResponse | StreamingRes
         if since and since < watermark:
             await manager.remove_thread_stream(thread_id, queue)
             return JSONResponse(
-                {"code": "cursor_expired", "detail": "cursor_expired", "recovery": "thread_snapshot"},
+                {
+                    "code": "cursor_expired",
+                    "detail": "cursor_expired",
+                    "recovery": "thread_snapshot",
+                },
                 status_code=410,
             )
         parsed_run_ids: set[UUID] = set()
@@ -371,9 +370,7 @@ async def protocol_event_stream(request: Request) -> JSONResponse | StreamingRes
             return True
 
         replay = [
-            wire
-            for wire in replay
-            if _is_resumable(wire) and _is_active_protocol_event(wire)
+            wire for wire in replay if _is_resumable(wire) and _is_active_protocol_event(wire)
         ]
     except Exception:
         await manager.remove_thread_stream(thread_id, queue)

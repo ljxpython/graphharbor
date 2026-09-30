@@ -207,9 +207,7 @@ async def test_pruning_waits_for_inflight_thread_replay() -> None:
 
         async with connect() as reader:
             thread = await reader.session.scalar(
-                select(ThreadRow)
-                .where(ThreadRow.thread_id == thread_id)
-                .with_for_update(read=True)
+                select(ThreadRow).where(ThreadRow.thread_id == thread_id).with_for_update(read=True)
             )
             assert thread is not None and thread.event_pruned_through == 0
 

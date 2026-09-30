@@ -109,6 +109,9 @@ ignore = [
     "ASYNC109",  # timeout kwargs are intentional Redis/queue wait APIs
     "PERF401",   # list.append loops preferred for clarity here
     "RUF012",    # mutable class attrs (SQLAlchemy / pydantic patterns)
+    "RUF001",    # ambiguous unicode character in string
+    "RUF002",    # ambiguous unicode character in docstring
+    "RUF003",    # ambiguous unicode character in comment
 ]
 
 [tool.ruff.lint.per-file-ignores]

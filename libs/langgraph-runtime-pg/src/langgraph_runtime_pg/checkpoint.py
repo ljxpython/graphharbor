@@ -65,18 +65,40 @@ class FencedPostgresSaver(AsyncPostgresSaver):
                     (resource_id,),
                 )
                 if not writer:
+                    cfg_dict = config if isinstance(config, dict) else {}
+                    configurable = cfg_dict.get("configurable")
+                    conf_dict = configurable if isinstance(configurable, dict) else {}
+                    config_metadata = cfg_dict.get("metadata")
+                    meta_dict = config_metadata if isinstance(config_metadata, dict) else {}
+                    req_run_id = (
+                        conf_dict.get("run_id") or meta_dict.get("run_id") or cfg_dict.get("run_id")
+                    )
+                    current_run_uuid: UUID | None = None
+                    if req_run_id:
+                        try:
+                            current_run_uuid = UUID(str(req_run_id))
+                        except (ValueError, TypeError):
+                            current_run_uuid = None
+
                     cursor = await connection.execute(
-                        "SELECT 1 FROM runs WHERE thread_id=%s "
-                        "AND (status='running' OR reason='rollback') LIMIT 1",
+                        "SELECT run_id, status, reason FROM runs WHERE thread_id=%s "
+                        "AND (status='running' OR reason='rollback')",
                         (resource_id,),
                     )
-                    if await cursor.fetchone():
-                        raise CheckpointConflict("thread has an active run or rollback")
+                    active_runs = await cursor.fetchall()
+                    for r in active_runs:
+                        active_run_id = r["run_id"] if isinstance(r, dict) else r[0]
+                        active_reason = r["reason"] if isinstance(r, dict) else r[2]
+                        if active_reason == "rollback":
+                            raise CheckpointConflict("thread has an active run or rollback")
+                        if current_run_uuid is None or active_run_id != current_run_uuid:
+                            raise CheckpointConflict("thread has an active run or rollback")
                     # An explicit state update supersedes old rollback snapshots.
-                    await connection.execute(
-                        "DELETE FROM run_checkpoint_baselines WHERE thread_id=%s",
-                        (resource_id,),
-                    )
+                    if current_run_uuid is None:
+                        await connection.execute(
+                            "DELETE FROM run_checkpoint_baselines WHERE thread_id=%s",
+                            (resource_id,),
+                        )
             yield AsyncPostgresSaver(connection, serde=self.serde)
 
     async def aput(self, config, checkpoint, metadata, new_versions):

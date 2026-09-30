@@ -613,4 +613,3 @@ async def test_store_get_requires_namespace():
     res = await store_get(request)
     assert res.status_code == 422
     assert json.loads(res.body.decode()) == {"detail": "namespace is required"}
-

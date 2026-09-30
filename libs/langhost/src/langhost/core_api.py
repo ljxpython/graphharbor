@@ -988,7 +988,7 @@ async def threads_state(request: Request) -> JSONResponse:
                 {
                     "values": {} if is_subgraph else (row.values_ or {}),
                     "next": [],
-                    "checkpoint": _checkpoint_key(config),
+                    "checkpoint": _checkpoint_key(dict(config)),
                     "metadata": {},
                     "created_at": None,
                     "parent_checkpoint": None,
