@@ -41,8 +41,10 @@
 | 文件/目录 | 用途 |
 |---|---|
 | [CONTEXT.md](CONTEXT.md) | **会话快照**：记录双包锁步版本、活跃专项进展、近期重大决策与核心边界（必读） |
-| [compatibility/profile.md](compatibility/profile.md) | **协议契约**：核对 LangGraph 协议实现现状与支持边界 |
-| [standards/release-process.md](standards/release-process.md) | **发布门禁**：双包锁步构建与发布验证要求 |
+| [FEATURES.md](FEATURES.md) | **功能清单**：全仓库功能与协议能力现状总览（语义记忆） |
+| [standards/README.md](standards/README.md) | **规范健康表**：跨包协议契约生效状态与置信度一览 |
+| [compatibility/profile.md](compatibility/profile.md) | **协议画像**：核对 LangGraph 协议实现现状与支持边界 |
+| [lessons/](lessons/) | **经验库**：AI 踩坑教训库（按需读取，每条 ≤4 行） |
 | [projects/](projects/) | **专项事实源**：正在实施的方案、任务进度与验证项 |
 
 ---
@@ -53,6 +55,7 @@
 docs/
 ├── README.md          ← 【你在这里】人类全景导航中心
 ├── CONTEXT.md         ← AI: 会话记忆与项目状态快照
+├── FEATURES.md        ← AI: 全仓库功能现状总览
 ├── CHANGELOG.md       ← 统一版本变更历史
 │
 ├── architecture/      ← 系统架构教学与原理解析（留空待填）
@@ -61,6 +64,7 @@ docs/
 ├── standards/         ← 规范契约（双包锁步发布流程等）
 ├── runbooks/          ← 生产运维与故障恢复手册
 ├── releases/          ← 历史细分版本发布说明归档
+├── lessons/           ← AI 领域踩坑经验库
 ├── projects/          ← 特性与重构专项（RFC / Plan / Tasks / Verification）
 │
 ├── demo/              ← 演示页面资源

@@ -10,6 +10,7 @@
 - **当前双包锁步版本**：`0.13.0.post37` (`libs/langhost` 与 `libs/langgraph-runtime-pg`)
 - **最后更新时间**：2026-09-30
 - **最新里程碑**：
+  - **2026-09-30** | AI Harness 六层工业级体系全面落成：对标全网最高标准，完成约束层（AGENTS.md 双包路由与反模式禁令）、流程层（.codex/skills/ 实装 Task Completion Card、两阶段验证与四态判定）、记忆层（docs/CONTEXT.md 会话快照、docs/FEATURES.md 语义记忆总览、docs/standards/ 契约健康表与置信度元数据）、可观测层（四处状态一致性核对）以及反馈层（docs/lessons/ 蒸馏经验库）。打通 .agents/skills 软链接双通道统一寻路。
   - **2026-09-30** | 文档体系全面重构：对标企业级 AI Agent 标准规范，完成人机分流导航设计。建立 `docs/README.md`、`docs/CONTEXT.md`、`docs/CHANGELOG.md`；收拢 20+ 碎片发布日志至 `releases/`；归整 `compatibility/`、`runbooks/` 与 `standards/`；预留 `architecture/` 系统架构专区。
   - **2026-09-28** | 子智能体工具历史持久化（`0.13.0.post37`）：支持定向 `checkpoint_ns` 路由与 `POST /state/checkpoint` 端点，彻底解决嵌套子智能体运行轨迹丢失问题。
   - **2026-09-27** | SSE 事件流保活心跳与连接容错优化（`0.13.0.post32`）：优化长连接断流重连与审批状态机自愈。

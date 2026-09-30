@@ -1,3 +1,10 @@
+---
+status: active
+last_verified: 2026-09-30
+confidence: high
+source_project: docs/projects/20260925-agent-harness-refresh/
+---
+
 # GraphHarbor 正式发布流程
 
 ## 当前版本发布结论
