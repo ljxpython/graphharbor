@@ -4,6 +4,12 @@
 
 ---
 
+## [坑] 节点写 Checkpoint 误触发 CheckpointConflict
+- **场景：** 官方 Worker 或无 `checkpoint_writer` 上下文执行 Run 跑图保存中间 Step Checkpoint
+- **错误：** 仅凭 `not writer` 即断定为外部修改并发冲突，误拦截正在运行的 Run 自身保存状态
+- **正确：** 从 `config`（`configurable`/`metadata`）提取 `run_id`，放行活跃 Run 本身的 Checkpoint 写入
+- **日期：** 2026-09-30
+
 ## [坑] 子智能体工具历史被平铺导致多图状态丢失
 - **场景：** 嵌套智能体（Multi-agent hierarchical teams）内部工具调用与快照回放
 - **错误：** 未向 `/state/checkpoint` 传递 `checkpoint_ns`，导致子图工具轨迹全部被根图吞并或丢弃
