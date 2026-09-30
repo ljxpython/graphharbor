@@ -10,6 +10,7 @@
 - **当前双包锁步版本**：`0.13.0.post37` (`libs/langhost` 与 `libs/langgraph-runtime-pg`)
 - **最后更新时间**：2026-09-30
 - **最新里程碑**：
+  - **2026-09-30** | 工业级架构深潜文档体系全量落成（`docs/architecture/`）：以老王暴躁技术流方法论为主导，圆满交付全局架构深潜中心与概念总字典（`docs/architecture/README.md`），覆盖 6 大核心主干模块（01-06）与 11 篇深度概念专篇，系统性攻克 Monorepo 双包锁步、官方协议黑盒适配、PostgreSQL 代际防裂脑、Redis 分布式租约收割、Graph 确定性状态机与离线 Mock 测试隔离体系。
   - **2026-09-30** | 全链路 CI 硬伤彻底根治（Run #36666991389 全绿）：彻底攻克生产契约重播 values 丢失（移除 input.respond 暴力重置 stream_resumable）、E2E 节点保存误杀 CheckpointConflict（精确放行活跃 Run 自身 Checkpoint 写入）以及全仓 Lint/mypy 规范，7 项矩阵任务 100% 绿灯通过。
   - **2026-09-30** | AI Harness 六层工业级体系全面落成：对标全网最高标准，完成约束层（AGENTS.md 双包路由与反模式禁令）、流程层（.codex/skills/ 实装 Task Completion Card、两阶段验证与四态判定）、记忆层（docs/CONTEXT.md 会话快照、docs/FEATURES.md 语义记忆总览、docs/standards/ 契约健康表与置信度元数据）、可观测层（四处状态一致性核对）以及反馈层（docs/lessons/ 蒸馏经验库）。打通 .agents/skills 软链接双通道统一寻路。
   - **2026-09-30** | 文档体系全面重构：对标企业级 AI Agent 标准规范，完成人机分流导航设计。建立 `docs/README.md`、`docs/CONTEXT.md`、`docs/CHANGELOG.md`；收拢 20+ 碎片发布日志至 `releases/`；归整 `compatibility/`、`runbooks/` 与 `standards/`；预留 `architecture/` 系统架构专区。
