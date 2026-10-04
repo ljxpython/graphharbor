@@ -4,9 +4,9 @@
 
 1. 检查 PyPI 目标版本未占用，提升双包到 `0.13.0.post38`，刷新锁文件和版本检查脚本。
 2. 运行锁步、Lint、测试和四个构建产物的导入检查；数据库测试只连接专用隔离库。
-3. 将改动提交到 `main`，推送匹配 tag；Release 工作流先发布 runtime，再发布 CLI。
+3. 将改动提交到 `main`，推送匹配 tag；发布时先上传 runtime，再上传 CLI。
 4. 核验 PyPI 双包元数据及 CLI 可安装运行，记录最终证据。
 
-首次 tag 工作流在 runtime OIDC 兑换处被 PyPI 拒绝：Environment `pypi-graphharbor-runtime` 与此前成功发布时的 `graphharbor-runtime` 不符。恢复后使用 `workflow_dispatch` 的 `pypi` 选项从同版 `main` 重跑；该入口不自动创建 GitHub Release，成功后用同一 tag 和构建产物补建 Release。
+首次 tag 工作流在 runtime OIDC 兑换处被 PyPI 拒绝：Environment `pypi-graphharbor-runtime` 与此前成功发布时的 `graphharbor-runtime` 不符。恢复工作流配置后，用户指定从 `~/.my_best/.env` 读取发布令牌直接上传；已取消手动触发的候选工作流，避免重复上传，并用同一 tag 和构建产物创建 GitHub Release。
 
 回滚预案：PyPI 版本不可删除或覆盖；发布中断时先查已上传包状态，再以新的 post 版本修复并锁步重发。已有带 drain 续跑标记的 Run 不应由旧 Worker 接管。

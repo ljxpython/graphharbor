@@ -110,6 +110,12 @@ GraphHarbor 是通用 LangGraph Agent Server。核心包、CLI、API、事件协
 
 ---
 
+## 📦 PyPI 直接发布
+
+用户明确要求正式发布时，完成双包锁步、测试和构建门禁后，优先从本机 `~/.my_best/.env` 读取 `UV_PUBLISH_TOKEN`，依次直接上传 `graphharbor-runtime`、`graphharbor` 的 wheel 与 sdist；无需等待 GitHub Actions 的 Trusted Publishing。令牌只注入上传进程环境，不回显、不写入仓库或日志。上传后必须从 PyPI 独立安装并核验双包版本及 CLI；GitHub Release 可附同一批构建产物。
+
+---
+
 ## ⛔ 普适性严禁行为清单 (已踩坑)
 
 > 遵守以下硬性禁令（不合法状态），违者视为严重事故：

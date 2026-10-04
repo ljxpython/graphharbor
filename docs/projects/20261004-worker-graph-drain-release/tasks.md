@@ -17,8 +17,9 @@
 - **合规检查：** `[x]` 构建与格式通过；`[x]` 阶段验证已记录；`[x]` 仅使用隔离数据库
 
 ### Task 1.3: 正式发布与索引核验
-- **改动内容：** 经 tag 触发 Release，验证 PyPI 双包及 CLI。
-- **代码位置：** `.github/workflows/release.yml`（复用，不修改）
+- **改动内容：** 修复 runtime 的 OIDC Environment；按用户指定从本地凭据直发双包，验证 PyPI 双包及 CLI。
+- **代码位置：** `.github/workflows/release.yml`、`AGENTS.md`、`docs/standards/release-process.md`
 - **预期结果：** PyPI 可安装同版双包，GitHub Release 成功。
-- **验证项：** GitHub Actions、PyPI JSON/simple index、独立 CLI 安装
-- **状态：** `[ ]` 待开始
+- **验证项：** PyPI JSON 列出双包各 wheel/sdist；CLI 精确依赖同版 runtime；独立安装返回双包 `0.13.0.post38`，`graphharbor --version` 返回 `0.13.0.post38`；GitHub Release 附四个产物
+- **状态：** `[x]` 已完成 2026-10-04
+- **合规检查：** `[x]` 令牌仅注入上传进程；`[x]` 阶段验证已记录；`[x]` CONTEXT/发布规范已同步
