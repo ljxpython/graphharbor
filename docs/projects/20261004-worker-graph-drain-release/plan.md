@@ -7,4 +7,6 @@
 3. 将改动提交到 `main`，推送匹配 tag；Release 工作流先发布 runtime，再发布 CLI。
 4. 核验 PyPI 双包元数据及 CLI 可安装运行，记录最终证据。
 
+首次 tag 工作流在 runtime OIDC 兑换处被 PyPI 拒绝：Environment `pypi-graphharbor-runtime` 与此前成功发布时的 `graphharbor-runtime` 不符。恢复后使用 `workflow_dispatch` 的 `pypi` 选项从同版 `main` 重跑；该入口不自动创建 GitHub Release，成功后用同一 tag 和构建产物补建 Release。
+
 回滚预案：PyPI 版本不可删除或覆盖；发布中断时先查已上传包状态，再以新的 post 版本修复并锁步重发。已有带 drain 续跑标记的 Run 不应由旧 Worker 接管。

@@ -124,7 +124,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi' && 'testpypi-graphharbor-runtime' || 'pypi-graphharbor-runtime' }}
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi' && 'testpypi-graphharbor-runtime' || 'graphharbor-runtime' }}
     permissions:
       id-token: write # PyPI Trusted Publishing (OIDC)
 

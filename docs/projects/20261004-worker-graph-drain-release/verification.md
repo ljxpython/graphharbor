@@ -15,7 +15,7 @@
 
 - 隔离数据库 `graphharbor_event_retention_verify_drain_20261004`：runtime 全套 `162 passed, 18 skipped`（114.49s）。
 - 隔离数据库 `graphharbor_drain_20261004_test`：网关全套 `63 passed, 3 skipped`（3.89s）。
-- Release 工作流、PyPI 索引与已发布包安装：待执行。
+- tag 触发的 Release run `37173582271`：完整 CI 七项与 Build 全部通过；runtime 发布因 PyPI `invalid-publisher`（Environment 名称不匹配）失败，CLI 发布跳过；PyPI 双包仍为 `post37`。修复工作流后待重试。
 
 ## 最终结论
 
