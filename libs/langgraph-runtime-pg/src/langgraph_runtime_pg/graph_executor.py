@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, cast
 
 from langchain_core.runnables import RunnableConfig
-from langgraph.runtime import Runtime, ServerInfo
+from langgraph.runtime import RunControl, Runtime, ServerInfo
 from langgraph.stream import (
     CheckpointsTransformer,
     CustomTransformer,
@@ -96,6 +96,7 @@ async def invoke_graph(
     config: RunnableConfig,
     on_event: EventCallback | None = None,
     durability: Durability | None = None,
+    control: RunControl | None = None,
     interrupt_before: str | tuple[str, ...] | None = None,
     interrupt_after: str | tuple[str, ...] | None = None,
 ) -> Any:
@@ -107,6 +108,7 @@ async def invoke_graph(
             config=config,
             context=config.get("context"),
             durability=durability,
+            control=control,
             interrupt_before=interrupt_before,
             interrupt_after=interrupt_after,
             version="v2",
@@ -117,6 +119,7 @@ async def invoke_graph(
         config=config,
         context=config.get("context"),
         durability=durability,
+        control=control,
         interrupt_before=interrupt_before,
         interrupt_after=interrupt_after,
         version="v3",

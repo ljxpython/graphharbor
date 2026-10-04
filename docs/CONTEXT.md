@@ -7,8 +7,8 @@
 
 ## 📌 当前版本与里程碑
 
-- **当前双包锁步版本**：`0.13.0.post37` (`libs/langhost` 与 `libs/langgraph-runtime-pg`)
-- **最后更新时间**：2026-09-30
+- **当前双包锁步版本**：`0.13.0.post38` (`libs/langhost` 与 `libs/langgraph-runtime-pg`，发布验证中)
+- **最后更新时间**：2026-10-04
 - **最新里程碑**：
   - **2026-09-30** | 工业级架构深潜文档体系全量落成（`docs/architecture/`）：以老王暴躁技术流方法论为主导，圆满交付全局架构深潜中心与概念总字典（`docs/architecture/README.md`），覆盖 6 大核心主干模块（01-06）与 11 篇深度概念专篇，系统性攻克 Monorepo 双包锁步、官方协议黑盒适配、PostgreSQL 代际防裂脑、Redis 分布式租约收割、Graph 确定性状态机与离线 Mock 测试隔离体系。
   - **2026-09-30** | 全链路 CI 硬伤彻底根治（Run #36666991389 全绿）：彻底攻克生产契约重播 values 丢失（移除 input.respond 暴力重置 stream_resumable）、E2E 节点保存误杀 CheckpointConflict（精确放行活跃 Run 自身 Checkpoint 写入）以及全仓 Lint/mypy 规范，7 项矩阵任务 100% 绿灯通过。
@@ -23,13 +23,15 @@
 
 | 组件/包 | 当前版本 | 源码位置 | 关键约束与职责 |
 |---|---|---|---|
-| **`graphharbor`** (CLI) | `0.13.0.post37` | `libs/langhost/` | 承载 CLI (`graphharbor serve`) 与 ASGI HTTP/SSE 网关边界，负责 Core Protocol 兼容与路由调度 |
-| **`graphharbor-runtime`** | `0.13.0.post37` | `libs/langgraph-runtime-pg/` | PostgreSQL 状态机（Checkpoints/Lease/Reaper）与 Redis 分布式 Worker 核心引擎 |
+| **`graphharbor`** (CLI) | `0.13.0.post38`（发布验证中） | `libs/langhost/` | 承载 CLI (`graphharbor serve`) 与 ASGI HTTP/SSE 网关边界，负责 Core Protocol 兼容与路由调度 |
+| **`graphharbor-runtime`** | `0.13.0.post38`（发布验证中） | `libs/langgraph-runtime-pg/` | PostgreSQL 状态机（Checkpoints/Lease/Reaper）与 Redis 分布式 Worker 核心引擎 |
 
 ---
 
 ## 🚀 活跃与近期核心专项
 
+- [Worker 图级优雅停机发版](projects/20261004-worker-graph-drain-release/README.md)：`partial`；`0.13.0.post38` 双包发布验证中。
+- [Worker 图级优雅停机](projects/20261004-worker-graph-drain/README.md)：`done`；RunControl drain、同 Run checkpoint 续跑及隔离 PostgreSQL/Redis 链路验收通过。
 - [子智能体 Checkpoint Namespace 历史持久化](projects/20260928-subagent-checkpoint-namespace-history/README.md)：`done`；双包 post37 升级并放通 `checkpoint_ns`，子智能体工具调用历史 100% 可查。
 - [SSE 事件流保活心跳与连接容错](projects/20260927-sse-stream-heartbeat-and-resilience/README.md)：`done`；网关保活心跳注入与前端容错对齐。
 - [Runtime 业务边界解耦与脱敏](projects/20260925-runtime-business-boundary-decoupling/README.md)：`partial`；通用 Agent Server 边界治理，消除存量业务字段。

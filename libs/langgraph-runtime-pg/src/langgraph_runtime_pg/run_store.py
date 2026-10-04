@@ -100,7 +100,11 @@ class RunRepository:
             thread_id=thread_id,
             status=RunStatus.PENDING.value,
             metadata_=dict(metadata or {}),
-            kwargs=dict(kwargs),
+            kwargs={
+                key: value
+                for key, value in kwargs.items()
+                if key != "__graphharbor_resume_after_drain"
+            },
             idempotency_key=idempotency_key,
             multitask_strategy=multitask_strategy,
             max_attempts=self.max_attempts,
@@ -395,7 +399,9 @@ class RunRepository:
         await session.flush()
         return run
 
-    async def requeue_for_shutdown(self, session: Any, run_id: UUID, owner: str) -> RunRow:
+    async def requeue_for_shutdown(
+        self, session: Any, run_id: UUID, owner: str, *, drained: bool = False
+    ) -> RunRow:
         """Release a claimed run for graceful worker shutdown."""
         self.last_transition_events = []
         now = datetime.now(UTC)
@@ -417,6 +423,8 @@ class RunRepository:
         )
         run.status = change.status.value
         run.reason = change.reason.value
+        if drained:
+            run.kwargs = {**run.kwargs, "__graphharbor_resume_after_drain": True}
         run.next_attempt_at = now + timedelta(seconds=self.retry_delay(run.retry_count))
         run.lease_owner = None
         run.lease_expires_at = None

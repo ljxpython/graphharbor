@@ -406,6 +406,7 @@ async def test_four_worker_slots_execute_distinct_threads_together(pg_runtime, m
 async def test_multi_slot_shutdown_requeues_all_inflight_runs(pg_runtime, monkeypatch) -> None:
     from types import SimpleNamespace
 
+    from langgraph.errors import GraphDrained
     from sqlalchemy import select
 
     from langgraph_runtime_pg.database import connect
@@ -439,12 +440,14 @@ async def test_multi_slot_shutdown_requeues_all_inflight_runs(pg_runtime, monkey
     started = asyncio.Event()
     count = 0
 
-    async def fake_invoke(*_args, **_kwargs):
+    async def fake_invoke(*_args, control, **_kwargs):
         nonlocal count
         count += 1
         if count == 4:
             started.set()
-        await asyncio.sleep(30)
+        await asyncio.sleep(0.2)
+        assert control.drain_requested
+        raise GraphDrained("shutdown")
 
     monkeypatch.setattr("langgraph_runtime_pg.production_worker.invoke_graph", fake_invoke)
     monkeypatch.setenv("LG_BG_JOB_HEARTBEAT", "2")
@@ -461,7 +464,179 @@ async def test_multi_slot_shutdown_requeues_all_inflight_runs(pg_runtime, monkey
     async with connect() as conn:
         rows = (await conn.session.scalars(select(RunRow))).all()
     assert len(rows) == 4
-    assert all(row.status == "pending" and row.lease_owner is None for row in rows)
+    assert all(
+        row.status == "pending"
+        and row.lease_owner is None
+        and row.kwargs["__graphharbor_resume_after_drain"] is True
+        for row in rows
+    )
+
+
+@pytest.mark.asyncio
+async def test_worker_drain_resumes_same_run_from_postgres_checkpoint(pg_runtime) -> None:
+    from types import SimpleNamespace
+    from typing import TypedDict
+
+    from langgraph.graph import END, START, StateGraph
+    from sqlalchemy import select
+
+    from langgraph_runtime_pg.checkpoint import get_checkpointer
+    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.models import AssistantRow, RunRow, RuntimeEventRow, ThreadRow
+    from langgraph_runtime_pg.production_worker import ProductionWorker
+    from langgraph_runtime_pg.run_store import RunRepository
+
+    class State(TypedDict):
+        value: int
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls: list[str] = []
+
+    async def first(state: State) -> dict[str, int]:
+        calls.append("first")
+        started.set()
+        await release.wait()
+        return {"value": state["value"] + 1}
+
+    async def second(state: State) -> dict[str, int]:
+        calls.append("second")
+        return {"value": state["value"] + 1}
+
+    builder = StateGraph(State)
+    builder.add_node("first", first)
+    builder.add_node("second", second)
+    builder.add_edge(START, "first")
+    builder.add_edge("first", "second")
+    builder.add_edge("second", END)
+    graph = builder.compile(checkpointer=get_checkpointer())
+
+    @asynccontextmanager
+    async def open_graph(_graph_id, _config):
+        yield graph
+
+    assistant_id, thread_id = uuid4(), uuid4()
+    async with connect() as conn:
+        conn.session.add(
+            AssistantRow(
+                assistant_id=assistant_id,
+                graph_id="drain-graph",
+                name="drain-test",
+                config={},
+                context={},
+                metadata_={},
+            )
+        )
+        conn.session.add(ThreadRow(thread_id=thread_id))
+        run = await RunRepository().create(
+            conn.session,
+            assistant_id=assistant_id,
+            thread_id=thread_id,
+            kwargs={"input": {"value": 0}, "__graphharbor_resume_after_drain": True},
+            metadata={},
+        )
+        run_id = run.run_id
+        assert "__graphharbor_resume_after_drain" not in run.kwargs
+
+    registry = SimpleNamespace(open=open_graph)
+    worker = ProductionWorker(registry, owner="drain-first")
+    active = asyncio.create_task(worker.run_once())
+    await asyncio.wait_for(started.wait(), 5)
+    worker.stop_event.set()
+    release.set()
+    assert await asyncio.wait_for(active, 5)
+
+    async with connect() as conn:
+        run = await conn.session.get(RunRow, run_id)
+        assert run.status == "pending"
+        assert run.kwargs["__graphharbor_resume_after_drain"] is True
+        retry_after = max((run.next_attempt_at - datetime.now(UTC)).total_seconds(), 0)
+
+    await asyncio.sleep(retry_after + 0.05)
+    assert await ProductionWorker(registry, owner="drain-second").run_once()
+    async with connect() as conn:
+        run = await conn.session.get(RunRow, run_id)
+        events = (
+            await conn.session.scalars(
+                select(RuntimeEventRow)
+                .where(RuntimeEventRow.run_id == run_id, RuntimeEventRow.topic == "lifecycle")
+                .order_by(RuntimeEventRow.sequence)
+            )
+        ).all()
+    assert run.status == "success"
+    assert calls == ["first", "second"]
+    assert [(event.payload["status"], event.payload.get("reason")) for event in events] == [
+        ("running", None),
+        ("pending", "shutdown_requeue"),
+        ("running", None),
+        ("success", "completed"),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("cancel_first", "threadless"), [(True, False), (False, False), (False, True)]
+)
+async def test_worker_shutdown_cancellation_and_grace_fallback(
+    pg_runtime, monkeypatch, cancel_first: bool, threadless: bool
+) -> None:
+    from types import SimpleNamespace
+
+    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.models import AssistantRow, RunRow, ThreadRow
+    from langgraph_runtime_pg.production_worker import ProductionWorker
+    from langgraph_runtime_pg.run_store import RunRepository
+
+    assistant_id, thread_id = uuid4(), None if threadless else uuid4()
+    async with connect() as conn:
+        conn.session.add(
+            AssistantRow(
+                assistant_id=assistant_id,
+                graph_id="shutdown-race",
+                name="shutdown-race",
+                config={},
+                context={},
+                metadata_={},
+            )
+        )
+        if thread_id is not None:
+            conn.session.add(ThreadRow(thread_id=thread_id))
+        run = await RunRepository().create(
+            conn.session,
+            assistant_id=assistant_id,
+            thread_id=thread_id,
+            kwargs={"input": {}},
+            metadata={},
+        )
+        run_id = run.run_id
+
+    started = asyncio.Event()
+    cancel_signal: asyncio.Future[asyncio.Event] = asyncio.get_running_loop().create_future()
+
+    async def fake_invoke(*_args, **_kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    async def fake_heartbeat(_run_id, _thread_id, cancel_event):
+        cancel_signal.set_result(cancel_event)
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("langgraph_runtime_pg.production_worker.invoke_graph", fake_invoke)
+    worker = ProductionWorker(SimpleNamespace(open=_open_fake_graph), owner="shutdown-race")
+    monkeypatch.setattr(worker, "_heartbeat", fake_heartbeat)
+    worker.drain_grace_seconds = 0.05
+    active = asyncio.create_task(worker.run_once())
+    await asyncio.wait_for(started.wait(), 5)
+    if cancel_first:
+        (await cancel_signal).set()
+    worker.stop_event.set()
+    assert await asyncio.wait_for(active, 5)
+
+    async with connect() as conn:
+        run = await conn.session.get(RunRow, run_id)
+    assert run.status == ("interrupted" if cancel_first else "pending")
+    assert run.reason == ("cancel_requested" if cancel_first else "shutdown_requeue")
+    assert "__graphharbor_resume_after_drain" not in run.kwargs
 
 
 @pytest.mark.asyncio

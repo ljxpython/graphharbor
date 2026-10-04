@@ -215,29 +215,40 @@ async def test_executor_uses_public_v2_invoke() -> None:
 
 @pytest.mark.asyncio
 async def test_executor_passes_public_durability_to_invoke_and_stream() -> None:
+    from langgraph.runtime import RunControl
     from langgraph.types import GraphOutput
 
     from langgraph_runtime_pg.graph_executor import invoke_graph, thread_config
 
     class RecordingGraph:
-        calls: list[tuple[str | None, object, object]] = []
+        calls: list[tuple[str | None, object, object, object]] = []
 
         async def ainvoke(
-            self, _input, *, config, context, durability, interrupt_before, interrupt_after, version
+            self,
+            _input,
+            *,
+            config,
+            context,
+            durability,
+            control,
+            interrupt_before,
+            interrupt_after,
+            version,
         ):
             del config, context, version
-            self.calls.append((durability, interrupt_before, interrupt_after))
+            self.calls.append((durability, control, interrupt_before, interrupt_after))
             return GraphOutput(value={"value": 1}, interrupts=())
 
         async def astream_events(
             self, _input, *, config, durability, interrupt_before, interrupt_after, **kwargs
         ):
-            self.calls.append((durability, interrupt_before, interrupt_after))
+            self.calls.append((durability, kwargs["control"], interrupt_before, interrupt_after))
             assert kwargs["version"] == "v3"
             return await _graph().astream_events({"value": 0}, config, **kwargs)
 
     graph = RecordingGraph()
     config = thread_config("durability-thread")
+    control = RunControl()
 
     async def discard(_event: dict) -> None:
         return None
@@ -247,6 +258,7 @@ async def test_executor_passes_public_durability_to_invoke_and_stream() -> None:
         {},
         config=config,
         durability="sync",
+        control=control,
         interrupt_before=("model",),
     )
     await invoke_graph(
@@ -254,10 +266,55 @@ async def test_executor_passes_public_durability_to_invoke_and_stream() -> None:
         {},
         config=config,
         durability="exit",
+        control=control,
         interrupt_after="*",
         on_event=discard,
     )
-    assert graph.calls == [("sync", ("model",), None), ("exit", None, "*")]
+    assert graph.calls == [
+        ("sync", control, ("model",), None),
+        ("exit", control, None, "*"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_executor_drains_at_superstep_and_resumes_from_checkpoint() -> None:
+    from langgraph.checkpoint.memory import MemorySaver
+    from langgraph.errors import GraphDrained
+    from langgraph.runtime import RunControl
+
+    from langgraph_runtime_pg.graph_executor import invoke_graph, thread_config
+
+    control = RunControl()
+    calls: list[str] = []
+
+    async def first(state: _State) -> dict[str, int]:
+        calls.append("first")
+        control.request_drain("test")
+        return {"value": state["value"] + 1}
+
+    async def second(state: _State) -> dict[str, int]:
+        calls.append("second")
+        return {"value": state["value"] + 1}
+
+    builder = StateGraph(_State)
+    builder.add_node("first", first)
+    builder.add_node("second", second)
+    builder.add_edge(START, "first")
+    builder.add_edge("first", "second")
+    builder.add_edge("second", END)
+    graph = builder.compile(checkpointer=MemorySaver())
+    config = thread_config("drain-test")
+
+    async def discard(_event: dict[str, Any]) -> None:
+        return None
+
+    with pytest.raises(GraphDrained):
+        await invoke_graph(graph, {"value": 0}, config=config, on_event=discard, control=control)
+    assert calls == ["first"]
+
+    output = await invoke_graph(graph, None, config=config, on_event=discard)
+    assert output.value == {"value": 2}
+    assert calls == ["first", "second"]
 
 
 @pytest.mark.asyncio

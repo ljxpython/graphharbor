@@ -29,6 +29,7 @@
 | **Checkpoint 状态存储** | PostgreSQL 事务级 Checkpoint 读写 | 🟢 Supported | `libs/langgraph-runtime-pg/src/langgraph_runtime_pg/` | 事务一致性，防幂等写入与状态回滚 |
 | **分布式行级 Lease 租约** | PostgreSQL 乐观锁/行锁租约保护 | 🟢 Supported | `libs/langgraph-runtime-pg/src/langgraph_runtime_pg/` | 节点并发抢占与租约心跳续期 |
 | **崩溃自动收割 (Reaper)** | 节点故障超时自动释放与重新排队 | 🟢 Supported | `libs/langgraph-runtime-pg/src/langgraph_runtime_pg/` | 杜绝 Worker 崩溃导致任务永久停滞 |
+| **Worker 图级优雅停机** | superstep 边界 drain 与同 Run 续跑 | 🟢 Supported | `libs/langgraph-runtime-pg/src/langgraph_runtime_pg/production_worker.py` | 隔离 PostgreSQL/Redis 契约与真实 checkpoint 续跑通过 |
 | **Redis 任务调度** | Redis List 队列与 Pub/Sub 事件总线 | 🟢 Supported | `libs/langgraph-runtime-pg/src/langgraph_runtime_pg/` | 高性能流式事件广播与跨进程排队 |
 | **Schema 数据库迁移** | Alembic 自动迁移命令 | 🟢 Supported | `libs/langgraph-runtime-pg/src/langgraph_runtime_pg/migrations/` | 执行 `graphharbor migrate upgrade` |
 | **通用业务边界隔离** | 核心模型不混入特定模型名/业务trace | 🟡 Partial | `libs/langgraph-runtime-pg/src/langgraph_runtime_pg/` | 详见 `20260925-runtime-business-boundary-decoupling` |

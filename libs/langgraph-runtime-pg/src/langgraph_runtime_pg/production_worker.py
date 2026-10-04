@@ -16,6 +16,8 @@ from typing import Any
 from uuid import UUID
 
 import structlog
+from langgraph.errors import GraphDrained
+from langgraph.runtime import RunControl
 from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
@@ -79,6 +81,17 @@ def _run_timeout_seconds() -> float | None:
         raise ValueError("GRAPHHARBOR_RUN_TIMEOUT_SECONDS must be a positive number") from exc
     if not math.isfinite(value) or value <= 0:
         raise ValueError("GRAPHHARBOR_RUN_TIMEOUT_SECONDS must be a positive number")
+    return value
+
+
+def _drain_grace_seconds() -> float:
+    raw = os.environ.get("GRAPHHARBOR_SHUTDOWN_DRAIN_SECONDS", "30")
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError("GRAPHHARBOR_SHUTDOWN_DRAIN_SECONDS must be a positive number") from exc
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("GRAPHHARBOR_SHUTDOWN_DRAIN_SECONDS must be a positive number")
     return value
 
 
@@ -191,6 +204,7 @@ class ProductionWorker:
             lease_seconds = 60
         self.repository = RunRepository(lease_seconds=lease_seconds)
         self.run_timeout_seconds = _run_timeout_seconds()
+        self.drain_grace_seconds = _drain_grace_seconds()
         self.stop_event = asyncio.Event()
 
     async def _publish_event(
@@ -324,14 +338,8 @@ class ProductionWorker:
             max(self.repository.lease_seconds / 3.0, 1.0),
         )
         while True:
-            if self.stop_event.is_set():
-                cancel_event.set()
-                return
             await asyncio.sleep(interval)
             try:
-                if self.stop_event.is_set():
-                    cancel_event.set()
-                    return
                 async with connect() as conn:
                     if not await self.repository.renew(conn.session, run_id, self.owner):
                         cancel_event.set()
@@ -384,6 +392,7 @@ class ProductionWorker:
                 else:
                     graph_id = assistant.graph_id
                     command = resume_command(run.kwargs.get("command"))
+                    drained = run.kwargs.get("__graphharbor_resume_after_drain") is True
                     durability = normalize_durability(run.kwargs.get("durability"))
                     interrupt_before = normalize_interrupt_nodes(
                         run.kwargs.get("interrupt_before"), "interrupt_before"
@@ -391,7 +400,9 @@ class ProductionWorker:
                     interrupt_after = normalize_interrupt_nodes(
                         run.kwargs.get("interrupt_after"), "interrupt_after"
                     )
-                    input_value = command or run.kwargs.get("input", run.kwargs)
+                    input_value = (
+                        None if drained else command or run.kwargs.get("input", run.kwargs)
+                    )
                     run_config = run.kwargs.get("config")
                     if not isinstance(run_config, dict):
                         run_config = {}
@@ -431,6 +442,8 @@ class ProductionWorker:
                     checkpoint_id = run.kwargs.get("checkpoint_id")
                     if isinstance(checkpoint_id, str) and checkpoint_id:
                         configurable["checkpoint_id"] = checkpoint_id
+                    if drained:
+                        configurable.pop("checkpoint_id", None)
                     merged_context: dict[str, Any] = {}
                     for context_source in (
                         assistant.context,
@@ -539,6 +552,8 @@ class ProductionWorker:
         )
         execution: asyncio.Task[Any] | None = None
         cancellation: asyncio.Task[Any] | None = None
+        shutdown: asyncio.Task[bool] | None = None
+        shutdown_requeue = False
         with contextlib.suppress(RedisError, OSError):
             await set_run_heartbeat(run_id)
         try:
@@ -558,7 +573,7 @@ class ProductionWorker:
             )
 
             async def on_event(event: dict[str, Any]) -> None:
-                if self.stop_event.is_set() or cancel_event.is_set():
+                if cancel_event.is_set():
                     raise RunCancelled
                 if _is_message_delta(event):
                     await event_buffer.add(event)
@@ -595,6 +610,7 @@ class ProductionWorker:
                             config=config,
                             on_event=on_event,
                             durability=durability,
+                            control=control,
                             interrupt_before=interrupt_before,
                             interrupt_after=interrupt_after,
                         )
@@ -604,17 +620,33 @@ class ProductionWorker:
                     finally:
                         checkpoint_writer.reset(writer_token)
 
+            control = RunControl()
             execution = asyncio.create_task(
                 execute(),
                 name=f"run-{run_id}",
             )
             cancellation = asyncio.create_task(cancel_event.wait(), name=f"cancel-{run_id}")
+            shutdown = asyncio.create_task(self.stop_event.wait(), name=f"shutdown-{run_id}")
             done, _ = await asyncio.wait(
-                {execution, cancellation},
+                {execution, cancellation, shutdown},
                 timeout=self.run_timeout_seconds,
                 return_when=asyncio.FIRST_COMPLETED,
             )
-            if not done:
+            if shutdown in done and execution not in done and cancellation not in done:
+                if thread_id is not None:
+                    control.request_drain("shutdown")
+                    done, _ = await asyncio.wait(
+                        {execution, cancellation},
+                        timeout=self.drain_grace_seconds,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                if not done or thread_id is None:
+                    shutdown_requeue = True
+                    execution.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await execution
+                    raise RunCancelled
+            elif not done:
                 execution.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await execution
@@ -705,10 +737,19 @@ class ProductionWorker:
                 completed_events = list(self.repository.last_transition_events)
             for event in completed_events:
                 await self._fanout_durable_event(event)
+        except GraphDrained:
+            async with connect() as conn:
+                await self.repository.requeue_for_shutdown(
+                    conn.session, run_id, self.owner, drained=thread_id is not None
+                )
+                drain_events = list(self.repository.last_transition_events)
+            for event in drain_events:
+                await self._fanout_durable_event(event)
+            await wake_run_queue()
         except RunCancelled:
             publish_cancel_event = False
             cancel_events: list[Any] = []
-            if self.stop_event.is_set():
+            if shutdown_requeue:
                 async with connect() as conn:
                     await self.repository.requeue_for_shutdown(conn.session, run_id, self.owner)
                     cancel_events = list(self.repository.last_transition_events)
@@ -745,7 +786,7 @@ class ProductionWorker:
             if cancel_events:
                 for event in cancel_events:
                     await self._fanout_durable_event(event)
-            elif publish_cancel_event or self.stop_event.is_set():
+            elif publish_cancel_event or shutdown_requeue:
                 with contextlib.suppress(Exception):
                     await self._publish_event(
                         run_id,
@@ -837,11 +878,11 @@ class ProductionWorker:
                     await self._fanout_durable_event(event)
             logger.exception("run execution failed", run_id=str(run_id), graph_id=graph_id or "")
         finally:
-            for task in (execution, cancellation):
+            for task in (execution, cancellation, shutdown):
                 if task is not None and not task.done():
                     task.cancel()
             await asyncio.gather(
-                *(task for task in (execution, cancellation) if task is not None),
+                *(task for task in (execution, cancellation, shutdown) if task is not None),
                 return_exceptions=True,
             )
             heartbeat.cancel()

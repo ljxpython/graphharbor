@@ -14,6 +14,9 @@
 
 ## 🚀 活跃与近期发布
 
+### [0.13.0.post38] - 2026-10-04
+- **Worker 停机**：接入 LangGraph `RunControl` 图级 drain，安全检查点后重排同一 Run 并空输入续跑。
+
 ### [0.13.0.post37] - 2026-09-28
 - **重大特性**：支持子智能体工具调用历史持久化与定向 `checkpoint_ns` 路由。
 - **兼容性放通**：对齐 LangGraph 官方 SDK 的 `POST /state/checkpoint` 端点，彻底解决嵌套子智能体运行轨迹丢失问题。
