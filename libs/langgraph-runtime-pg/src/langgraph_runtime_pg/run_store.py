@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, exists, func, or_, select, update
+from sqlalchemy import and_, case, delete, exists, func, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
@@ -33,6 +33,11 @@ class RunOwnershipError(RuntimeError):
 
 class RunConflictError(ValueError):
     """A run submission conflicts with a request or active execution."""
+
+
+def is_resume(kwargs: dict) -> bool:
+    command = kwargs.get("command")
+    return isinstance(command, dict) and "resume" in command
 
 
 class RunRepository:
@@ -84,7 +89,7 @@ class RunRepository:
                 if existing.thread_id != thread_id or existing.assistant_id != assistant_id:
                     raise RunConflictError("Idempotency key belongs to another run target")
                 return existing
-        if thread_id is not None and multitask_strategy == "reject":
+        if thread_id is not None and multitask_strategy == "reject" and not is_resume(kwargs):
             active = await session.scalar(
                 select(RunRow.run_id)
                 .where(
@@ -95,7 +100,13 @@ class RunRepository:
             )
             if active is not None:
                 raise RunConflictError("Thread already has a pending or running run")
+        position = await session.scalar(
+            select(func.coalesce(func.max(RunRow.queue_position), 0) + 1).where(
+                RunRow.thread_id == thread_id
+            )
+        )
         run = RunRow(
+            queue_position=position,
             assistant_id=assistant_id,
             thread_id=thread_id,
             status=RunStatus.PENDING.value,
@@ -134,31 +145,90 @@ class RunRepository:
         self.last_transition_events = []
         now = datetime.now(UTC)
         running = aliased(RunRow)
-        result = await session.execute(
-            select(RunRow)
-            .where(
-                RunRow.status == RunStatus.PENDING.value,
-                (RunRow.next_attempt_at.is_(None) | (RunRow.next_attempt_at <= now)),
-                or_(
-                    RunRow.thread_id.is_(None),
+        earlier = aliased(RunRow)
+        thread_scope = aliased(ThreadRow)
+        resume = func.coalesce(RunRow.kwargs["command"].has_key("resume"), False)
+        earlier_resume = func.coalesce(earlier.kwargs["command"].has_key("resume"), False)
+        rank = case((resume, 0), else_=1)
+        earlier_rank = case((earlier_resume, 0), else_=1)
+        # A queued retry remains the head even during its backoff. SKIP LOCKED
+        # must never let another worker jump over a locked head of this thread.
+        eligible = (
+            RunRow.status == RunStatus.PENDING.value,
+            (RunRow.next_attempt_at.is_(None) | (RunRow.next_attempt_at <= now)),
+            or_(
+                RunRow.thread_id.is_(None),
+                and_(
                     ~exists(
                         select(1).where(
                             running.thread_id == RunRow.thread_id,
                             or_(
-                                running.status == RunStatus.RUNNING.value,
+                                running.status == "running",
                                 running.reason == "rollback",
+                                and_(
+                                    running.lease_owner.is_not(None), running.lease_expires_at > now
+                                ),
+                            ),
+                        )
+                    ),
+                    ~exists(
+                        select(1).where(
+                            thread_scope.thread_id == RunRow.thread_id,
+                            thread_scope.interrupts != {},
+                            ~resume,
+                        )
+                    ),
+                    ~exists(
+                        select(1).where(
+                            earlier.thread_id == RunRow.thread_id,
+                            earlier.status == "pending",
+                            earlier.run_id != RunRow.run_id,
+                            tuple_(
+                                earlier_rank,
+                                func.coalesce(earlier.queue_position, 0),
+                                earlier.created_at,
+                                earlier.run_id,
+                            )
+                            < tuple_(
+                                rank,
+                                func.coalesce(RunRow.queue_position, 0),
+                                RunRow.created_at,
+                                RunRow.run_id,
                             ),
                         )
                     ),
                 ),
-            )
-            .order_by(RunRow.created_at)
+            ),
+        )
+        run = await session.scalar(
+            select(RunRow)
+            .where(*eligible)
+            .order_by(RunRow.created_at, RunRow.run_id)
             .with_for_update(skip_locked=True)
             .limit(1)
         )
-        run = result.scalar_one_or_none()
         if run is None:
             return None
+        # Existing event/lease writers lock run then thread. Never wait for a
+        # thread held by a submitter; release this claim and retry next tick.
+        if run.thread_id is not None:
+            thread = await session.scalar(
+                select(ThreadRow)
+                .where(ThreadRow.thread_id == run.thread_id)
+                .with_for_update(skip_locked=True)
+                .execution_options(populate_existing=True)
+            )
+            if thread is None:
+                return None
+            if thread.interrupts and not is_resume(run.kwargs):
+                return None
+            if (
+                await session.scalar(
+                    select(RunRow.run_id).where(RunRow.run_id == run.run_id, *eligible)
+                )
+                is None
+            ):
+                return None
         if run.retry_count >= run.max_attempts:
             run.status = RunStatus.ERROR.value
             run.reason = RunReason.INFRASTRUCTURE_ERROR.value

@@ -530,12 +530,16 @@ class StreamManager:
         control = "control" in topic
 
         if resumable:
-            entry_id = await self._redis.xadd(
+            replay = self._redis.pipeline()
+            replay.xadd(
                 _stream_key(thread_id, run_id),
                 {b"topic": message.topic, b"data": message.data},
                 maxlen=_replay_maxlen(),
                 approximate=True,
             )
+            # Sliding expiry also covers worker crashes before terminal cleanup.
+            replay.expire(_stream_key(thread_id, run_id), 3600)
+            entry_id, _ = await replay.execute()
             message.id = entry_id if isinstance(entry_id, bytes) else str(entry_id).encode()
         else:
             message.id = _generate_ms_seq_id().encode()
@@ -606,7 +610,8 @@ class StreamManager:
                 maxlen=_replay_maxlen(),
                 approximate=True,
             )
-        ids = await replay.execute()
+        replay.expire(_stream_key(thread_id, run_id), 3600)
+        ids = (await replay.execute())[:-1]
         async with self._buf_lock:
             for (run_message, thread_message), entry_id in zip(messages, ids, strict=True):
                 run_message.id = entry_id if isinstance(entry_id, bytes) else str(entry_id).encode()

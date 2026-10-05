@@ -19,7 +19,7 @@ import structlog
 from langgraph.errors import GraphDrained
 from langgraph.runtime import RunControl
 from redis.exceptions import RedisError
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import DBAPIError
 
 from langgraph_runtime_pg.auth import (
@@ -38,7 +38,7 @@ from langgraph_runtime_pg.graph_executor import (
 )
 from langgraph_runtime_pg.graph_registry import GraphRegistry
 from langgraph_runtime_pg.metrics import inc as metric_inc, set_gauge as metric_set_gauge
-from langgraph_runtime_pg.models import AssistantRow, RunRow, ThreadRow
+from langgraph_runtime_pg.models import AssistantRow, RunLeaseRow, RunRow, ThreadRow
 from langgraph_runtime_pg.production import configure_structured_logging
 from langgraph_runtime_pg.protocol import (
     TERMINAL_RUN_STATUSES,
@@ -313,6 +313,8 @@ class ProductionWorker:
             await manager.put(run_id, thread_id, run_message, resumable=True)
             if thread_message is not None:
                 await manager.put_thread(thread_id, thread_message)
+            if getattr(durable, "terminal", False):
+                await manager.clear_run_buffers(run_id, thread_id)
         except Exception:
             logger.warning(
                 "event transport unavailable",
@@ -890,6 +892,30 @@ class ProductionWorker:
                 await heartbeat
             with contextlib.suppress(RedisError, OSError):
                 await clear_run_heartbeat(run_id)
+            # Explicit cancellation retains the lease until execution has
+            # actually stopped. Only then may the next queued run start.
+            async with connect() as conn:
+                stopped = await conn.session.scalar(
+                    select(RunRow)
+                    .where(
+                        RunRow.run_id == run_id,
+                        RunRow.lease_owner == self.owner,
+                        RunRow.reason == RunReason.CANCEL_REQUESTED.value,
+                    )
+                    .with_for_update()
+                )
+                if stopped is not None:
+                    stopped.lease_owner = None
+                    stopped.lease_expires_at = None
+                    await conn.session.execute(
+                        delete(RunLeaseRow).where(RunLeaseRow.run_id == run_id)
+                    )
+                    if thread_id:
+                        stopped_thread = await conn.session.get(ThreadRow, thread_id)
+                        if stopped_thread is not None:
+                            stopped_thread.status = (
+                                "interrupted" if stopped_thread.interrupts else "idle"
+                            )
             await complete_rollbacks(owner=self.owner, run_id=run_id)
         return True
 

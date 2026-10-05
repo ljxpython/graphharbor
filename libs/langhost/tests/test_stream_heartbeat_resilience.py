@@ -38,6 +38,53 @@ class InMemoryStreamManager:
             await q.put(message)
 
 
+@pytest.mark.asyncio
+async def test_protocol_replay_reads_all_pages_and_releases_them(monkeypatch):
+    from langhost.protocol_api import PROTOCOL_REPLAY_PAGE_SIZE
+
+    thread_id = uuid4()
+    manager = InMemoryStreamManager()
+    loaded = []
+    pages = []
+    total = PROTOCOL_REPLAY_PAGE_SIZE * 2 + 1
+
+    async def load(_thread, since):
+        loaded.append(since)
+        page = [
+            {"seq": seq, "method": "custom", "params": {"data": "test"}}
+            for seq in range(since + 1, min(since + PROTOCOL_REPLAY_PAGE_SIZE, total) + 1)
+        ]
+        pages.append(page)
+        return 0, page
+
+    monkeypatch.setattr("langhost.protocol_api._load_protocol_events", load)
+    monkeypatch.setattr("langhost.protocol_api.get_stream_manager", lambda: manager)
+    monkeypatch.setattr(
+        "langhost.protocol_api._thread",
+        lambda *a: asyncio.sleep(0, result=ThreadRow(thread_id=thread_id, interrupts={})),
+    )
+    monkeypatch.setattr(
+        "langhost.streaming._resumable_run_ids", lambda ids: asyncio.sleep(0, result=ids)
+    )
+    monkeypatch.setenv("GRAPHHARBOR_PROTOCOL_HEARTBEAT_SECONDS", "0.1")
+    scope, receive = _make_scope_and_receive(
+        "POST", "/stream", {"thread_id": str(thread_id)}, {"channels": ["custom"]}
+    )
+    response = await protocol_event_stream(Request(scope, receive))
+    frames = []
+    try:
+        async for frame in response.body_iterator:
+            if frame.startswith(": heartbeat"):
+                break
+            frames.append(frame)
+        assert len(frames) == total
+        assert loaded == [0, PROTOCOL_REPLAY_PAGE_SIZE, PROTOCOL_REPLAY_PAGE_SIZE * 2]
+        assert all(not page for page in pages)
+    finally:
+        await response.body_iterator.aclose()
+    assert manager.removed_count == 1
+
+
 def _make_scope_and_receive(
     method: str,
     path: str,

@@ -281,6 +281,7 @@ def _run(row: RunRow) -> dict[str, Any]:
             "metadata": row.metadata_,
             "kwargs": kwargs,
             "multitask_strategy": row.multitask_strategy or "enqueue",
+            "queue_position": row.queue_position,
         }
     )
 
@@ -1455,17 +1456,16 @@ async def _cancel_row(request: Request, conn: Any, row: RunRow, action: str) -> 
         reason=RunReason.CANCEL_REQUESTED,
         retry_count=row.retry_count,
     )
+    was_running = row.status == "running"
     row.status = change.status.value
     row.reason = change.reason.value
-    row.lease_owner = None
-    row.lease_expires_at = None
+    if not was_running:
+        row.lease_owner = None
+        row.lease_expires_at = None
     row.heartbeat_at = datetime.now(UTC)
     row.updated_at = datetime.now(UTC)
-    await conn.session.execute(delete(RunLeaseRow).where(RunLeaseRow.run_id == row.run_id))
-    if row.thread_id is not None:
-        thread = await conn.session.get(ThreadRow, row.thread_id)
-        if thread is not None:
-            thread.status = "idle"
+    if not was_running:
+        await conn.session.execute(delete(RunLeaseRow).where(RunLeaseRow.run_id == row.run_id))
     await conn.session.flush()
     durable = await RunRepository().record_event(
         conn.session,
@@ -1541,6 +1541,85 @@ async def _fanout_durable_event(event: RuntimeEventRow) -> None:
     except Exception:
         # PostgreSQL replay remains available after Redis recovers.
         return
+
+
+async def runs_queue(request: Request) -> JSONResponse:
+    """Compare-and-swap operations on unclaimed messages, never running work."""
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            return _error("queue operation must be an object", 422)
+        operation = payload.get("operation")
+        expected = payload.get("expected_run_ids")
+        requested = payload.get("run_ids")
+        if (
+            operation not in {"cancel", "reorder"}
+            or not isinstance(expected, list)
+            or not isinstance(requested, list)
+        ):
+            return _error("invalid queue operation", 422)
+        if len(expected) > 1000 or len(requested) > 1000:
+            return _error("queue operation exceeds 1000 runs", 422)
+        expected = [UUID(value) for value in expected]
+        requested = [UUID(value) for value in requested]
+        if len(set(expected)) != len(expected) or len(set(requested)) != len(requested):
+            return _error("duplicate queue run IDs", 422)
+        if not set(requested).issubset(expected) or (
+            operation == "reorder" and set(requested) != set(expected)
+        ):
+            return _error("run IDs do not match expected queue", 422)
+    except (ValueError, TypeError, AttributeError):
+        return _error("invalid queue IDs", 422)
+    thread, _, thread_id = await _get_thread(request, action="update")
+    if thread is None:
+        return _error("thread not found", 404)
+    async with connect() as conn:
+        thread = await conn.session.scalar(
+            select(ThreadRow).where(ThreadRow.thread_id == thread_id).with_for_update()
+        )
+        if thread is None:
+            return _error("thread not found", 404)
+        # Never wait on a Run held by an event writer that needs this Thread.
+        rows = list(
+            (
+                await conn.session.scalars(
+                    select(RunRow)
+                    .where(
+                        RunRow.thread_id == thread_id,
+                        RunRow.status == "pending",
+                        ~func.coalesce(RunRow.kwargs["command"].has_key("resume"), False),
+                    )
+                    .order_by(RunRow.queue_position, RunRow.created_at, RunRow.run_id)
+                    .with_for_update(skip_locked=True)
+                )
+            ).all()
+        )
+        count = await conn.session.scalar(
+            select(func.count())
+            .select_from(RunRow)
+            .where(
+                RunRow.thread_id == thread_id,
+                RunRow.status == "pending",
+                ~func.coalesce(RunRow.kwargs["command"].has_key("resume"), False),
+            )
+        )
+        if count != len(rows) or [row.run_id for row in rows] != expected:
+            return _error("queue changed; refresh and retry", 409)
+        by_id = {row.run_id: row for row in rows}
+        if operation == "reorder":
+            positions = sorted(row.queue_position or index + 1 for index, row in enumerate(rows))
+            for run_id, position in zip(requested, positions, strict=True):
+                by_id[run_id].queue_position = position
+        else:
+            for run_id in requested:
+                await _cancel_row(request, conn, by_id[run_id], "interrupt")
+        await conn.session.flush()
+        response = [
+            _run(row)
+            for row in sorted(rows, key=lambda row: row.queue_position or 0)
+            if row.status == "pending"
+        ]
+    return JSONResponse(response)
 
 
 async def runs_cancel(request: Request) -> JSONResponse:

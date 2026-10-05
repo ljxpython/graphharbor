@@ -65,3 +65,5 @@
 | **langgraph-sdk (JS/TS)** | 官方 TypeScript / JavaScript SDK | 🟢 Supported | 遵循标准 Core REST/SSE 契约 |
 | **Agent Chat UI** | 官方开源聊天前端面板 | 🟢 Supported | 默认提供连接参数即开即用 |
 | **LangSmith 闭源企业功能** | 多租户云控、专有企业部署编排器 | 🔴 Unsupported | 显式排除，不伪造成功结果（见 `compatibility/exclusions.json`） |
+
+流资源边界：post39 已发布；Redis 写入滑动 TTL 3600 秒、终态本地缓冲回收、Protocol 历史每页 32 条。见 [专项](projects/20261005-stream-resource-bounds/README.md)。

@@ -132,7 +132,8 @@ class GraphRegistry:
         graphs = config.get("graphs") or {}
         if not isinstance(graphs, dict):
             raise ValueError("langgraph.json 'graphs' must be an object")
-        return cls(graphs, base_dir=base_dir)
+        registry = cls(graphs, base_dir=base_dir)
+        return registry
 
     @classmethod
     def from_path(cls, path: pathlib.Path) -> GraphRegistry:

@@ -7,8 +7,8 @@
 
 ## 📌 当前版本与里程碑
 
-- **当前双包锁步版本**：`0.13.0.post38` (`libs/langhost` 与 `libs/langgraph-runtime-pg`，PyPI 已发布)
-- **最后更新时间**：2026-10-04
+- **当前双包锁步版本**：`0.13.0.post39` (`libs/langhost` 与 `libs/langgraph-runtime-pg`，PyPI 已发布)
+- **最后更新时间**：2026-10-05
 - **最新里程碑**：
   - **2026-09-30** | 工业级架构深潜文档体系全量落成（`docs/architecture/`）：以老王暴躁技术流方法论为主导，圆满交付全局架构深潜中心与概念总字典（`docs/architecture/README.md`），覆盖 6 大核心主干模块（01-06）与 11 篇深度概念专篇，系统性攻克 Monorepo 双包锁步、官方协议黑盒适配、PostgreSQL 代际防裂脑、Redis 分布式租约收割、Graph 确定性状态机与离线 Mock 测试隔离体系。
   - **2026-09-30** | 全链路 CI 硬伤彻底根治（Run #36666991389 全绿）：彻底攻克生产契约重播 values 丢失（移除 input.respond 暴力重置 stream_resumable）、E2E 节点保存误杀 CheckpointConflict（精确放行活跃 Run 自身 Checkpoint 写入）以及全仓 Lint/mypy 规范，7 项矩阵任务 100% 绿灯通过。
@@ -23,12 +23,14 @@
 
 | 组件/包 | 当前版本 | 源码位置 | 关键约束与职责 |
 |---|---|---|---|
-| **`graphharbor`** (CLI) | `0.13.0.post38`（PyPI 已发布） | `libs/langhost/` | 承载 CLI (`graphharbor serve`) 与 ASGI HTTP/SSE 网关边界，负责 Core Protocol 兼容与路由调度 |
-| **`graphharbor-runtime`** | `0.13.0.post38`（PyPI 已发布） | `libs/langgraph-runtime-pg/` | PostgreSQL 状态机（Checkpoints/Lease/Reaper）与 Redis 分布式 Worker 核心引擎 |
+| **`graphharbor`** (CLI) | `0.13.0.post39`（PyPI 已发布） | `libs/langhost/` | 承载 CLI (`graphharbor serve`) 与 ASGI HTTP/SSE 网关边界，负责 Core Protocol 兼容与路由调度 |
+| **`graphharbor-runtime`** | `0.13.0.post39`（PyPI 已发布） | `libs/langgraph-runtime-pg/` | PostgreSQL 状态机（Checkpoints/Lease/Reaper）与 Redis 分布式 Worker 核心引擎 |
 
 ---
 
 ## 🚀 活跃与近期核心专项
+
+- [流缓存与回放资源治理](projects/20261005-stream-resource-bounds/README.md)：双包 post39 已发布，PyPI 独立安装/CLI 验证通过；平台现役 Runtime 已升级重启，多会话浏览器验收通过，done。
 
 - [Worker 图级优雅停机发版](projects/20261004-worker-graph-drain-release/README.md)：`done`；`0.13.0.post38` 双包已在 PyPI 发布并独立安装验证。
 - [Worker 图级优雅停机](projects/20261004-worker-graph-drain/README.md)：`done`；RunControl drain、同 Run checkpoint 续跑及隔离 PostgreSQL/Redis 链路验收通过。

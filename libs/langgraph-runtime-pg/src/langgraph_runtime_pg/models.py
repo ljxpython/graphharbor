@@ -174,6 +174,7 @@ class RunRow(Base):
         "metadata", JSONB, nullable=False, server_default=_JSONB_EMPTY
     )
     kwargs: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=_JSONB_EMPTY)
+    queue_position: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     multitask_strategy: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=_NOW

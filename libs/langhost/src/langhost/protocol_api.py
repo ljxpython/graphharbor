@@ -242,6 +242,9 @@ def _wire_from_row(row: RuntimeEventRow) -> dict[str, Any]:
     )
 
 
+PROTOCOL_REPLAY_PAGE_SIZE = 32
+
+
 async def _load_protocol_events(thread_id: UUID, since: int) -> tuple[int, list[dict[str, Any]]]:
     async with connect() as conn:
         thread = await conn.session.scalar(
@@ -253,6 +256,7 @@ async def _load_protocol_events(thread_id: UUID, since: int) -> tuple[int, list[
             select(RuntimeEventRow)
             .where(RuntimeEventRow.thread_id == thread_id, RuntimeEventRow.sequence > since)
             .order_by(RuntimeEventRow.sequence)
+            .limit(PROTOCOL_REPLAY_PAGE_SIZE)
         )
         rows = (await conn.session.execute(query)).scalars().all()
     return thread.event_pruned_through, [_wire_from_row(row) for row in rows]
@@ -284,6 +288,11 @@ def _safe_uuid(value: Any) -> UUID | None:
         return UUID(str(value))
     except (ValueError, TypeError):
         return None
+
+
+def _wire_run_id(wire: dict[str, Any]) -> UUID | None:
+    params = wire.get("params")
+    return _safe_uuid(params.get("run_id")) if isinstance(params, dict) else None
 
 
 async def protocol_event_stream(request: Request) -> JSONResponse | StreamingResponse:
@@ -325,15 +334,6 @@ async def protocol_event_stream(request: Request) -> JSONResponse | StreamingRes
                 },
                 status_code=410,
             )
-        parsed_run_ids: set[UUID] = set()
-        for wire in replay:
-            if isinstance(wire, dict):
-                params = wire.get("params")
-                if isinstance(params, dict):
-                    uid = _safe_uuid(params.get("run_id"))
-                    if uid is not None:
-                        parsed_run_ids.add(uid)
-        resumable = await _resumable_run_ids(parsed_run_ids)
         active_interrupt_ids = (
             set(thread.interrupts.keys()) if isinstance(thread.interrupts, dict) else set()
         )
@@ -359,19 +359,6 @@ async def protocol_event_stream(request: Request) -> JSONResponse | StreamingRes
                     return False
             return True
 
-        def _is_resumable(wire: Any) -> bool:
-            if not isinstance(wire, dict):
-                return True
-            params = wire.get("params")
-            if isinstance(params, dict):
-                uid = _safe_uuid(params.get("run_id"))
-                if uid is not None and uid not in resumable:
-                    return False
-            return True
-
-        replay = [
-            wire for wire in replay if _is_resumable(wire) and _is_active_protocol_event(wire)
-        ]
     except Exception:
         await manager.remove_thread_stream(thread_id, queue)
         raise
@@ -398,13 +385,38 @@ async def protocol_event_stream(request: Request) -> JSONResponse | StreamingRes
         try:
             if not await _check_authorized():
                 return
-            for wire in replay:
-                seq = wire.get("seq")
-                if isinstance(seq, int) and seq not in seen and _wire_matches(wire, body):
-                    seen.add(seq)
-                    metric_inc("graphharbor_protocol_events_total")
-                    yield _frame(wire)
-                    last_sent_at = loop.time()
+            # Transfer and release each bounded page before waiting on live SSE.
+            page = replay[:]
+            replay.clear()
+            cursor = since
+            while page:
+                resumable = await _resumable_run_ids(
+                    {uid for wire in page if (uid := _wire_run_id(wire)) is not None}
+                )
+                page_count = len(page)
+                for wire in page:
+                    seq = wire.get("seq")
+                    if not isinstance(seq, int):
+                        continue
+                    cursor = max(cursor, seq)
+                    uid = _wire_run_id(wire)
+                    if (
+                        (uid is None or uid in resumable)
+                        and _is_active_protocol_event(wire)
+                        and _wire_matches(wire, body)
+                    ):
+                        seen.add(seq)
+                        metric_inc("graphharbor_protocol_events_total")
+                        yield _frame(wire)
+                        last_sent_at = loop.time()
+                page.clear()
+                if page_count < PROTOCOL_REPLAY_PAGE_SIZE:
+                    break
+                if await request.is_disconnected() or not await _check_authorized():
+                    return
+                watermark, page = await _load_protocol_events(thread_id, cursor)
+                if cursor and cursor < watermark:
+                    return  # Reconnect receives 410 and recovers from a snapshot.
             started = loop.time()
             while loop.time() - started < timeout:
                 now = loop.time()

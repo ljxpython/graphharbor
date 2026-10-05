@@ -60,6 +60,7 @@ def test_serve_passes_resolved_port_to_banner_and_server(
 
     calls: dict[str, Any] = {}
 
+    monkeypatch.setattr(cli_module.os, "environ", cli_module.os.environ.copy())
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli_module, "load_dotenv", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli_module, "validate_config_file", lambda _config: {})
@@ -112,6 +113,8 @@ def test_worker_passes_concurrency_to_production_runtime(monkeypatch: Any, tmp_p
     from langhost import cli as cli_module
 
     captured: list[int] = []
+
+    monkeypatch.setattr(cli_module.os, "environ", cli_module.os.environ.copy())
 
     async def run_worker(_config: Path, *, n_jobs_per_worker: int) -> None:
         captured.append(n_jobs_per_worker)
