@@ -1,5 +1,10 @@
 # 运行时与持久化经验库 (runtime-persistence.md)
 
+## [坑] 只在正常结束时清缓存不能兜住 Worker 崩溃
+- **场景：** ProductionWorker 跳过旧清理入口，Redis run-stream 永久驻留，SSE 全量回放放大内存。
+- **正确：** Worker 终态回收本地缓冲，单条/批量写入 TTL 兜底；分页回放及时释放，未知缓存按明确授权核对后清理。
+- **日期：** 2026-10-05；用户批准记录。
+
 > 适用于 `libs/langgraph-runtime-pg/`、PostgreSQL Checkpoint、Lease 租约、Redis 任务调度与 Worker 恢复场景。
 
 ---
