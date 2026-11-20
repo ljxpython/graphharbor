@@ -274,7 +274,23 @@ def thread_to_dict(r: Any) -> dict:
 
 
 def run_to_dict(r: Any) -> dict:
-    return row_to_dict(r, _RUN_KEYS)
+    result = row_to_dict(r, _RUN_KEYS)
+    kwargs = result.get("kwargs")
+    if isinstance(kwargs, dict):
+        result["kwargs"] = {
+            key: value for key, value in kwargs.items() if key != "__graphharbor_run_budget"
+        }
+        config = kwargs.get("config")
+        if isinstance(config, dict) and isinstance(config.get("configurable"), dict):
+            result["kwargs"]["config"] = {
+                **config,
+                "configurable": {
+                    key: value
+                    for key, value in config["configurable"].items()
+                    if key != "__graphharbor_run_budget"
+                },
+            }
+    return result
 
 
 def cron_to_dict(r: Any) -> dict:
@@ -397,7 +413,7 @@ def _auto_migrate_enabled() -> bool:
 async def start_pool() -> None:
     global _ENGINE, _SESSION_FACTORY
     from langgraph_runtime_pg.checkpoint import setup_checkpointer
-    from langgraph_runtime_pg.migrate import upgrade_head
+    from langgraph_runtime_pg.migrate import head_revision, upgrade_head
     from langgraph_runtime_pg.store import setup_store
 
     if _ENGINE is not None and _SESSION_FACTORY is not None:
@@ -427,6 +443,12 @@ async def start_pool() -> None:
     try:
         _ENGINE = engine
         _SESSION_FACTORY = session_factory
+        async with engine.connect() as connection:
+            revision = await connection.scalar(text("SELECT version_num FROM alembic_version"))
+            if revision != head_revision():
+                raise RuntimeError(
+                    "runtime schema does not match this package; run its migrations first"
+                )
         await setup_checkpointer()
         await setup_store()
         await start_stream()

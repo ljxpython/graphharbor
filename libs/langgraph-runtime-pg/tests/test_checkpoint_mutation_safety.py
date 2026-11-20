@@ -29,7 +29,7 @@ def graph_fixture(saver, entered=None, release=None):
     return builder.compile(checkpointer=saver)
 
 
-async def snapshot(thread_id):
+async def snapshot(thread_id, tables=("checkpoints", "checkpoint_writes")):
     from langgraph_runtime_pg.database import connect
 
     async with connect() as conn:
@@ -44,7 +44,7 @@ async def snapshot(thread_id):
                     )
                 ).scalars()
             )
-            for table in ("checkpoints", "checkpoint_writes")
+            for table in tables
         }
 
 
@@ -60,7 +60,7 @@ async def setup_client():
 
 
 async def execute_run(client, assistant_id, thread_id, graph, value):
-    from langgraph_runtime_pg.checkpoint_mutations import checkpoint_writer
+    from langgraph_runtime_pg.checkpoint_mutations import checkpoint_writer, project_run_values
     from langgraph_runtime_pg.database import connect
     from langgraph_runtime_pg.models import ThreadRow
     from langgraph_runtime_pg.protocol import RunReason, RunStatus
@@ -83,7 +83,7 @@ async def execute_run(client, assistant_id, thread_id, graph, value):
             conn.session, run.run_id, "test-owner", RunStatus.SUCCESS, reason=RunReason.COMPLETED
         )
         thread = await conn.session.get(ThreadRow, UUID(thread_id))
-        thread.values_ = result
+        await project_run_values(conn.session, run.run_id, thread, result)
         thread.status = "idle"
     return run
 
@@ -259,7 +259,7 @@ async def test_pending_rollback_preserves_existing_checkpoints(pg_runtime):
         before = await snapshot(tid)
         run = (await client.post(f"/threads/{tid}/runs", json={"assistant_id": assistant})).json()
         response = await client.post(f"/threads/{tid}/runs/{run['run_id']}/cancel?action=rollback")
-        assert response.status_code == 200
+        assert response.status_code == 202
         assert await snapshot(tid) == before
 
 
@@ -321,7 +321,7 @@ async def test_historical_rollback_conflict_and_batch_reverse_restore(pg_runtime
         response = await client.post(
             "/runs/cancel?action=rollback", json={"run_ids": [str(run_b.run_id), str(run_c.run_id)]}
         )
-        assert response.status_code == 200, response.text
+        assert response.status_code == 204, response.text
         assert await snapshot(tid) == baseline
 
 
@@ -352,7 +352,7 @@ async def test_rollback_intent_survives_pool_restart_and_blocks_mutations(pg_run
             checkpoint_writer.reset(token)
         assert (
             await client.post(f"/threads/{tid}/runs/{run.run_id}/cancel?action=rollback")
-        ).status_code == 200
+        ).status_code == 202
         current = await snapshot(tid)
         assert (
             await client.post(
@@ -373,15 +373,23 @@ async def test_rollback_intent_survives_pool_restart_and_blocks_mutations(pg_run
 
         process = await asyncio.create_subprocess_exec(
             sys.executable,
+            "-u",
             "-c",
             "import asyncio; from langgraph_runtime_pg.database import start_pool, stop_pool; "
             "from langgraph_runtime_pg.checkpoint_mutations import complete_rollbacks; "
-            'exec("async def main():\\n await start_pool()\\n await complete_rollbacks()\\n await stop_pool()"); '
+            "exec(\"async def main():\\n print('starting pool')\\n await start_pool()\\n print('completing rollback')\\n await complete_rollbacks()\\n print('stopping pool')\\n await stop_pool()\"); "
             "asyncio.run(main())",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(process.communicate(), 20)
+        communication = asyncio.create_task(process.communicate())
+        try:
+            # Cold imports/migrations are startup work, not a rollback latency guarantee.
+            stdout, stderr = await asyncio.wait_for(asyncio.shield(communication), 90)
+        except TimeoutError:
+            process.kill()
+            stdout, stderr = await communication
+            pytest.fail("fresh rollback process timed out: " + (stdout + stderr).decode())
         assert process.returncode == 0, (stdout + stderr).decode()
         assert await snapshot(tid) == baseline
         assert (await client.get(f"/threads/{tid}/runs/{run.run_id}")).status_code == 404
@@ -421,7 +429,7 @@ async def test_restore_failure_is_atomic_and_retryable(pg_runtime, monkeypatch):
         assert (await client.get(f"/threads/{tid}/runs/{run.run_id}")).status_code == 200
         assert (
             await client.post(f"/threads/{tid}/runs/{run.run_id}/cancel?action=rollback")
-        ).status_code == 200
+        ).status_code == 202
         assert await snapshot(tid) == baseline
 
 
@@ -451,6 +459,223 @@ async def test_hitl_prune_preserves_pending_writes_and_resume(pg_runtime):
         after = await graph.aget_state(config)
         assert after.tasks == before.tasks
         assert (await graph.ainvoke(Command(resume=42), config))["value"] == 42
+
+
+async def test_prune_collects_blobs_is_idempotent_and_transactional(pg_runtime, monkeypatch):
+    from langgraph_runtime_pg import checkpoint_mutations as mutations
+    from langgraph_runtime_pg.checkpoint import get_checkpointer
+
+    Payload = TypedDict("Payload", {"payload": list[str]})  # noqa: UP013
+    builder = StateGraph(Payload)
+    builder.add_node("pass", lambda state: {})
+    builder.add_edge(START, "pass")
+    builder.add_edge("pass", END)
+    graph = builder.compile(checkpointer=get_checkpointer())
+    client, _, tid = await setup_client()
+    config = {"configurable": {"thread_id": tid}}
+    tables = ("checkpoints", "checkpoint_writes", "checkpoint_blobs")
+    async with aclosing(client):
+        for i in range(8):
+            await graph.ainvoke({"payload": [str(i) * 1024]}, config)
+        expected = (await graph.aget_state(config)).values
+        before = await snapshot(tid, tables)
+        original = mutations._delete_batches
+
+        async def fail_blobs(session, table, *args):
+            if table == "checkpoint_blobs":
+                raise RuntimeError("injected GC failure")
+            await original(session, table, *args)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(mutations, "_delete_batches", fail_blobs)
+            with pytest.raises(RuntimeError, match="injected GC failure"):
+                await client.post(
+                    "/threads/prune", json={"thread_ids": [tid], "strategy": "keep_latest"}
+                )
+        assert await snapshot(tid, tables) == before
+        for _ in range(2):
+            response = await client.post(
+                "/threads/prune", json={"thread_ids": [tid], "strategy": "keep_latest"}
+            )
+            assert response.status_code == 200, response.text
+            assert (await graph.aget_state(config)).values == expected
+        after = await snapshot(tid, tables)
+        assert len(after["checkpoint_blobs"]) < len(before["checkpoint_blobs"])
+        assert await graph.ainvoke({"payload": ["continued"]}, config) == {"payload": ["continued"]}
+
+
+async def test_journal_restores_first_overwrite_and_immutable_blob_conflict(pg_runtime):
+    from langgraph_runtime_pg.checkpoint import get_checkpointer
+    from langgraph_runtime_pg.checkpoint_mutations import checkpoint_writer, rollback_run
+    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.models import RunRow
+    from langgraph_runtime_pg.run_store import RunRepository
+
+    saver = get_checkpointer()
+    client, assistant, tid = await setup_client()
+    tables = ("checkpoints", "checkpoint_writes", "checkpoint_blobs")
+    async with aclosing(client):
+        await execute_run(client, assistant, tid, graph_fixture(saver), 1)
+        config = {"configurable": {"thread_id": tid, "checkpoint_ns": ""}}
+        original = await saver.aget_tuple(config)
+        await saver.aput_writes(original.config, [("__error__", "before")], "task")
+        await saver.aput(
+            original.config,
+            {
+                **original.checkpoint,
+                "channel_values": {"payload": ["original"]},
+                "channel_versions": {"payload": "fixed"},
+            },
+            {},
+            {"payload": "fixed"},
+        )
+        before = await snapshot(tid, tables)
+        run = (await client.post(f"/threads/{tid}/runs", json={"assistant_id": assistant})).json()
+        async with connect() as conn:
+            claimed = await RunRepository().claim_next(conn.session, "journal-test")
+        assert str(claimed.run_id) == run["run_id"]
+        token = checkpoint_writer.set((run["run_id"], "journal-test", claimed.retry_count))
+        try:
+            for i in range(2):
+                await saver.aput(
+                    original.config,
+                    {
+                        **original.checkpoint,
+                        "channel_values": {"payload": [f"replacement-{i}"]},
+                        "channel_versions": {"payload": "fixed"},
+                    },
+                    {"test": i},
+                    {"payload": "fixed"},
+                )
+                await saver.aput_writes(original.config, [("__error__", f"after-{i}")], "task")
+        finally:
+            checkpoint_writer.reset(token)
+        async with connect() as conn:
+            rows = (
+                await conn.session.execute(
+                    text("""
+                SELECT table_name,count(*) FROM run_checkpoint_undo
+                WHERE run_id=:run_id GROUP BY table_name
+            """),
+                    {"run_id": claimed.run_id},
+                )
+            ).all()
+            assert dict(rows) == {"checkpoints": 1, "checkpoint_writes": 1}
+            row = await conn.session.get(RunRow, claimed.run_id, with_for_update=True)
+            await rollback_run(conn.session, row)
+        assert await snapshot(tid, tables) == before
+
+
+async def test_boundary_and_projection_patch_do_not_copy_history(pg_runtime):
+    from langgraph_runtime_pg.checkpoint import get_checkpointer
+    from langgraph_runtime_pg.checkpoint_mutations import project_run_values
+    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.models import RunCheckpointBaselineRow, ThreadRow
+    from langgraph_runtime_pg.run_store import RunRepository
+
+    client, assistant, tid = await setup_client()
+    async with aclosing(client):
+        await execute_run(client, assistant, tid, graph_fixture(get_checkpointer()), 1)
+        values = {"items": ["x" * 1024 for _ in range(1000)]}
+        async with connect() as conn:
+            thread = await conn.session.get(ThreadRow, UUID(tid))
+            thread.values_ = values
+        await client.post(f"/threads/{tid}/runs", json={"assistant_id": assistant})
+        async with connect() as conn:
+            run = await RunRepository().claim_next(conn.session, "patch-test")
+            thread = await conn.session.get(ThreadRow, UUID(tid))
+            boundary = await conn.session.get(RunCheckpointBaselineRow, run.run_id)
+            import json
+
+            assert len(json.dumps(boundary.projection)) < 1000
+            updated = {"items": [*values["items"], "new"]}
+            await project_run_values(conn.session, run.run_id, thread, updated)
+            assert len(json.dumps(boundary.projection)) < 1000
+            import jsonpatch
+
+            assert jsonpatch.apply_patch(updated, boundary.projection["values_undo"]) == values
+
+
+async def test_delta_update_fork_legacy_counters_and_reconnect(pg_runtime):
+    from typing import Annotated
+
+    from langgraph.channels import DeltaChannel
+
+    from langgraph_runtime_pg.checkpoint import (
+        copy_thread_checkpoints,
+        get_checkpointer,
+        reconnect_checkpointer,
+    )
+    from langgraph_runtime_pg.database import connect
+
+    def reducer(state, writes):
+        return (state or []) + [item for batch in writes for item in batch]
+
+    DeltaState = TypedDict(  # noqa: UP013
+        "DeltaState",
+        {"items": Annotated[list[int], DeltaChannel(reducer, snapshot_frequency=5)]},
+    )
+
+    def build(saver):
+        builder = StateGraph(DeltaState)
+        builder.add_node("pass", lambda state: {})
+        builder.add_edge(START, "pass")
+        builder.add_edge("pass", END)
+        return builder.compile(checkpointer=saver)
+
+    graph = build(get_checkpointer())
+    client, _, tid = await setup_client()
+    config = {"configurable": {"thread_id": tid}}
+    async with aclosing(client):
+        for value in range(5):
+            await graph.ainvoke({"items": [value]}, config)
+        await graph.aupdate_state(config, {"items": [100]})
+        await graph.ainvoke({"items": [101]}, config)
+        expected = {"items": [0, 1, 2, 3, 4, 100, 101]}
+        assert (await graph.aget_state(config)).values == expected
+        fork_id = str(uuid4())
+        await copy_thread_checkpoints(tid, fork_id)
+        assert (await graph.aget_state({"configurable": {"thread_id": fork_id}})).values == expected
+        # Older update_state calls could omit counters; discover the channel in its history.
+        async with connect() as conn:
+            await conn.session.execute(
+                text("SELECT set_config('graphharbor.checkpoint_format','journal-v1',true)")
+            )
+            await conn.session.execute(
+                text("""
+                UPDATE checkpoints SET metadata=metadata-'counters_since_delta_snapshot'
+                WHERE thread_id=:tid AND checkpoint_id=(SELECT max(checkpoint_id)
+                    FROM checkpoints WHERE thread_id=:tid AND checkpoint_ns='')
+            """),
+                {"tid": tid},
+            )
+        assert (await graph.aget_state(config)).values == expected
+        response = await client.post(
+            "/threads/prune", json={"thread_ids": [tid], "strategy": "keep_latest"}
+        )
+        assert response.status_code == 200, response.text
+        graph = build(await reconnect_checkpointer())
+        assert (await graph.aget_state(config)).values == expected
+        assert await graph.ainvoke({"items": [102]}, config) == {"items": [*expected["items"], 102]}
+
+
+async def test_writer_without_new_format_is_rejected_atomically(pg_runtime):
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    from psycopg.errors import ObjectNotInPrerequisiteState
+
+    from langgraph_runtime_pg.checkpoint import get_checkpointer
+
+    client, assistant, tid = await setup_client()
+    async with aclosing(client):
+        saver = get_checkpointer()
+        await execute_run(client, assistant, tid, graph_fixture(saver), 1)
+        tables = ("checkpoints", "checkpoint_writes", "checkpoint_blobs")
+        before = await snapshot(tid, tables)
+        saved = await saver.aget_tuple({"configurable": {"thread_id": tid}})
+        old_writer = AsyncPostgresSaver(saver.conn)
+        with pytest.raises(ObjectNotInPrerequisiteState, match="drain old workers"):
+            await old_writer.aput(saved.config, {**saved.checkpoint, "id": str(uuid4())}, {}, {})
+        assert await snapshot(tid, tables) == before
 
 
 async def test_legacy_prune_applies_delete_authorization(pg_runtime, monkeypatch):

@@ -1,0 +1,170 @@
+{
+  "version": "0.13.0.post45",
+  "checks": [
+    {
+      "name": "versions",
+      "command": "\".venv/bin/python\" \"scripts/check_versions.py\"",
+      "cwd": "/Users/lijiaxin/PyCharmMiscProject/graphharbor",
+      "exit_code": 0,
+      "output": "ok: graphharbor=0.13.0.post45; dependencies={'langgraph': '1.2.11', 'langgraph-sdk': '0.4.3', 'langgraph-cli': '0.4.31', 'langgraph-checkpoint': '4.2.0', 'langgraph-checkpoint-postgres': '3.1.2', 'langgraph-api': '0.13.0'}"
+    },
+    {
+      "name": "engine-lock",
+      "command": "uv lock --check",
+      "cwd": "/Users/lijiaxin/PyCharmMiscProject/graphharbor",
+      "exit_code": 0,
+      "output": "Resolved 146 packages in 17ms"
+    },
+    {
+      "name": "compatibility",
+      "command": "\".venv/bin/python\" \"scripts/check_compatibility_baseline.py\"",
+      "cwd": "/Users/lijiaxin/PyCharmMiscProject/graphharbor",
+      "exit_code": 0,
+      "output": "compatibility baseline: OK"
+    },
+    {
+      "name": "ruff-check",
+      "command": "\".venv/bin/python\" -m ruff check \"libs/langhost\" \"libs/langgraph-runtime-pg\" \"scripts/run_isolated_tests.py\" \"scripts/verify_run_acceptance.py\"",
+      "cwd": "/Users/lijiaxin/PyCharmMiscProject/graphharbor",
+      "exit_code": 0,
+      "output": "All checks passed!"
+    },
+    {
+      "name": "ruff-format",
+      "command": "\".venv/bin/python\" -m ruff format --check \"libs/langhost\" \"libs/langgraph-runtime-pg\" \"scripts/run_isolated_tests.py\" \"scripts/verify_run_acceptance.py\"",
+      "cwd": "/Users/lijiaxin/PyCharmMiscProject/graphharbor",
+      "exit_code": 0,
+      "output": "88 files already formatted"
+    },
+    {
+      "name": "platform-lock",
+      "command": "uv lock --check",
+      "cwd": "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service",
+      "exit_code": 0,
+      "output": "Resolved 144 packages in 31ms"
+    }
+  ],
+  "phase_scope": "V03 closeout only; system-level Final is recorded separately in verification.md",
+  "passed": true,
+  "verified_at": "2026-10-10T15:58:48.059179+00:00",
+  "documents": {
+    "files": 20,
+    "local_links": 79,
+    "anchor_links": 7,
+    "errors": [],
+    "platform_scoped_check_docs_errors": 0
+  },
+  "states": {
+    "project": "done",
+    "tasks": 13,
+    "phase_records": 13,
+    "evidence_scenarios": 32,
+    "platform_project": "partial",
+    "B01": "done",
+    "platform_full_stack_final": "not_run",
+    "deployed": false
+  },
+  "artifacts": {
+    "hashes_matched": 4,
+    "source_files_matched": 58,
+    "pypi_wheel_cases": 5,
+    "pypi_sdist_cases": 5
+  },
+  "limits": [
+    "isolated PostgreSQL fsync=off does not verify power-loss durability",
+    "full platform T08/T10/F12 and new Linux application image not verified here",
+    "full platform repository documentation checks report unrelated absolute paths and lessons EOF whitespace; closeout scope checks pass"
+  ],
+  "diff_checks": [
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check",
+        "--"
+      ],
+      "cwd": "/Users/lijiaxin/PyCharmMiscProject/graphharbor",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check",
+        "--",
+        "docs/projects/20261009-agent-generic-production-capabilities/README.md",
+        "docs/projects/20261009-agent-generic-production-capabilities/plan.md",
+        "docs/projects/20261009-agent-generic-production-capabilities/tasks.md",
+        "docs/projects/20261009-agent-generic-production-capabilities/verification.md",
+        "docs/projects/20261009-agent-generic-production-capabilities/engine-handoff.md",
+        "docs/projects/20261009-agent-generic-production-capabilities/frontend-handoff.md",
+        "docs/projects/20261009-agent-generic-production-capabilities/local-compatibility-frontend-handoff.md",
+        "docs/CONTEXT.md",
+        "docs/FEATURES.md",
+        "docs/runbooks/runtime-background-tasks.md"
+      ],
+      "cwd": "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform",
+      "exit_code": 0,
+      "output": ""
+    }
+  ],
+  "out_of_scope_checks": {
+    "platform_full_repository_check_docs": {
+      "command": "python3 scripts/check_docs.py",
+      "exit_code": 1,
+      "error_count": 39,
+      "scope_errors": 0,
+      "findings": [
+        "docs/knowledge/deerflow-capability-gap-analysis.md:709: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:42: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:57: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:61: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:118: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:171: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:219: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:267: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:271: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:311: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:372: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:376: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:437: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:535: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:580: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:608: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:636: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:672: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:708: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:751: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:786: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:818: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:911: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:958: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:1002: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:1052: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:1092: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:1138: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:1188: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:1217: macOS local absolute path",
+        "docs/knowledge/open-swe-vs-runtime-gap.md:1245: macOS local absolute path",
+        "docs/projects/20261005-agent-followup-suggestions/README.md:51: macOS local absolute path",
+        "docs/projects/20261005-scheduled-agent-tasks/frontend-handoff.md:4: macOS local absolute path",
+        "docs/projects/20261005-scheduled-agent-tasks/plan.md:11: macOS local absolute path",
+        "docs/projects/20261005-scheduled-agent-tasks/verification.md:101: macOS local absolute path",
+        "docs/projects/20261006-agent-context-window-governance/frontend-handoff.md:202: macOS local absolute path",
+        "docs/projects/20261007-agent-execution-budget/implementation/02-frontend-budget-implementation.md:7: macOS local absolute path",
+        "docs/projects/20261007-agent-run-cancellation/frontend-handoff.md:332: macOS local absolute path",
+        "docs/projects/20261009-agent-generic-production-capabilities/local-runner-compatibility-proposal.md:10: macOS local absolute path"
+      ]
+    },
+    "platform_full_repository_diff_check": {
+      "exit_code": 2,
+      "findings": [
+        "docs/lessons/ai-workflow.md:95: new blank line at EOF",
+        "docs/lessons/platform-web.md:25: new blank line at EOF",
+        "docs/lessons/runtime-service.md:95: new blank line at EOF"
+      ],
+      "edited_by_this_closeout": false
+    }
+  }
+}

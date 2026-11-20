@@ -6,6 +6,7 @@ This module deliberately imports no ``langgraph_api`` private module.  The old
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -49,7 +50,6 @@ async def lifespan(
     **_: Any,
 ) -> AsyncIterator[None]:
     """Start durable dependencies, then close them in reverse order."""
-    del app
     configure_structured_logging()
     state = readiness or RuntimeReadiness()
     state.checks = {
@@ -61,6 +61,8 @@ async def lifespan(
     }
     # Production migration is an explicit pre-deploy command, never a startup side effect.
     previous_auto_migrate = os.environ.get("LG_RUNTIME_PG_AUTO_MIGRATE")
+    cron_task: asyncio.Task[None] | None = None
+    webhook_task: asyncio.Task[None] | None = None
     os.environ["LG_RUNTIME_PG_AUTO_MIGRATE"] = "false"
     try:
         await start_pool()
@@ -75,6 +77,16 @@ async def lifespan(
         state.checks["queue"] = state.checks["redis"]
         state.ready = True
         state.reason = None
+        from langgraph_runtime_pg.cron import cron_scheduler
+
+        cron_task = asyncio.create_task(cron_scheduler(), name="graphharbor-cron")
+        if (
+            bool(getattr(getattr(app, "state", None), "webhook_dispatcher_enabled", False))
+            or os.environ.get("GRAPHHARBOR_WEBHOOK_DISPATCHER") == "1"
+        ):
+            from langgraph_runtime_pg.webhook_delivery import delivery_loop
+
+            webhook_task = asyncio.create_task(delivery_loop(), name="graphharbor-webhooks")
         logger.info("GraphHarbor production runtime ready")
         yield
     except Exception as exc:
@@ -83,6 +95,14 @@ async def lifespan(
         logger.exception("GraphHarbor production runtime failed to start")
         raise
     finally:
+        for task in (cron_task, webhook_task):
+            if task is None:
+                continue
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         state.ready = False
         state.reason = "stopped"
         if state.checks is not None:

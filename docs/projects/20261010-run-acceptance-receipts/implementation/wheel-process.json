@@ -1,0 +1,33 @@
+{
+  "python_sdk": "0.4.3",
+  "cases": [
+    {
+      "case": "two-api-concurrency-pending-read",
+      "run_id": "0bff2608-3ddc-4d3e-b013-3ffb1ef73909",
+      "receipts": 1,
+      "runs": 1,
+      "execution_starts": 0,
+      "reads": 20
+    },
+    {
+      "case": "queued-stop-and-permanent-busy-rejection",
+      "run_id": "0bff2608-3ddc-4d3e-b013-3ffb1ef73909",
+      "execution_starts": 0
+    },
+    {
+      "case": "lost-ack-api-kill-restart-worker-recovery",
+      "run_id": "9b35b122-90ad-40c2-bf9e-a053a43bade1",
+      "execution_starts": 1
+    },
+    {
+      "case": "after-commit-enqueue-failure-pg-recovery",
+      "run_id": "de6da87f-e106-4e6a-910c-8d43d27ec426",
+      "execution_starts": 1
+    },
+    {
+      "case": "deletion-expiry-permanent-key",
+      "run_id": "9b35b122-90ad-40c2-bf9e-a053a43bade1",
+      "execution_starts": 1
+    }
+  ]
+}

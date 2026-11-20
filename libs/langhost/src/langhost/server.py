@@ -31,6 +31,8 @@ from langgraph_runtime_pg.graph_registry import GraphRegistry, resolve_within_ba
 from langgraph_runtime_pg.metrics import prometheus_text, set_gauge
 from langgraph_runtime_pg.production import RuntimeReadiness, lifespan as runtime_lifespan
 from langgraph_runtime_pg.protocol import official_info_document
+from langgraph_runtime_pg.webhooks import configure_webhooks
+from langhost.cancellation import cancel_active, get_cancellation
 from langhost.core_api import (
     assistants_count,
     assistants_create,
@@ -67,16 +69,21 @@ from langhost.core_api import (
     threads_count,
     threads_create,
     threads_delete,
+    threads_deletion,
     threads_get,
     threads_history,
+    threads_metadata_cas,
     threads_prune,
+    threads_retention,
     threads_search,
     threads_state,
+    threads_touch,
     threads_update,
     threads_update_state,
 )
 from langhost.mcp_transport import create_mcp_transport
 from langhost.protocol_api import protocol_commands, protocol_event_stream
+from langhost.run_acceptance import create_acceptance, get_acceptance, openapi_acceptance
 from langhost.store_api import (
     store_delete,
     store_get,
@@ -180,6 +187,19 @@ def _openapi_document() -> dict[str, Any]:
                     "properties": {
                         "thread_id": {"type": "string", "format": "uuid"},
                         "metadata": {"type": "object"},
+                        "retention": {
+                            "type": ["object", "null"],
+                            "required": ["mode", "ttl_minutes"],
+                            "additionalProperties": False,
+                            "properties": {
+                                "mode": {"type": "string", "enum": ["fixed", "idle"]},
+                                "ttl_minutes": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 52560000,
+                                },
+                            },
+                        },
                         "if_exists": {
                             "type": "string",
                             "enum": ["raise", "do_nothing"],
@@ -188,7 +208,7 @@ def _openapi_document() -> dict[str, Any]:
                         "ttl": {
                             "type": "object",
                             "properties": {
-                                "strategy": {"type": "string", "enum": ["delete", "keep_latest"]},
+                                "strategy": {"type": "string", "enum": ["delete"]},
                                 "ttl": {"type": "number"},
                             },
                         },
@@ -221,6 +241,7 @@ def _openapi_document() -> dict[str, Any]:
             }
         },
         "paths": {
+            "/threads/{thread_id}/runs/acceptance": openapi_acceptance(),
             "/ok": {"get": {"responses": {"200": {"description": "ready"}}}},
             "/live": {"get": {"responses": {"200": {"description": "alive"}}}},
             "/ready": {"get": {"responses": {"200": {"description": "ready"}}}},
@@ -281,6 +302,83 @@ def _openapi_document() -> dict[str, Any]:
             "/threads/count": {"post": {}},
             "/threads/prune": {"post": {}},
             "/threads/{thread_id}": {"get": {}, "patch": {}, "delete": {}},
+            "/threads/{thread_id}/metadata/cas": {"patch": {}},
+            "/threads/{thread_id}/retention": {
+                "parameters": [
+                    {
+                        "name": "thread_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string", "format": "uuid"},
+                    }
+                ],
+                "get": {
+                    "summary": "Read retention without renewing activity",
+                    "responses": {
+                        "200": {"description": "Policy and server timestamps"},
+                        "404": {"description": "Thread unavailable"},
+                    },
+                },
+                "patch": {
+                    "summary": "Set a generic retention policy; null disables expiry",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["policy"],
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "policy": {
+                                            "$ref": "#/components/schemas/ThreadCreate/properties/retention"
+                                        }
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "200": {"description": "Policy and server timestamps"},
+                        "409": {"description": "Deletion already requested"},
+                        "422": {"description": "Invalid policy"},
+                    },
+                },
+            },
+            "/threads/{thread_id}/touch": {
+                "post": {
+                    "summary": "Explicit activity using server time; renews idle policy only",
+                    "parameters": [
+                        {
+                            "name": "thread_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "format": "uuid"},
+                        }
+                    ],
+                    "responses": {
+                        "200": {"description": "Policy and server timestamps"},
+                        "409": {"description": "Deletion already requested"},
+                    },
+                },
+            },
+            "/threads/{thread_id}/deletion": {
+                "get": {
+                    "summary": "Read the durable deletion task, including after Thread removal",
+                    "parameters": [
+                        {
+                            "name": "thread_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "format": "uuid"},
+                        }
+                    ],
+                    "responses": {
+                        "200": {"description": "Task id, state, attempts and safe error"},
+                        "404": {"description": "Task unavailable"},
+                    },
+                },
+            },
             "/threads/{thread_id}/copy": {"post": {}},
             "/threads/{thread_id}/state": {"get": {}, "post": {}, "patch": {}},
             "/threads/{thread_id}/state/checkpoint": {"post": {}},
@@ -374,6 +472,12 @@ def create_app(
     auth_config = _config_value(config, "auth", {}) or {}
     auth_spec = auth_config if isinstance(auth_config, str) else _config_value(auth_config, "path")
     auth_handler = _load_symbol(auth_spec, base_dir) if auth_spec else None
+    webhook_config = _config_value(config, "webhooks", {}) or {}
+    projector_spec = (webhook_config.get("terminal") or {}).get("projector")
+    configure_webhooks(config, _load_symbol(projector_spec, base_dir) if projector_spec else None)
+    from langgraph_runtime_pg.retention import configure_retention
+
+    configure_retention(config, lambda spec: _load_symbol(spec, base_dir))
     mcp_enabled = not bool(_config_value(http_config, "disable_mcp", False))
     mcp_holder: dict[str, Any] = {}
 
@@ -450,6 +554,10 @@ def create_app(
         Route("/threads/{thread_id}/stream", thread_stream, methods=["GET"]),
         Route("/threads/{thread_id}", threads_get, methods=["GET"]),
         Route("/threads/{thread_id}", threads_update, methods=["PATCH"]),
+        Route("/threads/{thread_id}/metadata/cas", threads_metadata_cas, methods=["PATCH"]),
+        Route("/threads/{thread_id}/retention", threads_retention, methods=["GET", "PATCH"]),
+        Route("/threads/{thread_id}/touch", threads_touch, methods=["POST"]),
+        Route("/threads/{thread_id}/deletion", threads_deletion, methods=["GET"]),
         Route("/threads/{thread_id}", threads_delete, methods=["DELETE"]),
         Route("/runs/{run_id}/stream", runs_stream_existing, methods=["GET"]),
         Route("/runs/stream", runs_stream, methods=["POST"]),
@@ -460,6 +568,8 @@ def create_app(
         Route("/threads/{thread_id}/runs/crons", cron_create_thread, methods=["POST"]),
         Route("/threads/{thread_id}/runs/wait", runs_wait, methods=["POST"]),
         Route("/threads/{thread_id}/runs", runs_list, methods=["GET"]),
+        Route("/threads/{thread_id}/runs/acceptance", create_acceptance, methods=["POST"]),
+        Route("/threads/{thread_id}/runs/acceptance", get_acceptance, methods=["GET"]),
         Route("/threads/{thread_id}/runs/{run_id}/stream", runs_stream_existing, methods=["GET"]),
         Route("/threads/{thread_id}/runs/stream", runs_stream, methods=["POST"]),
         Route("/threads/{thread_id}/commands", protocol_commands, methods=["POST"]),
@@ -471,6 +581,12 @@ def create_app(
         Route("/store/namespaces", store_list_namespaces, methods=["POST"]),
         Route("/threads/{thread_id}/runs", runs_create_thread, methods=["POST"]),
         Route("/threads/{thread_id}/runs/queue", runs_queue, methods=["POST"]),
+        Route("/threads/{thread_id}/runs/cancel-active", cancel_active, methods=["POST"]),
+        Route(
+            "/threads/{thread_id}/runs/cancellations/{cancellation_id}",
+            get_cancellation,
+            methods=["GET"],
+        ),
         Route("/threads/{thread_id}/runs/{run_id}/cancel", runs_cancel, methods=["POST"]),
         Route("/threads/{thread_id}/runs/{run_id}/join", runs_join, methods=["GET"]),
         Route("/threads/{thread_id}/runs/{run_id}", runs_get, methods=["GET"]),
@@ -528,6 +644,9 @@ def create_app(
     # routes and integration tests while GraphHarbor owns request authentication.
     app.state.auth_handler = auth_handler
     app.state.custom_app = custom_app
+    app.state.webhook_dispatcher_enabled = not (config.get("http") or {}).get(
+        "disable_webhooks", False
+    )
     return app
 
 
@@ -538,6 +657,8 @@ def run_server(host: str, port: int, reload: bool, graphs: dict[str, Any], **kwa
     if kwargs.get("__redis_uri__"):
         os.environ["REDIS_URI"] = str(kwargs["__redis_uri__"])
     config = kwargs.pop("config", None) or {"graphs": graphs}
+    if kwargs.get("webhooks") is not None:
+        config = {**config, "webhooks": kwargs["webhooks"]}
     app = create_app(config, base_dir=kwargs.pop("base_dir", None) or pathlib.Path.cwd())
     uvicorn_kwargs: dict[str, Any] = {
         "host": host,

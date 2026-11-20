@@ -1,0 +1,110 @@
+{
+  "started_at": "2026-10-10T15:34:40.232431+00:00",
+  "command": [
+    "scripts/verify_run_acceptance.py",
+    "--candidate",
+    "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/pypi-sdist/bin/graphharbor",
+    "--output",
+    "docs/projects/20261010-run-acceptance-receipts/implementation/final-pypi-sdist.json"
+  ],
+  "python_sdk": "0.4.3",
+  "installations": [
+    {
+      "graphharbor": "0.13.0.post45",
+      "runtime": "0.13.0.post45",
+      "sdk": "0.4.3",
+      "gateway_source": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/pypi-sdist/lib/python3.13/site-packages/langhost/__init__.py",
+      "runtime_source": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/pypi-sdist/lib/python3.13/site-packages/langgraph_runtime_pg/__init__.py",
+      "head": "013_run_acceptance_receipts"
+    }
+  ],
+  "processes": [
+    {
+      "pid": 69932,
+      "executable": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/pypi-sdist/bin/graphharbor",
+      "role": "migrate"
+    },
+    {
+      "pid": 70298,
+      "executable": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/pypi-sdist/bin/graphharbor",
+      "role": "serve"
+    },
+    {
+      "pid": 70787,
+      "executable": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/pypi-sdist/bin/graphharbor",
+      "role": "serve"
+    },
+    {
+      "pid": 71181,
+      "executable": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/pypi-sdist/bin/graphharbor",
+      "role": "serve"
+    },
+    {
+      "pid": 71627,
+      "executable": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/pypi-sdist/bin/graphharbor",
+      "role": "worker"
+    },
+    {
+      "pid": 72406,
+      "executable": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/pypi-sdist/bin/graphharbor",
+      "role": "serve"
+    },
+    {
+      "pid": 72657,
+      "executable": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/pypi-sdist/bin/graphharbor",
+      "role": "worker"
+    }
+  ],
+  "cases": [
+    {
+      "case": "two-api-concurrency-pending-read",
+      "observed_at": "2026-10-10T15:36:56.941695+00:00",
+      "schema_head": "013_run_acceptance_receipts",
+      "run_count": 1,
+      "ledger_count": 1,
+      "run_id": "5b7ea1da-1aea-4287-9ddc-a92e2770f0d2",
+      "receipts": 1,
+      "runs": 1,
+      "execution_starts": 0,
+      "reads": 20
+    },
+    {
+      "case": "queued-stop-and-permanent-busy-rejection",
+      "observed_at": "2026-10-10T15:36:57.981392+00:00",
+      "schema_head": "013_run_acceptance_receipts",
+      "run_count": 1,
+      "ledger_count": 2,
+      "run_id": "5b7ea1da-1aea-4287-9ddc-a92e2770f0d2",
+      "execution_starts": 0
+    },
+    {
+      "case": "lost-ack-api-kill-restart-worker-recovery",
+      "observed_at": "2026-10-10T15:38:16.411570+00:00",
+      "schema_head": "013_run_acceptance_receipts",
+      "run_count": 2,
+      "ledger_count": 3,
+      "run_id": "51f6ec84-2c25-41f7-81f4-e04bb3611fb7",
+      "execution_starts": 1
+    },
+    {
+      "case": "after-commit-enqueue-failure-pg-recovery",
+      "observed_at": "2026-10-10T15:39:12.660910+00:00",
+      "schema_head": "013_run_acceptance_receipts",
+      "run_count": 3,
+      "ledger_count": 4,
+      "run_id": "293363fb-171a-40f9-9301-fd74643d9a7d",
+      "execution_starts": 1
+    },
+    {
+      "case": "deletion-expiry-permanent-key",
+      "observed_at": "2026-10-10T15:39:12.801345+00:00",
+      "schema_head": "013_run_acceptance_receipts",
+      "run_count": 2,
+      "ledger_count": 4,
+      "run_id": "51f6ec84-2c25-41f7-81f4-e04bb3611fb7",
+      "execution_starts": 1
+    }
+  ],
+  "passed": true,
+  "finished_at": "2026-10-10T15:39:12.839332+00:00"
+}

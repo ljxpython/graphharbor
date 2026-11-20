@@ -16,14 +16,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = {
-    "langgraph": "1.2.11",
-    "langgraph-sdk": "0.4.3",
+    "langgraph": "1.2.24",
+    "langgraph-sdk": "0.4.14",
     "langgraph-cli": "0.4.31",
-    "langgraph-checkpoint": "4.2.0",
-    "langgraph-checkpoint-postgres": "3.1.2",
+    "langgraph-checkpoint": "4.3.2",
+    "langgraph-checkpoint-postgres": "3.2.1",
 }
-MAPPING_PATH = ROOT / "docs" / "compatibility-matrix.json"
-EXCLUSIONS_PATH = ROOT / "docs" / "compatibility-exclusions.json"
+MAPPING_PATH = ROOT / "docs" / "compatibility" / "compatibility-matrix.json"
+EXCLUSIONS_PATH = ROOT / "docs" / "compatibility" / "compatibility-exclusions.json"
 
 
 def _locked_packages() -> dict[str, str]:
@@ -79,7 +79,7 @@ def _check_mapping() -> list[str]:
         errors.append("compatibility mapping must record a successful official protocol comparison")
     if not mapping.get("official-protocol-verified-at"):
         errors.append("compatibility mapping must record the official protocol verification date")
-    if mapping.get("protocol-exclusions") != "docs/compatibility-exclusions.json":
+    if mapping.get("protocol-exclusions") != EXCLUSIONS_PATH.relative_to(ROOT).as_posix():
         errors.append("compatibility mapping must point to the documented protocol exclusions")
     return errors
 

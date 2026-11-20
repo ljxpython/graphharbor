@@ -1,0 +1,26 @@
+{
+  "version": "0.13.0.post45",
+  "root": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/final-artifacts",
+  "artifacts": [
+    {
+      "file": "graphharbor-0.13.0.post45-py3-none-any.whl",
+      "sha256": "2a9e79a9674452925bdddf5fc121e8e6d366ca310f959d0371539c53114b9643",
+      "bytes": 51092
+    },
+    {
+      "file": "graphharbor-0.13.0.post45.tar.gz",
+      "sha256": "61f1052fa6f18d39dba8035d6a7e5628222d769ae1be1a4965104e6b37817f73",
+      "bytes": 65652
+    },
+    {
+      "file": "graphharbor_runtime-0.13.0.post45-py3-none-any.whl",
+      "sha256": "88824d784bbcf7d4c75234c83bec24dbc691323013a45d3804f208fe1367ab2d",
+      "bytes": 134613
+    },
+    {
+      "file": "graphharbor_runtime-0.13.0.post45.tar.gz",
+      "sha256": "82bed4dd8430c77f94ea01a46ce75ec2f72e11b10a59b4d404ad83ebd854c6f0",
+      "bytes": 190239
+    }
+  ]
+}

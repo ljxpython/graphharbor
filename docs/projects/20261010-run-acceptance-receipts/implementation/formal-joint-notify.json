@@ -1,0 +1,14 @@
+{
+  "outcome": "notify",
+  "run_id": "6692fb9e-42ac-4d34-9461-5527047a7d9a",
+  "accepted_while_worker_stopped": true,
+  "run_count": 2,
+  "ledger_count": 1,
+  "completion_model_calls": 1,
+  "pids": {
+    "provider": 56461,
+    "runtime": 56633,
+    "platform": 56955,
+    "worker": 58365
+  }
+}

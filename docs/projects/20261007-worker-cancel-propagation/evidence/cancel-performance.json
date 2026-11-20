@@ -1,0 +1,24 @@
+{
+  "samples": 24,
+  "concurrency": 8,
+  "failures": 0,
+  "heartbeat_ticks": 0,
+  "latency": {
+    "publish_to_receive": {
+      "p50_ms": 17.443,
+      "p95_ms": 34.076
+    },
+    "receive_to_stop": {
+      "p50_ms": 5.358,
+      "p95_ms": 8.967
+    },
+    "stop_to_commit": {
+      "p50_ms": 152.454,
+      "p95_ms": 341.86
+    }
+  },
+  "redis_pubsub_connections_before": 2,
+  "redis_pubsub_connections_after": 2,
+  "control_queues_after": 0,
+  "managed_tasks_after": 0
+}

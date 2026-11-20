@@ -8,8 +8,10 @@ from datetime import datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     String,
@@ -85,6 +87,7 @@ class ThreadRow(Base):
         Index("ix_threads_graph_id", "graph_id"),
         Index("ix_threads_status_updated_at", "status", "updated_at"),
         Index("ix_threads_updated_at", "updated_at"),
+        Index("ix_threads_expires_at", "expires_at"),
         Index(
             "ix_threads_metadata_gin",
             "metadata",
@@ -120,6 +123,33 @@ class ThreadRow(Base):
     state_updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    retention: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
+    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deletion_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ThreadDeletionRow(Base):
+    """Durable handoff and tombstone, deliberately independent of the thread."""
+
+    __tablename__ = "thread_deletions"
+    __table_args__ = (Index("ix_thread_deletions_due", "state", "next_attempt_at"),)
+
+    thread_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), unique=True, default=uuid.uuid4
+    )
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False)
+    reason: Mapped[str] = mapped_column(String(32), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="before_delete")
+    hooks: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=_JSONB_EMPTY)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_NOW)
+    lease_owner: Mapped[str | None] = mapped_column(String(64))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(256))
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_NOW)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RunRow(Base):
@@ -184,20 +214,109 @@ class RunRow(Base):
     )
 
 
+class RunAcceptanceRow(Base):
+    """Permanent retry binding, independent of Run/Thread deletion."""
+
+    __tablename__ = "run_acceptance_receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "scope_id", "credential_id", "key_sha256", name="uq_run_acceptance_binding"
+        ),
+        CheckConstraint(
+            "(outcome = 'accepted' AND run_id IS NOT NULL AND accepted_at IS NOT NULL "
+            "AND rejection_reason IS NULL AND authorization_metadata IS NOT NULL "
+            "AND ((closed_observed_at IS NULL AND details_expires_at IS NULL) OR "
+            "(closed_observed_at IS NOT NULL AND details_expires_at IS NOT NULL))) OR "
+            "(outcome = 'rejected' AND run_id IS NULL AND accepted_at IS NULL "
+            "AND rejection_reason IS NOT NULL AND rejection_reason = 'multitask_rejected' AND authorization_metadata IS NOT NULL "
+            "AND details_expires_at IS NOT NULL) OR "
+            "(outcome = 'expired' AND run_id IS NULL AND accepted_at IS NULL "
+            "AND rejection_reason IS NULL AND authorization_metadata IS NULL "
+            "AND details_expires_at IS NOT NULL)",
+            name="ck_run_acceptance_outcome",
+        ),
+        Index(
+            "ix_run_acceptance_open",
+            "recorded_at",
+            postgresql_where=text("outcome = 'accepted' AND closed_observed_at IS NULL"),
+        ),
+        Index(
+            "ix_run_acceptance_expiry",
+            "details_expires_at",
+            postgresql_where=text("outcome <> 'expired' AND details_expires_at IS NOT NULL"),
+        ),
+    )
+
+    receipt_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    scope_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    credential_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    key_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    thread_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    authorization_metadata: Mapped[dict | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=_NOW
+    )
+    closed_observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    details_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class RunCancellationRow(Base):
+    """A fixed cancellation boundary, independent of subsequent submissions."""
+
+    __tablename__ = "run_cancellations"
+    __table_args__ = (UniqueConstraint("thread_id", "principal", "idempotency_key"),)
+
+    cancellation_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    thread_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
+    principal: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
+    targets: Mapped[list] = mapped_column(JSONB, nullable=False)
+    reconcile_run_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    has_pending_interrupts: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class RunCheckpointBaselineRow(Base):
-    """Pre-execution state, retained until its run is deleted."""
+    """Small run boundary; touched namespaces are captured lazily by the saver."""
 
     __tablename__ = "run_checkpoint_baselines"
+    __table_args__ = (Index("ix_run_checkpoint_boundaries_order", "thread_id", "sequence"),)
 
     run_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("runs.run_id", ondelete="CASCADE"), primary_key=True
     )
-    thread_id: Mapped[uuid.UUID] = mapped_column(
+    thread_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("threads.thread_id", ondelete="CASCADE"), index=True
     )
-    checkpoints: Mapped[list] = mapped_column(JSONB, nullable=False)
-    writes: Mapped[list] = mapped_column(JSONB, nullable=False)
+    sequence: Mapped[int] = mapped_column(BigInteger, Identity(), nullable=False)
+    heads: Mapped[dict] = mapped_column(JSONB, nullable=False)
     projection: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+
+class RunCheckpointUndoRow(Base):
+    """First before-image for each key actually changed by a run."""
+
+    __tablename__ = "run_checkpoint_undo"
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("run_checkpoint_baselines.run_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    table_name: Mapped[str] = mapped_column(Text, primary_key=True)
+    row_key: Mapped[dict] = mapped_column(JSONB, primary_key=True)
+    before_image: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
 
 
 class CronRow(Base):
@@ -314,6 +433,37 @@ class RuntimeEventRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=_NOW
     )
+
+
+class RunCallbackDeliveryRow(Base):
+    """Independent snapshot retained after Run, Thread and terminal event deletion."""
+
+    __tablename__ = "run_callback_deliveries"
+    __table_args__ = (
+        UniqueConstraint("run_id", "profile", name="uq_run_callback_profile"),
+        Index("ix_run_callback_due", "state", "next_attempt_at"),
+    )
+
+    delivery_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    event_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    thread_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    profile: Mapped[str] = mapped_column(String(16), nullable=False)
+    target: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    retry_deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    lease_owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class RuntimeSchemaRow(Base):

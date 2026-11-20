@@ -1,0 +1,124 @@
+[
+  {
+    "package": "apps/platform-api",
+    "mode": [
+      "check"
+    ],
+    "files": [
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/adapters/langgraph/runs_sdk_adapter.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/adapters/langgraph/runtime_client.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/adapters/langgraph/runtime_gateway_upstream.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/core/security/tokens.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/modules/runtime_gateway/application/background_completion.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/modules/runtime_gateway/application/ports.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/modules/runtime_gateway/application/service.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/modules/runtime_gateway/infra/sqlalchemy/models.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/modules/runtime_gateway/infra/sqlalchemy/repository.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/modules/runtime_gateway/presentation/http.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/tests/test_background_tasks.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/tests/test_run_requests.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/migrations/versions/20261010_0007_run_acceptance.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/core/security/run_acceptance.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/modules/runtime_gateway/application/run_acceptance.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/tests/integration/test_run_acceptance_migration.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/tests/test_background_capabilities.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/tests/test_run_acceptance.py"
+    ],
+    "exit_code": 0,
+    "stdout": "All checks passed!\n",
+    "stderr": ""
+  },
+  {
+    "package": "apps/platform-api",
+    "mode": [
+      "format",
+      "--check"
+    ],
+    "files": [
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/adapters/langgraph/runs_sdk_adapter.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/adapters/langgraph/runtime_client.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/adapters/langgraph/runtime_gateway_upstream.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/core/security/tokens.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/modules/runtime_gateway/application/background_completion.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/modules/runtime_gateway/application/ports.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/modules/runtime_gateway/application/service.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/modules/runtime_gateway/infra/sqlalchemy/models.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/modules/runtime_gateway/infra/sqlalchemy/repository.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/modules/runtime_gateway/presentation/http.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/tests/test_background_tasks.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/tests/test_run_requests.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/migrations/versions/20261010_0007_run_acceptance.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/core/security/run_acceptance.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/src/platform_api/modules/runtime_gateway/application/run_acceptance.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/tests/integration/test_run_acceptance_migration.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/tests/test_background_capabilities.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/platform-api/tests/test_run_acceptance.py"
+    ],
+    "exit_code": 0,
+    "stdout": "18 files already formatted\n",
+    "stderr": ""
+  },
+  {
+    "package": "apps/runtime-service",
+    "mode": [
+      "check"
+    ],
+    "files": [
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/auth/platform.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/background_tasks/repository.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/background_tasks/service.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/middlewares/runtime_config.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/runtime/auth.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/runtime/errors.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/services/dearflow_agent/capabilities.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/tools/background.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/tools/errors.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/background/test_repository.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/background/test_service.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/background/test_tools_and_assembly.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/e2e/test_background_tasks.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/fixtures/run_reliability.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/runtime/test_auth.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/runtime/test_platform_auth.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/services/dearflow_agent/test_agent.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/services/showcase_demo/test_agent.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/background_tasks/capabilities.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/background/test_compatibility.py"
+    ],
+    "exit_code": 0,
+    "stdout": "All checks passed!\n",
+    "stderr": ""
+  },
+  {
+    "package": "apps/runtime-service",
+    "mode": [
+      "format",
+      "--check"
+    ],
+    "files": [
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/auth/platform.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/background_tasks/repository.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/background_tasks/service.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/middlewares/runtime_config.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/runtime/auth.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/runtime/errors.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/services/dearflow_agent/capabilities.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/tools/background.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/tools/errors.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/background/test_repository.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/background/test_service.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/background/test_tools_and_assembly.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/e2e/test_background_tasks.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/fixtures/run_reliability.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/runtime/test_auth.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/runtime/test_platform_auth.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/services/dearflow_agent/test_agent.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/services/showcase_demo/test_agent.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/src/runtime_service/background_tasks/capabilities.py",
+      "/Users/lijiaxin/.codex/worktrees/99f7/ai-agent-platform/apps/runtime-service/tests/background/test_compatibility.py"
+    ],
+    "exit_code": 0,
+    "stdout": "20 files already formatted\n",
+    "stderr": ""
+  }
+]

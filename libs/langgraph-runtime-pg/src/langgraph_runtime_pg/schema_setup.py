@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -23,7 +24,15 @@ async def run_schema_setup(
         prepare_threshold=0,
         row_factory=dict_row,
     ) as connection:
-        await connection.execute("SELECT pg_advisory_lock(%s)", (SETUP_ADVISORY_KEY,))
+        # A blocked SELECT can hold a snapshot that CREATE INDEX CONCURRENTLY needs to finish.
+        while True:
+            cursor = await connection.execute(
+                "SELECT pg_try_advisory_lock(%s) AS acquired", (SETUP_ADVISORY_KEY,)
+            )
+            row = await cursor.fetchone()
+            if row and row["acquired"]:
+                break
+            await asyncio.sleep(0.1)
         try:
             await setup(connection)
         finally:

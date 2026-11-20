@@ -1,0 +1,110 @@
+{
+  "started_at": "2026-10-10T14:26:01.555840+00:00",
+  "command": [
+    "scripts/verify_run_acceptance.py",
+    "--candidate",
+    "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/sdist/bin/graphharbor",
+    "--output",
+    "docs/projects/20261010-run-acceptance-receipts/implementation/final-sdist.json"
+  ],
+  "python_sdk": "0.4.3",
+  "installations": [
+    {
+      "graphharbor": "0.13.0.post45",
+      "runtime": "0.13.0.post45",
+      "sdk": "0.4.3",
+      "gateway_source": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/sdist/lib/python3.13/site-packages/langhost/__init__.py",
+      "runtime_source": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/sdist/lib/python3.13/site-packages/langgraph_runtime_pg/__init__.py",
+      "head": "013_run_acceptance_receipts"
+    }
+  ],
+  "processes": [
+    {
+      "pid": 22054,
+      "executable": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/sdist/bin/graphharbor",
+      "role": "migrate"
+    },
+    {
+      "pid": 23671,
+      "executable": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/sdist/bin/graphharbor",
+      "role": "serve"
+    },
+    {
+      "pid": 24177,
+      "executable": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/sdist/bin/graphharbor",
+      "role": "serve"
+    },
+    {
+      "pid": 24289,
+      "executable": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/sdist/bin/graphharbor",
+      "role": "serve"
+    },
+    {
+      "pid": 24443,
+      "executable": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/sdist/bin/graphharbor",
+      "role": "worker"
+    },
+    {
+      "pid": 24859,
+      "executable": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/sdist/bin/graphharbor",
+      "role": "serve"
+    },
+    {
+      "pid": 25099,
+      "executable": "/Users/lijiaxin/PyCharmMiscProject/graphharbor/.release-candidates/run-acceptance-post45-r2/sdist/bin/graphharbor",
+      "role": "worker"
+    }
+  ],
+  "cases": [
+    {
+      "case": "two-api-concurrency-pending-read",
+      "observed_at": "2026-10-10T14:27:44.301260+00:00",
+      "schema_head": "013_run_acceptance_receipts",
+      "run_count": 1,
+      "ledger_count": 1,
+      "run_id": "c96c1749-780f-4178-84e7-31593c6fec09",
+      "receipts": 1,
+      "runs": 1,
+      "execution_starts": 0,
+      "reads": 20
+    },
+    {
+      "case": "queued-stop-and-permanent-busy-rejection",
+      "observed_at": "2026-10-10T14:27:44.507834+00:00",
+      "schema_head": "013_run_acceptance_receipts",
+      "run_count": 1,
+      "ledger_count": 2,
+      "run_id": "c96c1749-780f-4178-84e7-31593c6fec09",
+      "execution_starts": 0
+    },
+    {
+      "case": "lost-ack-api-kill-restart-worker-recovery",
+      "observed_at": "2026-10-10T14:28:01.383335+00:00",
+      "schema_head": "013_run_acceptance_receipts",
+      "run_count": 2,
+      "ledger_count": 3,
+      "run_id": "87a5e110-86a5-4be4-94fe-c55e1d032859",
+      "execution_starts": 1
+    },
+    {
+      "case": "after-commit-enqueue-failure-pg-recovery",
+      "observed_at": "2026-10-10T14:28:16.665788+00:00",
+      "schema_head": "013_run_acceptance_receipts",
+      "run_count": 3,
+      "ledger_count": 4,
+      "run_id": "6fae2b10-03ff-4910-bc84-be45bd4dca64",
+      "execution_starts": 1
+    },
+    {
+      "case": "deletion-expiry-permanent-key",
+      "observed_at": "2026-10-10T14:28:16.841185+00:00",
+      "schema_head": "013_run_acceptance_receipts",
+      "run_count": 2,
+      "ledger_count": 4,
+      "run_id": "87a5e110-86a5-4be4-94fe-c55e1d032859",
+      "execution_starts": 1
+    }
+  ],
+  "passed": true,
+  "finished_at": "2026-10-10T14:28:16.884159+00:00"
+}

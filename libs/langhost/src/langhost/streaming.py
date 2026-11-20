@@ -14,11 +14,13 @@ from sqlalchemy import func, select
 from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 
+from langgraph_runtime_pg.checkpoint_mutations import rollback_receipt
 from langgraph_runtime_pg.database import connect
 from langgraph_runtime_pg.metrics import inc as metric_inc
 from langgraph_runtime_pg.models import RunRow, RuntimeEventRow, ThreadRow
 from langgraph_runtime_pg.protocol import RunStatus, project_v3_event
 from langgraph_runtime_pg.redis_stream import Message, get_stream_manager
+from langgraph_runtime_pg.run_store import stopped_event
 
 _TERMINAL = frozenset(
     {
@@ -178,7 +180,7 @@ async def _thread_frame(
                     if run is not None:
                         attempt = max(run.retry_count, 1)
             return "metadata", {"run_id": str(row.run_id), "attempt": attempt}, f"{row.sequence}-0"
-        if status in _TERMINAL:
+        if status in _TERMINAL and row.terminal and event.get("execution_stopped") is not False:
             if "lifecycle" not in modes and "run_modes" not in modes:
                 return None
             return (
@@ -433,6 +435,11 @@ async def _run_snapshot(request: Request, run_id: UUID) -> RunRow | None:
         return await _authorized_run(request, conn.session, run_id)
 
 
+async def _run_stopped(snapshot: RunRow) -> bool:
+    async with connect() as conn:
+        return await stopped_event(conn.session, snapshot) is not None
+
+
 async def _run_sse(
     request: Request,
     *,
@@ -480,12 +487,12 @@ async def _run_sse(
                 )
                 return
             if not include_location and not snapshot.kwargs.get("stream_resumable", False):
-                if snapshot.status in _TERMINAL:
+                if await _run_stopped(snapshot):
                     return
                 replay = []
             yield _sse(
                 "metadata",
-                {"run_id": str(run_id), "attempt": snapshot.retry_count + 1},
+                {"run_id": str(run_id), "attempt": max(snapshot.retry_count, 1)},
             )
 
             async def emit_envelope(envelope: dict[str, Any]) -> AsyncIterator[str]:
@@ -523,7 +530,7 @@ async def _run_sse(
                     yield frame
                     last_sent_at = loop.time()
             snapshot = await _run_snapshot(request, run_id)
-            if snapshot is None or snapshot.status in _TERMINAL:
+            if snapshot is None or await _run_stopped(snapshot):
                 return
 
             started = loop.time()
@@ -538,7 +545,13 @@ async def _run_sse(
                     yield ": heartbeat\n\n"
                     last_sent_at = loop.time()
                     snapshot = await _run_snapshot(request, run_id)
-                    if snapshot is not None and snapshot.status in _TERMINAL:
+                    if snapshot is None:
+                        async with connect() as conn:
+                            receipt = await rollback_receipt(conn.session, run_id)
+                        if receipt is None or receipt.payload.get("execution_stopped") is not True:
+                            yield _sse("error", {"detail": "worker shutdown is unconfirmed"})
+                        return
+                    if snapshot is not None and await _run_stopped(snapshot):
                         for envelope in await _load_events(run_id, after=max(seen or {cursor})):
                             async for frame in emit_envelope(envelope):
                                 yield frame
@@ -565,7 +578,9 @@ async def _run_sse(
                 if isinstance(event, dict) and event.get("event") == "lifecycle":
                     status = str(event.get("status", ""))
                     if status in _TERMINAL:
-                        return
+                        snapshot = await _run_snapshot(request, run_id)
+                        if snapshot is None or await _run_stopped(snapshot):
+                            return
             yield _sse("error", {"detail": "stream timed out"})
         finally:
             metric_inc("graphharbor_sse_connections_closed_total", labels={"version": version})

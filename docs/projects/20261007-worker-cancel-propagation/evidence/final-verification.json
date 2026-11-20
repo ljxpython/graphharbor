@@ -1,0 +1,33 @@
+{
+  "status": "done",
+  "date": "2026-10-07",
+  "completed_task_cards": 13,
+  "task_phase_records": 13,
+  "non_e2e": {
+    "passed": 270,
+    "skipped": 8,
+    "deselected": 13,
+    "warnings": 4,
+    "duration_seconds": 79.3
+  },
+  "isolated_cron": {
+    "passed": 3,
+    "warnings": 2,
+    "duration_seconds": 10.75
+  },
+  "final_pypi_protocol": {
+    "passed_scenarios": 24,
+    "server_python": "3.13.9",
+    "python_sdk": "0.4.6",
+    "javascript_sdk": "1.9.28"
+  },
+  "mypy_source_files": 38,
+  "formatted_files": 83,
+  "documentation_files_checked": 24,
+  "specialty_release_documents": 14,
+  "valid_local_references": 37,
+  "release": "0.13.0.post42",
+  "platform_deployed": false,
+  "platform_project_status": "blocked",
+  "worker_timeout_project_status": "partial"
+}

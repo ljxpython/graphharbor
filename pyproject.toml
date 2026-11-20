@@ -51,10 +51,10 @@ graphharbor = { workspace = true }
 constraint-dependencies = [
     "langgraph-api==0.13.0",
     "langgraph-runtime-inmem==0.33.0",
-    "langgraph-sdk==0.4.3",
-    "langgraph==1.2.11",
-    "langgraph-checkpoint==4.2.0",
-    "langgraph-checkpoint-postgres==3.1.2",
+    "langgraph-sdk==0.4.14",
+    "langgraph==1.2.24",
+    "langgraph-checkpoint==4.3.2",
+    "langgraph-checkpoint-postgres==3.2.1",
 ]
 package = false
 
@@ -162,6 +162,7 @@ module = [
     "deepagents.*",
     "croniter",
     "orjson",
+    "jsonpatch",
     "psycopg_pool",
     "psycopg_pool.*",
 ]

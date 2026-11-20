@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib.util
 import json
 import math
 import os
@@ -11,15 +12,24 @@ import signal
 import socket
 import time
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import structlog
+from asyncpg import (  # type: ignore[import-untyped]
+    CannotConnectNowError,
+    DeadlockDetectedError,
+    PostgresConnectionError,
+    SerializationError,
+    TooManyConnectionsError,
+)
 from langgraph.errors import GraphDrained
 from langgraph.runtime import RunControl
+from psycopg import InterfaceError, OperationalError
 from redis.exceptions import RedisError
-from sqlalchemy import delete, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
 
 from langgraph_runtime_pg.auth import (
@@ -27,7 +37,11 @@ from langgraph_runtime_pg.auth import (
     verify_runtime_context_envelope,
 )
 from langgraph_runtime_pg.checkpoint import get_checkpointer, reconnect_checkpointer
-from langgraph_runtime_pg.checkpoint_mutations import checkpoint_writer, complete_rollbacks
+from langgraph_runtime_pg.checkpoint_mutations import (
+    checkpoint_writer,
+    complete_rollbacks,
+    project_run_values,
+)
 from langgraph_runtime_pg.database import connect, start_pool, stop_pool
 from langgraph_runtime_pg.graph_executor import (
     invoke_graph,
@@ -36,9 +50,13 @@ from langgraph_runtime_pg.graph_executor import (
     resume_command,
     thread_config,
 )
-from langgraph_runtime_pg.graph_registry import GraphRegistry
+from langgraph_runtime_pg.graph_registry import (
+    GraphRegistry,
+    resolve_config_base_dir,
+    resolve_within_base_dir,
+)
 from langgraph_runtime_pg.metrics import inc as metric_inc, set_gauge as metric_set_gauge
-from langgraph_runtime_pg.models import AssistantRow, RunLeaseRow, RunRow, ThreadRow
+from langgraph_runtime_pg.models import AssistantRow, RunRow, ThreadRow
 from langgraph_runtime_pg.production import configure_structured_logging
 from langgraph_runtime_pg.protocol import (
     TERMINAL_RUN_STATUSES,
@@ -50,15 +68,18 @@ from langgraph_runtime_pg.redis_stream import (
     Message,
     bg_job_heartbeat_secs,
     clear_run_heartbeat,
+    control_action as _control_action,
     dequeue_run_hint,
     get_stream_manager,
     set_run_heartbeat,
     wait_for_queue_wake,
     wake_run_queue,
 )
+from langgraph_runtime_pg.retry import RETRIABLE_EXCEPTIONS
 from langgraph_runtime_pg.run_state import is_terminal
 from langgraph_runtime_pg.run_store import RunOwnershipError, RunRepository
 from langgraph_runtime_pg.thread_config import attach_thread_metadata
+from langgraph_runtime_pg.webhooks import project_error
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -71,34 +92,58 @@ class RunTimedOut(Exception):
     pass
 
 
-def _run_timeout_seconds() -> float | None:
-    raw = os.environ.get("GRAPHHARBOR_RUN_TIMEOUT_SECONDS")
-    if raw is None or not raw.strip():
-        return None
+def _run_timeout_seconds() -> float:
+    name = "GRAPHHARBOR_RUN_TIMEOUT_SECONDS"
+    raw = os.environ.get(name)
+    if not raw or not raw.strip():
+        name = "BG_JOB_TIMEOUT_SECS"
+        raw = os.environ.get(name, "86400")
     try:
         value = float(raw)
     except ValueError as exc:
-        raise ValueError("GRAPHHARBOR_RUN_TIMEOUT_SECONDS must be a positive number") from exc
+        raise ValueError(f"{name} must be a positive number") from exc
     if not math.isfinite(value) or value <= 0:
-        raise ValueError("GRAPHHARBOR_RUN_TIMEOUT_SECONDS must be a positive number")
+        raise ValueError(f"{name} must be a positive number")
     return value
 
 
 def _drain_grace_seconds() -> float:
-    raw = os.environ.get("GRAPHHARBOR_SHUTDOWN_DRAIN_SECONDS", "30")
+    name = "GRAPHHARBOR_SHUTDOWN_DRAIN_SECONDS"
+    raw = os.environ.get(name)
+    if not raw or not raw.strip():
+        name = "BG_JOB_SHUTDOWN_GRACE_PERIOD_SECS"
+        raw = os.environ.get(name, "180")
     try:
         value = float(raw)
     except ValueError as exc:
-        raise ValueError("GRAPHHARBOR_SHUTDOWN_DRAIN_SECONDS must be a positive number") from exc
-    if not math.isfinite(value) or value <= 0:
-        raise ValueError("GRAPHHARBOR_SHUTDOWN_DRAIN_SECONDS must be a positive number")
+        raise ValueError(f"{name} must be a positive number up to 3600") from exc
+    if not math.isfinite(value) or not 0 < value <= 3600:
+        raise ValueError(f"{name} must be a positive number up to 3600")
     return value
 
 
 def _is_infrastructure_error(exc: BaseException) -> bool:
+    if isinstance(exc, DBAPIError):
+        sqlstate = str(getattr(exc.orig, "sqlstate", "") or "")
+        return (
+            exc.connection_invalidated
+            or sqlstate.startswith("08")
+            or sqlstate in {"40001", "40P01", "53300", "57P03"}
+            or (exc.orig is not None and _is_infrastructure_error(exc.orig))
+        )
     return isinstance(
-        exc, (TimeoutError, ConnectionError, OSError, DBAPIError)
-    ) or exc.__class__.__module__.startswith("psycopg")
+        exc,
+        (
+            *RETRIABLE_EXCEPTIONS,
+            OperationalError,
+            InterfaceError,
+            PostgresConnectionError,
+            CannotConnectNowError,
+            SerializationError,
+            DeadlockDetectedError,
+            TooManyConnectionsError,
+        ),
+    )
 
 
 def _jsonable(value: Any) -> Any:
@@ -202,8 +247,10 @@ class ProductionWorker:
             lease_seconds = max(int(os.environ.get("GRAPHHARBOR_LEASE_SECONDS", "60")), 5)
         except ValueError:
             lease_seconds = 60
-        self.repository = RunRepository(lease_seconds=lease_seconds)
         self.run_timeout_seconds = _run_timeout_seconds()
+        self.repository = RunRepository(
+            lease_seconds=lease_seconds, run_timeout_seconds=self.run_timeout_seconds
+        )
         self.drain_grace_seconds = _drain_grace_seconds()
         self.stop_event = asyncio.Event()
 
@@ -324,7 +371,8 @@ class ProductionWorker:
 
     async def _cancel_requested(self, run_id: UUID, thread_id: UUID | None) -> bool:
         try:
-            if await get_stream_manager().aget_control_key(run_id, thread_id) is not None:
+            message = await get_stream_manager().aget_control_key(run_id, thread_id, refresh=True)
+            if _control_action(message) in {"interrupt", "rollback"}:
                 return True
         except Exception:
             logger.debug("control transport unavailable", run_id=str(run_id), exc_info=True)
@@ -332,8 +380,83 @@ class ProductionWorker:
             row = await conn.session.get(RunRow, run_id)
         return row is None or is_terminal(row.status)
 
+    async def _listen_for_cancel(
+        self,
+        queue: asyncio.Queue,
+        run_id: UUID,
+        thread_id: UUID | None,
+        cancel_event: asyncio.Event,
+    ) -> None:
+        while True:
+            message = await queue.get()
+            action = _control_action(message)
+            if action in {"interrupt", "rollback"} or (
+                action == "recheck" and await self._cancel_requested(run_id, thread_id)
+            ):
+                if not cancel_event.is_set():
+                    metric_inc("graphharbor_cancel_control_received_total")
+                    logger.info("run cancel control received", run_id=str(run_id), action=action)
+                cancel_event.set()
+
+    async def _confirm_shutdown(
+        self,
+        run_id: UUID,
+        generation: int,
+        cancel_event: asyncio.Event,
+        trace_context: dict[str, Any],
+    ) -> None:
+        while True:
+            try:
+                async with connect() as conn:
+                    stopped = await conn.session.scalar(
+                        select(RunRow).where(RunRow.run_id == run_id).with_for_update()
+                    )
+                    confirmed = []
+                    if (
+                        stopped is not None
+                        and stopped.reason != RunReason.ROLLBACK.value
+                        and (
+                            stopped.reason == RunReason.CANCEL_REQUESTED.value
+                            or (cancel_event.is_set() and not is_terminal(stopped.status))
+                            or (is_terminal(stopped.status) and stopped.lease_owner is None)
+                        )
+                    ):
+                        try:
+                            if stopped.lease_owner is None:
+                                event = await self.repository.confirm_fenced_stop(
+                                    conn.session, stopped, generation
+                                )
+                                confirmed = [event] if event else []
+                            else:
+                                await self.repository.finish(
+                                    conn.session,
+                                    run_id,
+                                    self.owner,
+                                    RunStatus.INTERRUPTED,
+                                    reason=RunReason.CANCEL_REQUESTED,
+                                    generation=generation,
+                                    trace_context=trace_context,
+                                )
+                                confirmed = list(self.repository.last_transition_events)
+                        except RunOwnershipError:
+                            pass
+                for event in confirmed:
+                    await self._fanout_durable_event(event)
+                await complete_rollbacks(owner=self.owner, run_id=run_id, generation=generation)
+                return
+            except Exception as exc:
+                if not _is_infrastructure_error(exc):
+                    raise
+                logger.warning("run shutdown confirmation will retry", run_id=str(run_id))
+                await asyncio.sleep(0.5)
+
     async def _heartbeat(
-        self, run_id: UUID, thread_id: UUID | None, cancel_event: asyncio.Event
+        self,
+        run_id: UUID,
+        thread_id: UUID | None,
+        cancel_event: asyncio.Event,
+        *,
+        generation: int | None = None,
     ) -> None:
         interval = min(
             max(bg_job_heartbeat_secs() / 2.0, 1.0),
@@ -343,7 +466,9 @@ class ProductionWorker:
             await asyncio.sleep(interval)
             try:
                 async with connect() as conn:
-                    if not await self.repository.renew(conn.session, run_id, self.owner):
+                    if not await self.repository.renew(
+                        conn.session, run_id, self.owner, generation=generation
+                    ):
                         cancel_event.set()
                         return
                 # PostgreSQL lease is authoritative; Redis heartbeat is advisory.
@@ -351,7 +476,6 @@ class ProductionWorker:
                     await set_run_heartbeat(run_id)
                 if await self._cancel_requested(run_id, thread_id):
                     cancel_event.set()
-                    return
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -367,6 +491,8 @@ class ProductionWorker:
         graph_id = ""
         runtime_context_error: RuntimeContextError | None = None
         claimed_transition_events: list[Any] = []
+        budget: dict[str, Any] | None = None
+        deadline_monotonic: float | None = None
         async with connect() as conn:
             run = await self.repository.claim_next(conn.session, self.owner)
             if run is None:
@@ -403,7 +529,17 @@ class ProductionWorker:
                         run.kwargs.get("interrupt_after"), "interrupt_after"
                     )
                     input_value = (
-                        None if drained else command or run.kwargs.get("input", run.kwargs)
+                        None
+                        if drained
+                        else command
+                        or run.kwargs.get(
+                            "input",
+                            {
+                                key: value
+                                for key, value in run.kwargs.items()
+                                if key != "__graphharbor_run_budget"
+                            },
+                        )
                     )
                     run_config = run.kwargs.get("config")
                     if not isinstance(run_config, dict):
@@ -439,6 +575,7 @@ class ProductionWorker:
                             "run_id",
                             "__pregel_runtime",
                             "__graphharbor_runtime_context",
+                            "__graphharbor_run_budget",
                         }
                     }
                     checkpoint_id = run.kwargs.get("checkpoint_id")
@@ -513,6 +650,23 @@ class ProductionWorker:
                         ),
                     }
                     trace_context = {key: value for key, value in trace_context.items() if value}
+                    stored_budget = run.kwargs.get("__graphharbor_run_budget")
+                    if isinstance(stored_budget, dict):
+                        # Sample before the query so database latency never adds time.
+                        observed_monotonic = time.monotonic()
+                        database_now = await conn.session.scalar(select(func.clock_timestamp()))
+                        deadline_monotonic = (
+                            observed_monotonic
+                            + (
+                                datetime.fromisoformat(stored_budget["deadline_at"]) - database_now
+                            ).total_seconds()
+                        )
+                        budget = {
+                            **stored_budget,
+                            "run_id": str(run_id),
+                            "thread_id": str(thread_id or run_id),
+                            "deadline_monotonic": deadline_monotonic,
+                        }
                     if thread is not None:
                         if runtime_context_error is None:
                             thread.graph_id = graph_id
@@ -550,8 +704,12 @@ class ProductionWorker:
 
         cancel_event = asyncio.Event()
         heartbeat = asyncio.create_task(
-            self._heartbeat(run_id, thread_id, cancel_event), name=f"heartbeat-{run_id}"
+            self._heartbeat(run_id, thread_id, cancel_event, generation=run.retry_count),
+            name=f"heartbeat-{run_id}",
         )
+        manager = None
+        control_queue = None
+        listener = None
         execution: asyncio.Task[Any] | None = None
         cancellation: asyncio.Task[Any] | None = None
         shutdown: asyncio.Task[bool] | None = None
@@ -559,14 +717,34 @@ class ProductionWorker:
         with contextlib.suppress(RedisError, OSError):
             await set_run_heartbeat(run_id)
         try:
+            try:
+                manager = get_stream_manager()
+                control_queue = await manager.add_control_queue(run_id, thread_id)
+                listener = asyncio.create_task(
+                    self._listen_for_cancel(control_queue, run_id, thread_id, cancel_event),
+                    name=f"control-{run_id}",
+                )
+                await manager.wait_control_ready()
+            except RuntimeError:
+                logger.warning("run control unavailable; using durable polling", run_id=str(run_id))
             await self._publish_event(
                 run_id,
                 thread_id,
                 {"event": "lifecycle", "status": RunStatus.RUNNING.value},
                 trace_context=trace_context,
             )
-            if await self._cancel_requested(run_id, thread_id):
+            if cancel_event.is_set() or await self._cancel_requested(run_id, thread_id):
                 raise RunCancelled
+
+            def remaining_timeout() -> float | None:
+                return (
+                    max(0.0, deadline_monotonic - time.monotonic())
+                    if deadline_monotonic is not None
+                    else None
+                )
+
+            if remaining_timeout() == 0:
+                raise RunTimedOut("graphharbor.run_timeout")
 
             event_buffer = _StreamEventBuffer(
                 lambda events: self._publish_events(
@@ -605,10 +783,43 @@ class ProductionWorker:
             async def execute() -> Any:
                 writer_token = checkpoint_writer.set((str(run_id), self.owner, run.retry_count))
                 try:
-                    async with self.registry.open(graph_id, config) as graph:
+                    if remaining_timeout() == 0:
+                        raise RunTimedOut("graphharbor.run_timeout")
+                    factory_config = cast(
+                        Any,
+                        {
+                            **config,
+                            "configurable": {
+                                **config["configurable"],
+                                **(
+                                    {"__graphharbor_run_budget": budget}
+                                    if budget is not None
+                                    else {}
+                                ),
+                            },
+                        },
+                    )
+                    async with self.registry.open(graph_id, factory_config) as graph:
+                        invocation_input = input_value
+                        if run.retry_count > 1 and not drained and thread_id is not None:
+                            state_reader = getattr(graph, "aget_state", None)
+                            if callable(state_reader):
+                                latest_config = {
+                                    **config,
+                                    "configurable": {
+                                        key: value
+                                        for key, value in config["configurable"].items()
+                                        if key != "checkpoint_id"
+                                    },
+                                }
+                                state = await state_reader(latest_config)
+                                checkpoint_metadata = getattr(state, "metadata", None) or {}
+                                if str(checkpoint_metadata.get("run_id")) == str(run_id):
+                                    config["configurable"].pop("checkpoint_id", None)
+                                    invocation_input = None
                         return await invoke_graph(
                             graph,
-                            input_value,
+                            invocation_input,
                             config=config,
                             on_event=on_event,
                             durability=durability,
@@ -631,15 +842,20 @@ class ProductionWorker:
             shutdown = asyncio.create_task(self.stop_event.wait(), name=f"shutdown-{run_id}")
             done, _ = await asyncio.wait(
                 {execution, cancellation, shutdown},
-                timeout=self.run_timeout_seconds,
+                timeout=remaining_timeout(),
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if shutdown in done and execution not in done and cancellation not in done:
                 if thread_id is not None:
                     control.request_drain("shutdown")
+                    remaining = remaining_timeout()
                     done, _ = await asyncio.wait(
                         {execution, cancellation},
-                        timeout=self.drain_grace_seconds,
+                        timeout=(
+                            min(self.drain_grace_seconds, remaining)
+                            if remaining is not None
+                            else self.drain_grace_seconds
+                        ),
                         return_when=asyncio.FIRST_COMPLETED,
                     )
                 if not done or thread_id is None:
@@ -647,6 +863,9 @@ class ProductionWorker:
                     execution.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await execution
+                    if remaining_timeout() == 0:
+                        shutdown_requeue = False
+                        raise RunTimedOut("graphharbor.run_timeout")
                     raise RunCancelled
             elif not done:
                 execution.cancel()
@@ -710,14 +929,20 @@ class ProductionWorker:
                         terminal_payload=terminal_payload,
                         preceding_events=preceding_events,
                         trace_context=trace_context,
+                        generation=run.retry_count,
                     )
                     if finished is None:
                         return True
                     metric_inc("graphharbor_runs_interrupted_total", labels={"reason": "hitl"})
-                    if thread_row is not None:
+                    if thread_row is not None and finished.reason == RunReason.HITL_INTERRUPT.value:
                         thread_row.status = "interrupted"
                         thread_row.interrupts = {item["id"]: item for item in interrupts}
-                        thread_row.values_ = _jsonable(getattr(result, "value", None))
+                        await project_run_values(
+                            conn.session,
+                            run_id,
+                            thread_row,
+                            _jsonable(getattr(result, "value", None)),
+                        )
                 else:
                     finished = await self.repository.finish(
                         conn.session,
@@ -727,14 +952,20 @@ class ProductionWorker:
                         reason=RunReason.COMPLETED,
                         terminal_payload=terminal_payload,
                         trace_context=trace_context,
+                        generation=run.retry_count,
                     )
                     if finished is None:
                         return True
                     metric_inc("graphharbor_runs_completed_total")
-                    if thread_row is not None:
+                    if thread_row is not None and finished.reason == RunReason.COMPLETED.value:
                         thread_row.status = "idle"
                         thread_row.interrupts = {}
-                        thread_row.values_ = _jsonable(getattr(result, "value", result))
+                        await project_run_values(
+                            conn.session,
+                            run_id,
+                            thread_row,
+                            _jsonable(getattr(result, "value", result)),
+                        )
                         thread_row.error = None
                 completed_events = list(self.repository.last_transition_events)
             for event in completed_events:
@@ -742,64 +973,29 @@ class ProductionWorker:
         except GraphDrained:
             async with connect() as conn:
                 await self.repository.requeue_for_shutdown(
-                    conn.session, run_id, self.owner, drained=thread_id is not None
+                    conn.session,
+                    run_id,
+                    self.owner,
+                    drained=thread_id is not None,
+                    generation=run.retry_count,
                 )
                 drain_events = list(self.repository.last_transition_events)
             for event in drain_events:
                 await self._fanout_durable_event(event)
             await wake_run_queue()
         except RunCancelled:
-            publish_cancel_event = False
             cancel_events: list[Any] = []
             if shutdown_requeue:
                 async with connect() as conn:
-                    await self.repository.requeue_for_shutdown(conn.session, run_id, self.owner)
+                    await self.repository.requeue_for_shutdown(
+                        conn.session, run_id, self.owner, generation=run.retry_count
+                    )
                     cancel_events = list(self.repository.last_transition_events)
-                lifecycle_status = RunStatus.PENDING.value
-                lifecycle_reason = RunReason.SHUTDOWN_REQUEUE.value
             else:
                 metric_inc("graphharbor_runs_interrupted_total", labels={"reason": "cancel"})
-                async with connect() as conn:
-                    run_row = await conn.session.get(RunRow, run_id)
-                    if run_row is not None and not is_terminal(run_row.status):
-                        finished = await self.repository.finish(
-                            conn.session,
-                            run_id,
-                            self.owner,
-                            RunStatus.INTERRUPTED,
-                            reason=RunReason.CANCEL_REQUESTED,
-                            terminal_payload={
-                                "event": "lifecycle",
-                                "status": RunStatus.INTERRUPTED.value,
-                                "reason": RunReason.CANCEL_REQUESTED.value,
-                            },
-                            trace_context=trace_context,
-                        )
-                        if finished is None:
-                            return True
-                        if thread_id:
-                            thread_row = await conn.session.get(ThreadRow, thread_id)
-                            if thread_row is not None:
-                                thread_row.status = "idle"
-                        publish_cancel_event = True
-                        cancel_events = list(self.repository.last_transition_events)
-                lifecycle_status = RunStatus.INTERRUPTED.value
-                lifecycle_reason = RunReason.CANCEL_REQUESTED.value
-            if cancel_events:
-                for event in cancel_events:
-                    await self._fanout_durable_event(event)
-            elif publish_cancel_event or shutdown_requeue:
-                with contextlib.suppress(Exception):
-                    await self._publish_event(
-                        run_id,
-                        thread_id,
-                        {
-                            "event": "lifecycle",
-                            "status": lifecycle_status,
-                            "reason": lifecycle_reason,
-                        },
-                        trace_context=trace_context,
-                    )
+                cancel_event.set()
+            for event in cancel_events:
+                await self._fanout_durable_event(event)
         except RunOwnershipError:
             logger.info("run finalization lost lease ownership", run_id=str(run_id))
         except Exception as exc:
@@ -826,8 +1022,8 @@ class ProductionWorker:
                         if thread_row is not None:
                             thread_row.status = "idle"
                             thread_row.error = {"message": str(exc), "type": type(exc).__name__}
-                    retrying = infrastructure and run_row.retry_count < min(
-                        run_row.max_attempts, self.repository.max_attempts
+                    retrying = infrastructure and await self.repository.can_retry(
+                        conn.session, run_row
                     )
                     if timed_out:
                         await self.repository.finish(
@@ -841,8 +1037,10 @@ class ProductionWorker:
                                 "status": RunStatus.TIMEOUT.value,
                                 "reason": RunReason.TIMEOUT.value,
                                 "error": {"type": type(exc).__name__, "message": str(exc)},
+                                "outcome": project_error(exc),
                             },
                             trace_context=trace_context,
+                            generation=run.retry_count,
                         )
                     else:
                         await self.repository.fail(
@@ -866,8 +1064,10 @@ class ProductionWorker:
                                     else RunReason.BUSINESS_ERROR.value
                                 ),
                                 "error": {"type": type(exc).__name__, "message": str(exc)},
+                                "outcome": project_error(exc),
                             },
                             trace_context=trace_context,
+                            generation=run.retry_count,
                         )
                     failure_events = list(self.repository.last_transition_events)
             if infrastructure:
@@ -880,43 +1080,27 @@ class ProductionWorker:
                     await self._fanout_durable_event(event)
             logger.exception("run execution failed", run_id=str(run_id), graph_id=graph_id or "")
         finally:
-            for task in (execution, cancellation, shutdown):
-                if task is not None and not task.done():
+            for task in (execution, cancellation, shutdown, listener):
+                if task is not None and not task.done() and not task.cancelling():
                     task.cancel()
             await asyncio.gather(
-                *(task for task in (execution, cancellation, shutdown) if task is not None),
+                *(
+                    task
+                    for task in (execution, cancellation, shutdown, listener)
+                    if task is not None
+                ),
                 return_exceptions=True,
             )
-            heartbeat.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await heartbeat
-            with contextlib.suppress(RedisError, OSError):
-                await clear_run_heartbeat(run_id)
-            # Explicit cancellation retains the lease until execution has
-            # actually stopped. Only then may the next queued run start.
-            async with connect() as conn:
-                stopped = await conn.session.scalar(
-                    select(RunRow)
-                    .where(
-                        RunRow.run_id == run_id,
-                        RunRow.lease_owner == self.owner,
-                        RunRow.reason == RunReason.CANCEL_REQUESTED.value,
-                    )
-                    .with_for_update()
-                )
-                if stopped is not None:
-                    stopped.lease_owner = None
-                    stopped.lease_expires_at = None
-                    await conn.session.execute(
-                        delete(RunLeaseRow).where(RunLeaseRow.run_id == run_id)
-                    )
-                    if thread_id:
-                        stopped_thread = await conn.session.get(ThreadRow, thread_id)
-                        if stopped_thread is not None:
-                            stopped_thread.status = (
-                                "interrupted" if stopped_thread.interrupts else "idle"
-                            )
-            await complete_rollbacks(owner=self.owner, run_id=run_id)
+            try:
+                await self._confirm_shutdown(run_id, run.retry_count, cancel_event, trace_context)
+            finally:
+                heartbeat.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat
+                if manager is not None and control_queue is not None:
+                    await manager.remove_control_queue(run_id, thread_id, control_queue)
+                with contextlib.suppress(RedisError, OSError):
+                    await clear_run_heartbeat(run_id)
         return True
 
     async def reap_once(self) -> int:
@@ -967,6 +1151,13 @@ class ProductionWorker:
             except Exception:
                 logger.exception("lease reaper failed")
             try:
+                from langgraph_runtime_pg.run_acceptance import RunAcceptanceRepository
+
+                async with connect() as conn:
+                    await RunAcceptanceRepository().maintain_acceptance_receipts(conn.session)
+            except Exception:
+                logger.exception("acceptance receipt maintenance failed")
+            try:
                 retention_seconds = int(
                     os.environ.get("GRAPHHARBOR_EVENT_RETENTION_SECONDS", "86400")
                 )
@@ -998,6 +1189,33 @@ async def run_worker(config_path: Path, *, n_jobs_per_worker: int = 1) -> None:
     if n_jobs_per_worker < 1:
         raise ValueError("n_jobs_per_worker must be a positive integer")
     configure_structured_logging()
+    from langgraph_runtime_pg.webhooks import configure_webhooks
+
+    try:
+        config = json.loads(await asyncio.to_thread(config_path.read_text))
+    except FileNotFoundError:
+        config = {}
+
+    projector_spec = ((config.get("webhooks") or {}).get("terminal") or {}).get("projector")
+
+    def load_hook(hook_spec: str) -> Any:
+        path_text, separator, symbol = hook_spec.partition(":")
+        if not separator:
+            raise ValueError("lifecycle hook must use path.py:symbol")
+        path = resolve_within_base_dir(resolve_config_base_dir(config_path, config), path_text)
+        spec = importlib.util.spec_from_file_location(
+            f"graphharbor_projector_{abs(hash(path))}", path
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load terminal projector {path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return getattr(module, symbol)
+
+    configure_webhooks(config, load_hook(projector_spec) if projector_spec else None)
+    from langgraph_runtime_pg.retention import configure_retention, retention_loop
+
+    configure_retention(config, load_hook)
     registry = GraphRegistry.from_path(config_path)
     previous_auto_migrate = os.environ.get("LG_RUNTIME_PG_AUTO_MIGRATE")
     os.environ["LG_RUNTIME_PG_AUTO_MIGRATE"] = "false"
@@ -1021,11 +1239,26 @@ async def run_worker(config_path: Path, *, n_jobs_per_worker: int = 1) -> None:
             installed_signals.append(sig)
         except (NotImplementedError, RuntimeError):
             continue
+    dispatcher: asyncio.Task[None] | None = None
+    retention_task: asyncio.Task[None] | None = None
     try:
+        if not ((config.get("http") or {}).get("disable_webhooks", False)):
+            from langgraph_runtime_pg.webhook_delivery import delivery_loop
+
+            dispatcher = asyncio.create_task(delivery_loop(), name="graphharbor-webhooks")
+        retention_task = asyncio.create_task(retention_loop(), name="graphharbor-retention")
         async with asyncio.TaskGroup() as group:
             for worker in workers:
                 group.create_task(worker.run_forever(), name=f"worker-{worker.owner}")
     finally:
+        if retention_task is not None:
+            retention_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await retention_task
+        if dispatcher is not None:
+            dispatcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await dispatcher
         for sig in installed_signals:
             with contextlib.suppress(NotImplementedError, RuntimeError):
                 loop.remove_signal_handler(sig)

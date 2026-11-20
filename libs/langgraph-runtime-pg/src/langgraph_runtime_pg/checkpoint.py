@@ -38,6 +38,9 @@ class FencedPostgresSaver(AsyncPostgresSaver):
             ).connection() as connection,
             connection.transaction(),
         ):
+            await connection.execute(
+                "SELECT set_config('graphharbor.checkpoint_format', 'journal-v1', true)"
+            )
             if writer:
                 run_id, owner, generation = writer
                 cursor = await connection.execute(
@@ -60,10 +63,19 @@ class FencedPostgresSaver(AsyncPostgresSaver):
             except ValueError:
                 resource_id = None  # MCP/standalone graph checkpoint identifiers.
             if resource_id:
-                await connection.execute(
-                    "SELECT thread_id FROM threads WHERE thread_id=%s FOR UPDATE",
+                cursor = await connection.execute(
+                    "SELECT deletion_requested_at FROM threads WHERE thread_id=%s FOR UPDATE",
                     (resource_id,),
                 )
+                thread = await cursor.fetchone()
+                if not writer:
+                    tombstone = await connection.execute(
+                        "SELECT 1 FROM thread_deletions WHERE thread_id=%s", (resource_id,)
+                    )
+                    if (
+                        thread and thread["deletion_requested_at"] is not None
+                    ) or await tombstone.fetchone():
+                        raise CheckpointConflict("thread deletion has been requested")
                 if not writer:
                     cfg_dict = config if isinstance(config, dict) else {}
                     configurable = cfg_dict.get("configurable")
@@ -99,6 +111,29 @@ class FencedPostgresSaver(AsyncPostgresSaver):
                             "DELETE FROM run_checkpoint_baselines WHERE thread_id=%s",
                             (resource_id,),
                         )
+            journal_run_id = (
+                writer[0]
+                if writer
+                else (str(current_run_uuid) if resource_id and current_run_uuid is not None else "")
+            )
+            if journal_run_id:
+                await connection.execute(
+                    "SELECT set_config('graphharbor.checkpoint_writer', %s, true)",
+                    (journal_run_id,),
+                )
+                await connection.execute(
+                    "UPDATE run_checkpoint_baselines b SET heads = heads || jsonb_build_object("
+                    "%s::text, (SELECT checkpoint_id FROM checkpoints "
+                    "WHERE thread_id=%s AND checkpoint_ns=%s ORDER BY checkpoint_id DESC LIMIT 1)) "
+                    "WHERE run_id=%s AND NOT heads ? %s",
+                    (
+                        config["configurable"].get("checkpoint_ns", ""),
+                        thread_id,
+                        config["configurable"].get("checkpoint_ns", ""),
+                        journal_run_id,
+                        config["configurable"].get("checkpoint_ns", ""),
+                    ),
+                )
             yield AsyncPostgresSaver(connection, serde=self.serde)
 
     async def aput(self, config, checkpoint, metadata, new_versions):
@@ -131,6 +166,9 @@ async def setup_checkpointer() -> AsyncPostgresSaver:
         # autocommit required: setup() runs CREATE INDEX CONCURRENTLY
         async def setup(connection: Any) -> None:
             await AsyncPostgresSaver(connection).setup()
+            from langgraph_runtime_pg.checkpoint_journal import install_journal
+
+            await install_journal(connection)
 
         await run_schema_setup(uri, setup)
         pool = AsyncConnectionPool(

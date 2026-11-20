@@ -390,6 +390,11 @@ class PrincipalMiddleware:
             await self.app(scope, receive, send)
             return
         headers = {key.lower(): value for key, value in scope.get("headers", [])}
+        path = scope.get("path", "")
+        acceptance_path = path.startswith("/threads/") and path.endswith("/runs/acceptance")
+        if b"graphharbor-request-digest" in headers and not acceptance_path:
+            await _json_error(send, 422, "receipt digest requires the acceptance endpoint")
+            return
         auth_header = headers.get(b"authorization", b"").decode("latin-1")
         management_header = headers.get(b"x-graphharbor-management-key", b"").decode("latin-1")
         if management_header:
@@ -414,6 +419,20 @@ class PrincipalMiddleware:
                     authorization=auth_header or None,
                 )
                 scope["principal"] = Principal.from_auth_user(user)
+                auth_user = scope["principal"].auth_user or {}
+                if "run_acceptance" in auth_user:
+                    from langgraph_runtime_pg.run_acceptance import AcceptanceGrant
+
+                    try:
+                        grant = AcceptanceGrant.parse(auth_user["run_acceptance"])
+                    except ValueError as exc:
+                        raise AuthorizationError(str(exc)) from exc
+                    methods = {"GET", "POST"} if grant.operation == "create" else {"GET"}
+                    if (
+                        path != f"/threads/{grant.thread_id}/runs/acceptance"
+                        or scope.get("method") not in methods
+                    ):
+                        raise AuthorizationError("run acceptance grant cannot access this resource")
             elif self.allow_anonymous:
                 # No auth_handler and allow_anonymous: proceed without principal
                 pass

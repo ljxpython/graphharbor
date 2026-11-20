@@ -132,7 +132,7 @@ async def test_redis_heartbeat_outage_does_not_cancel_postgres_owned_run(monkeyp
     class Repository:
         lease_seconds = 5
 
-        async def renew(self, _session, _run_id, _owner):
+        async def renew(self, _session, _run_id, _owner, **_kwargs):
             renewed.set()
             return True
 
@@ -365,9 +365,8 @@ async def test_expired_event_pruning_is_bounded_and_preserves_active_state(
                 RunCheckpointBaselineRow(
                     run_id=old_run,
                     thread_id=old_thread,
-                    checkpoints=[{"checkpoint_id": "retention-baseline"}],
-                    writes=[],
-                    projection={"values": {"kept": True}},
+                    heads={"": "retention-baseline"},
+                    projection={"values_undo": []},
                 )
             )
             conn.session.add(
@@ -467,7 +466,7 @@ async def test_expired_event_pruning_is_bounded_and_preserves_active_state(
             assert old_row is not None and old_row.event_pruned_through == 5
             assert thread_row is not None and thread_row.event_pruned_through == 5
             assert checkpoint_baseline is not None
-            assert checkpoint_baseline.projection == {"values": {"kept": True}}
+            assert checkpoint_baseline.projection == {"values_undo": []}
             assert store_item is not None and store_item.value == {"preserved": True}
             assert [row.sequence for row in remaining] == [6]
             if terminal_status == "error":

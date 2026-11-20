@@ -1,0 +1,228 @@
+{
+  "graphharbor": [
+    {
+      "state": "pending",
+      "action": "interrupt",
+      "wait": false,
+      "status": 202,
+      "body": null,
+      "headers": {
+        "content-type": null,
+        "location": null,
+        "content-location": null
+      },
+      "response_before_cleanup": null,
+      "elapsed_seconds": 0.047
+    },
+    {
+      "state": "pending",
+      "action": "interrupt",
+      "wait": true,
+      "status": 200,
+      "body": null,
+      "headers": {
+        "content-type": "application/json",
+        "location": "/threads/742600f8-863c-49e7-8e83-dabf91e83390/runs/c8dc683d-3472-4cd4-8442-60cf80959c85/join",
+        "content-location": "/threads/742600f8-863c-49e7-8e83-dabf91e83390/runs/c8dc683d-3472-4cd4-8442-60cf80959c85"
+      },
+      "response_before_cleanup": null,
+      "elapsed_seconds": 0.044
+    },
+    {
+      "state": "pending",
+      "action": "rollback",
+      "wait": false,
+      "status": 202,
+      "body": null,
+      "headers": {
+        "content-type": null,
+        "location": null,
+        "content-location": null
+      },
+      "response_before_cleanup": null,
+      "elapsed_seconds": 0.035
+    },
+    {
+      "state": "pending",
+      "action": "rollback",
+      "wait": true,
+      "status": 200,
+      "body": null,
+      "headers": {
+        "content-type": "application/json",
+        "location": "/threads/79732e1e-def5-45b9-9072-140670c638ca/runs/9a4b785f-cb33-468a-ac96-75bce8201d1b/join",
+        "content-location": "/threads/79732e1e-def5-45b9-9072-140670c638ca/runs/9a4b785f-cb33-468a-ac96-75bce8201d1b"
+      },
+      "response_before_cleanup": null,
+      "elapsed_seconds": 0.054
+    },
+    {
+      "sdk": "python-0.4.6",
+      "state": "pending",
+      "action": "interrupt",
+      "wait": false,
+      "passed": true
+    },
+    {
+      "sdk": "python-0.4.6",
+      "state": "pending",
+      "action": "interrupt",
+      "wait": true,
+      "passed": true
+    },
+    {
+      "sdk": "python-0.4.6",
+      "state": "pending",
+      "action": "rollback",
+      "wait": false,
+      "passed": true
+    },
+    {
+      "sdk": "python-0.4.6",
+      "state": "pending",
+      "action": "rollback",
+      "wait": true,
+      "passed": true
+    },
+    {
+      "sdk": "javascript-1.9.28",
+      "state": "pending",
+      "action": "interrupt",
+      "wait": false,
+      "passed": true
+    },
+    {
+      "sdk": "javascript-1.9.28",
+      "state": "pending",
+      "action": "interrupt",
+      "wait": true,
+      "passed": true
+    },
+    {
+      "sdk": "javascript-1.9.28",
+      "state": "pending",
+      "action": "rollback",
+      "wait": false,
+      "passed": true
+    },
+    {
+      "sdk": "javascript-1.9.28",
+      "state": "pending",
+      "action": "rollback",
+      "wait": true,
+      "passed": true
+    },
+    {
+      "state": "running",
+      "action": "interrupt",
+      "wait": false,
+      "status": 202,
+      "body": null,
+      "headers": {
+        "content-type": null,
+        "location": null,
+        "content-location": null
+      },
+      "response_before_cleanup": true,
+      "elapsed_seconds": 0.134
+    },
+    {
+      "state": "running",
+      "action": "interrupt",
+      "wait": true,
+      "status": 200,
+      "body": null,
+      "headers": {
+        "content-type": "application/json",
+        "location": "/threads/b3731e09-4e01-4917-a87b-55957f4a1805/runs/fd89a3aa-2a19-4c90-a54f-f83b8569172b/join",
+        "content-location": "/threads/b3731e09-4e01-4917-a87b-55957f4a1805/runs/fd89a3aa-2a19-4c90-a54f-f83b8569172b"
+      },
+      "response_before_cleanup": false,
+      "elapsed_seconds": 0.23
+    },
+    {
+      "state": "running",
+      "action": "rollback",
+      "wait": false,
+      "status": 202,
+      "body": null,
+      "headers": {
+        "content-type": null,
+        "location": null,
+        "content-location": null
+      },
+      "response_before_cleanup": true,
+      "elapsed_seconds": 0.144
+    },
+    {
+      "state": "running",
+      "action": "rollback",
+      "wait": true,
+      "status": 200,
+      "body": null,
+      "headers": {
+        "content-type": "application/json",
+        "location": "/threads/80509161-e376-4683-9ee7-e8b06fc5e571/runs/b8fded88-bb7c-44a4-b55b-6c83465e9de8/join",
+        "content-location": "/threads/80509161-e376-4683-9ee7-e8b06fc5e571/runs/b8fded88-bb7c-44a4-b55b-6c83465e9de8"
+      },
+      "response_before_cleanup": false,
+      "elapsed_seconds": 0.229
+    },
+    {
+      "sdk": "python-0.4.6",
+      "state": "running",
+      "action": "interrupt",
+      "wait": false,
+      "passed": true
+    },
+    {
+      "sdk": "python-0.4.6",
+      "state": "running",
+      "action": "interrupt",
+      "wait": true,
+      "passed": true
+    },
+    {
+      "sdk": "python-0.4.6",
+      "state": "running",
+      "action": "rollback",
+      "wait": false,
+      "passed": true
+    },
+    {
+      "sdk": "python-0.4.6",
+      "state": "running",
+      "action": "rollback",
+      "wait": true,
+      "passed": true
+    },
+    {
+      "sdk": "javascript-1.9.28",
+      "state": "running",
+      "action": "interrupt",
+      "wait": false,
+      "passed": true
+    },
+    {
+      "sdk": "javascript-1.9.28",
+      "state": "running",
+      "action": "interrupt",
+      "wait": true,
+      "passed": true
+    },
+    {
+      "sdk": "javascript-1.9.28",
+      "state": "running",
+      "action": "rollback",
+      "wait": false,
+      "passed": true
+    },
+    {
+      "sdk": "javascript-1.9.28",
+      "state": "running",
+      "action": "rollback",
+      "wait": true,
+      "passed": true
+    }
+  ]
+}

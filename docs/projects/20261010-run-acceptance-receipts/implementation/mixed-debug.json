@@ -1,0 +1,44 @@
+{
+  "python_sdk": "0.4.3",
+  "cases": [
+    {
+      "case": "two-api-concurrency-pending-read",
+      "run_id": "c1c4269f-b2a4-4d3c-a85e-f0f9033b37fc",
+      "receipts": 1,
+      "runs": 1,
+      "execution_starts": 0,
+      "reads": 20
+    },
+    {
+      "case": "queued-stop-and-permanent-busy-rejection",
+      "run_id": "c1c4269f-b2a4-4d3c-a85e-f0f9033b37fc",
+      "execution_starts": 0
+    },
+    {
+      "case": "lost-ack-api-kill-restart-worker-recovery",
+      "run_id": "6c5499fa-830c-425b-a25e-d931a6283742",
+      "execution_starts": 1
+    },
+    {
+      "case": "after-commit-enqueue-failure-pg-recovery",
+      "run_id": "060f9473-652d-4083-9d86-3829973d2ec4",
+      "execution_starts": 1
+    },
+    {
+      "case": "deletion-expiry-permanent-key",
+      "run_id": "6c5499fa-830c-425b-a25e-d931a6283742",
+      "execution_starts": 1
+    },
+    {
+      "case": "legacy-api-new-post-refused",
+      "status": 405,
+      "execution_starts": 0
+    },
+    {
+      "case": "new-api-legacy-worker-code-rollback-upgrade",
+      "run_id": "b8fc1646-0536-4958-9a43-75a802b81a4d",
+      "ledger_preserved": true,
+      "execution_starts": 1
+    }
+  ]
+}

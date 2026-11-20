@@ -73,6 +73,8 @@ CORE_CAPABILITIES = (
     Capability("threads", "core", True),
     Capability("runs", "core", True),
     Capability("cron", "core", True),
+    Capability("webhooks", "core", True),
+    Capability("run_terminal_delivery", "extended", True),
     Capability("stream_v2", "core", True),
     Capability("events_v2", "core", True),
     Capability("events_v3", "core", True),
@@ -164,7 +166,16 @@ def project_v3_event(
             RunStatus.INTERRUPTED.value: "interrupted",
         }.get(status, "running")
         data = {"event": phase, "status": status}
-        for key in ("graph_name", "cause", "reason", "output", "error", "interrupts"):
+        for key in (
+            "graph_name",
+            "cause",
+            "reason",
+            "output",
+            "error",
+            "interrupts",
+            "execution_stopped",
+            "lease_fenced",
+        ):
             if key in event:
                 data[key] = event[key]
     if method == "input.requested":
@@ -232,6 +243,9 @@ def protocol_event(
                 data[key] = event[key]
         if event.get("reason"):
             data["reason"] = event["reason"]
+        for key in ("execution_stopped", "lease_fenced"):
+            if key in event:
+                data[key] = event[key]
         if "output" in event:
             data["output"] = event["output"]
         if "error" in event:

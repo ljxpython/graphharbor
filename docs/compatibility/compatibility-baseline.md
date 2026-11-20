@@ -1,6 +1,6 @@
 # GraphHarbor Compatibility Baseline
 
-基线日期：2026-08-25  
+初始基线日期：2026-08-25；当前依赖核对：2026-11-21。下列版本表为当前锁，后续章节中的早期接入缺口是历史范围，不代表使用方今日状态。post49严格官方对照的既有差异及本轮存储验收见[专项](../projects/20261120-checkpoint-storage-governance/verification.md)。
 
 本文记录“当前事实”和“冻结目标”之间的差异。当前版本通过 GraphHarbor workspace、`ai-agent-platform` 的 adapter、官方 SDK 签名和 LangChain Agent Server 文档交叉确认。未标记为已验证的能力不能对外宣称兼容。
 
@@ -9,12 +9,12 @@
 | Component | Current lock/runtime | Frozen target | Status |
 |---|---:|---:|---|
 | Python | workspace `>=3.11` | 3.13 production, CI 3.11/3.12/3.13 | regression passed |
-| `langgraph` | 1.2.11 | 1.2.11 | lock verified |
-| `langgraph-sdk` | 0.4.3 | 0.4.3 | lock verified |
+| `langgraph` | 1.2.24 | 1.2.24 | lock verified |
+| `langgraph-sdk` | 0.4.14 | 0.4.14 | lock verified |
 | `langgraph-cli` | 0.4.31 | 0.4.31 | lock verified |
 | `langgraph-api` | 0.13.0 compatibility spike only | 0.13.0 spike only | not a production dependency |
-| `langgraph-checkpoint` | 4.2.0 | 4.2.0 | lock verified |
-| `langgraph-checkpoint-postgres` | 3.1.2 | 3.1.2 | lock verified |
+| `langgraph-checkpoint` | 4.3.2 | 4.3.2 | lock verified |
+| `langgraph-checkpoint-postgres` | 3.2.1 | 3.2.1 | lock verified |
 | `langgraph-runtime-inmem` | 0.33.0 comparison only | 0.33.0 comparison only | not production source of truth |
 | PostgreSQL | 16.9 CI / host service | PostgreSQL 16 baseline | CI image and host service verified |
 | Redis | 7.4.2 CI / host service | Redis 7 baseline | CI image and host service verified |

@@ -61,6 +61,8 @@ While official `langgraph dev` provides an exceptional local developer experienc
 
 ## Core Production Superpowers
 
+- **Checkpoint Storage Governance (post49)**: Minimal per-run boundaries, transactional undo records, reverse JSON Patch projections and reference-safe blob collection are released with migration015. See the [validated scope and limits](docs/projects/20261120-checkpoint-storage-governance/verification.md); applications own graph state and retention policy.
+- **Durable Thread Retention**: Fixed or explicitly refreshed idle TTL, one deletion workflow for manual and automatic cleanup, and retryable application hooks. Applications own retention policy and resource cleanup; GraphHarbor owns expiry and durable handoff. See the [retention runbook](docs/runbooks/production-runbook.md#thread-ttl-and-durable-deletion-post48).
 - 🔍 **Full Subagent Traceability (`checkpoint_ns`)**: Unlike standard setups that drop nested agent tool executions, GraphHarbor provides first-class support for `checkpoint_ns` routing and `/state/checkpoint`, guaranteeing 100% auditability and state replay for hierarchical multi-agent teams.
 - ⚡ **Distributed Lease & Auto-Reaper**: Multi-worker job execution protected by PostgreSQL transactional row-level leases. If a worker process crashes, its lease expires automatically and the reaper worker re-queues the run with zero state corruption.
 - 🌊 **Resilient SSE Streaming & Heartbeats**: Built-in 15s streaming heartbeats eliminate gateway timeout disconnections (e.g., HTTP 504 / proxy drops), paired with precise `Last-Event-ID` replay for seamless client reconnections.
@@ -180,6 +182,7 @@ GraphHarbor features a comprehensive, multi-layered documentation system under [
 - 🛠 **[Developer & Testing Guides (`docs/guides/README.md`)](docs/guides/README.md)** — Local development workflow, testing guidelines, and E2E scripts.
 - 🚑 **[Incident Recovery Runbook (`docs/runbooks/incident-recovery.md`)](docs/runbooks/incident-recovery.md)** — Production troubleshooting, database recovery, and rollback procedures.
 - 📜 **[Changelog (`docs/CHANGELOG.md`)](docs/CHANGELOG.md)** — Track full release notes across versions.
+- **[Run acceptance receipts](docs/projects/20261010-run-acceptance-receipts/README.md)** — Post45 adds atomic acceptance facts, a fixed-key read-only lookup, and permanent idempotency tombstones. This is a GraphHarbor extension; missing or expired receipts remain unknown.
 
 ---
 

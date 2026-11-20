@@ -1,5 +1,21 @@
 # GraphHarbor Compatibility Profile
 
+## Checkpoint journal（正式post49 / migration015）
+
+本次存储治理固定LangGraph1.2.24、checkpoint4.3.2、checkpoint-postgres3.2.1、SDK0.4.14和CLI0.4.31。Run使用首before-image与反向JSON Patch，prune关闭旧回滚窗口后保留Delta必要祖先并回收无引用blob。转换须停API/Worker并备份；仅支持journal-v1，旧进程/不匹配Schema明确拒绝，不提供在线旧格式分支。
+
+真实PG、容量与独立安装证据见[本专项](../projects/20261120-checkpoint-storage-governance/verification.md)。本轮实际官方0.13.0严格对照仍失败：201项OpenAPI描述差异与旧正式post48逐项相同，retention扩展及thread stream额外checkpoint/debug也在旧包复现；未添加协议排除项或宣称严格等价。SSE首帧attempt竞态已复现并修正。历史2026-08-25通过字段不代表新依赖严格对照通过。
+
+## Thread retention compatibility (0.13.0.post48)
+
+- 官方Thread创建的 `ttl={strategy:"delete",ttl:分钟}` 映射固定到期；不将分钟误作秒。自动 `keep_latest` 显式422，手动`threads/prune`压缩保持原行为。
+- `retention`、`touch`、`deletion`为GraphHarbor独立扩展路径；idle只按显式touch续期，普通GET、metadata更新和后台Run不续期。调用方必须报告自己的活动语义。
+- 手动DELETE与TTL共用持久删除。完成204、未确认清理202；调用方须按任务状态判断，不能把受理等同资源已释放。
+- 这不实现官方checkpointer TTL配置的全部压缩/归档能力，不提供业务Workspace或审计删除。
+- migration014拒绝破坏性downgrade；旧post45因schema版本不匹配不能直接接管。已验证停维护保存任务、恢复post48继续；不承诺混合旧新包运行。
+
+源码/候选/正式PyPI及使用方三服务证据见[生命周期专项](../projects/20261030-thread-retention-lifecycle/verification.md)；完整接口见[REST契约](../standards/rest-sse-contract.md)。本增量不改变其他专项的独立兼容门禁。
+
 ## 1. 目的
 
 GraphHarbor 不要求第一天实现官方 Agent Server 的所有边缘能力，但必须对已经声明支持的能力做到完整兼容：
@@ -181,6 +197,14 @@ Core 覆盖：
 - cancel、retry、graceful shutdown/requeue。
 - 单实例和多实例。
 
+本次Worker超时切片以`langgraph-api==0.13.0`为基线：每attempt硬限默认86400秒，下一attempt重计；硬限timeout、用户/provider TimeoutError未恢复时error，DB瞬时故障有界重试。`BG_JOB_MAX_RETRIES`按锁定源码最大attempt判断（默认3）；shutdown grace默认180/最大3600，checkpoint handoff不占故障attempt且租约代次递增。兼容官方三个BG_JOB配置，旧GraphHarbor变量作为优先别名保留。私有factory预算桥接是GraphHarbor内部集成，不是官方公开协议；累计Run总deadline不纳入本期。源码/冷安装/HTTP修订验收见[Worker专项](../projects/20261006-run-timeout-budget/README.md)，不据此宣称整套Server兼容。
+
+post42 取消传播已按“PG 事实源 + Redis 控制 key/PubSub + Worker 停止确认”实现并通过隔离门禁。订阅就绪/重连后复查 key/PG；清理期间按 owner/generation 续租；资源退出后持久确认并释放 lease，wait/SSE/join 共用停止依据。不增加公开 cancelled 状态或业务配置，租约到期/fence 不冒充执行停止。
+
+冻结表面：wait=false空body202；wait=true有持久停止依据200，否则超时/未确认503。confirmed body null与官方pending {}、running __error__有差异，两种SDK丢弃body；正常rollback删除后再次cancel404，receipt可查。官方/候选各24、冷安装24、回退/kill/混合12、平台默认/子图通过；post42双包已发布/PyPI/Final通过，取消专项done，见[专项](../projects/20261007-worker-cancel-propagation/verification.md)。现役未升级，不声明整套Server完全兼容。
+
+混合版本不提供新版停止保证：新 API + 旧 Worker 缺少停止依据时 503；旧 API + 新 Worker 的 interrupt 仍可能提前 200。回退须停止新提交、完成 active/pending/rollback 对账并 drain/确认，旧 Worker 仅用作回退行为。
+
 ## 4. Level Extended 范围
 
 以下能力不阻塞 Core 第一版，但必须保留扩展位：
@@ -305,6 +329,8 @@ Core Runs + Streaming v2 + Events v3 + HITL + Subgraphs
 
 当前项目已经通过 `platform-api` adapter 使用 `/runs/batch`、`/runs/cancel`、`/threads/count`、`/threads/{thread_id}/copy`、`threads/prune` 和 cron 操作，因此这些能力属于 Core，不能再按“当前前端暂时没有点击”放入 Extended。
 
+Cron 对齐锁定的 `langgraph-api==0.13.0` 与 `langgraph-sdk==0.4.3`：独立部署启动持久调度器；SDK 创建、搜索/计数、更新、暂停/删除、绑定 Thread 创建；`cron_id` 写入 Run 配置和元数据；时区/DST、`end_time`、`keep`/默认模式、双实例领取、故障回滚与重启恢复均有隔离库验证。认证身份在创建时保存，派发时为每次 Run 签名；撤销 API 凭据只阻断新请求，不自动停止已存在的 cron，资源所有方须主动暂停或删除。此处不承诺平台业务权限的实时撤销。
+
 这些是切片级契约，不是重新讨论整个架构。
 
 ## 9. 当前可以开始什么
@@ -339,3 +365,15 @@ Core Runs + Streaming v2 + Events v3 + HITL + Subgraphs
 ~~~
 
 不需要提前实现官方所有协议，但这六项必须明确。
+
+### Cron post41 接续验证（2026-10-05）
+
+双包 post41 已发布并独立安装。有限表达式最后一次 Run 正常持久化后耗尽停用；执行 payload 编辑刷新当前受信身份，单纯启停不覆盖。通用 RunRepository.search 提供 metadata SQL 分页，未新增非标准公开 cron history API。Thread 创建并发原子唯一；Thread 已删的 queued Run 进入 error/thread_not_found 并留下 terminal event，不永久 pending。
+
+CI 合并 126 passed/4 skipped；应用用发布包完成 22 Run（8 success、14 预期 error）隔离链路。身份/凭据/项目/Agent/模型/Thread 实时授权属于平台应用 guard，不内置到 GraphHarbor。验证覆盖锁定版本与所列场景，不表示整套 LangGraph Server 行为已穷举。
+
+### Run接受回执 post45（2026-10-10，GraphHarbor扩展）
+
+正式双包post45提供独立POST/GET acceptance路由，最终UTF-8字节摘要与可信固定grant、原子Run/ledger、持久忙碌拒绝和永久墓碑。官方SDK普通Run契约保持原状；新扩展由明确bytes HTTP adapter调用，不能给旧普通POST加header冒充接受事实。缺记录/过期保持unknown，不自动重投。
+
+源码Final371/Cron3、候选wheel7/sdist5、Python SDK0.4.3/0.4.6各24与平台notify/Stop/撤权联合通过。正式四产物hash已核验，发布后独立安装和联合证据由[本专项Final](../projects/20261010-run-acceptance-receipts/verification.md)维护。不宣称LangGraph Server公开承诺同等持久否定或删除后防重。

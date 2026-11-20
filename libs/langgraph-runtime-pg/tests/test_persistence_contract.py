@@ -62,14 +62,8 @@ async def test_empty_schema_migration_is_repeatable(pg_runtime) -> None:
                     "007_checkpoint_baselines",
                 )
                 connection.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(table)))
-        assert (
-            upgrade_head(isolated_uri, version_table_schema=schema)
-            == "009_event_retention_watermarks"
-        )
-        assert (
-            upgrade_head(isolated_uri, version_table_schema=schema)
-            == "009_event_retention_watermarks"
-        )
+        assert upgrade_head(isolated_uri, version_table_schema=schema) == "015_checkpoint_journal"
+        assert upgrade_head(isolated_uri, version_table_schema=schema) == "015_checkpoint_journal"
         command.check(alembic_config(isolated_uri, version_table_schema=schema))
         with psycopg.connect(isolated_uri) as connection:
             tables = {
@@ -78,7 +72,16 @@ async def test_empty_schema_migration_is_repeatable(pg_runtime) -> None:
                     "SELECT tablename FROM pg_tables WHERE schemaname = %s", (schema,)
                 )
             }
-        assert {"assistants", "threads", "runs", "run_leases", "runtime_events"} <= tables
+        assert {
+            "assistants",
+            "threads",
+            "runs",
+            "run_leases",
+            "runtime_events",
+            "run_cancellations",
+            "run_callback_deliveries",
+            "run_acceptance_receipts",
+        } <= tables
     finally:
         with psycopg.connect(base_uri, autocommit=True) as connection:
             connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
@@ -151,6 +154,35 @@ async def test_concurrent_claim_has_one_owner(pg_runtime) -> None:
 
 
 @pytest.mark.asyncio
+async def test_deleted_thread_queued_runs_finish_with_durable_error(pg_runtime) -> None:
+    from langgraph_runtime_pg.database import get_session_factory
+    from langgraph_runtime_pg.models import RunRow, RuntimeEventRow, ThreadRow
+
+    repository, runs = await _seed_repository_runs(count=2)
+    session_factory = get_session_factory()
+    async with session_factory() as session, session.begin():
+        thread = await session.get(ThreadRow, runs[0].thread_id)
+        await session.delete(thread)
+    for _ in runs:
+        async with session_factory() as session, session.begin():
+            assert await repository.claim_next(session, "worker") is None
+            assert len(repository.last_transition_events) == 1
+    async with session_factory() as session:
+        for queued in runs:
+            run = await session.get(RunRow, queued.run_id)
+            assert run.status == "error"
+            assert run.metadata_["error_code"] == "thread_not_found"
+            events = (
+                await session.scalars(
+                    select(RuntimeEventRow).where(RuntimeEventRow.run_id == queued.run_id)
+                )
+            ).all()
+            assert len(events) == 1 and events[0].terminal
+            assert events[0].thread_id is None
+            assert events[0].payload["error_code"] == "thread_not_found"
+
+
+@pytest.mark.asyncio
 async def test_claim_survives_pool_restart_and_reaper_requeues(pg_runtime) -> None:
     from langgraph_runtime_pg.database import get_session_factory, start_pool, stop_pool
     from langgraph_runtime_pg.models import RunLeaseRow, RunRow
@@ -180,6 +212,25 @@ async def test_claim_survives_pool_restart_and_reaper_requeues(pg_runtime) -> No
             await session.scalar(select(RunLeaseRow).where(RunLeaseRow.run_id == runs[0].run_id))
             is None
         )
+
+
+@pytest.mark.asyncio
+async def test_startup_rejects_mismatched_schema_without_auto_migration(pg_runtime, monkeypatch):
+    from langgraph_runtime_pg import database, migrate
+
+    await database.stop_pool()
+    try:
+        with monkeypatch.context() as patch:
+            patch.setenv("LG_RUNTIME_PG_AUTO_MIGRATE", "false")
+            patch.setattr(migrate, "head_revision", lambda: "future_schema")
+            with pytest.raises(RuntimeError, match="schema does not match"):
+                await database.start_pool()
+            with pytest.raises(RuntimeError, match="Call start_pool"):
+                database.get_session_factory()
+        await database.start_pool()
+        assert await database.schema_ready()
+    finally:
+        await database.stop_pool()
 
 
 @pytest.mark.asyncio

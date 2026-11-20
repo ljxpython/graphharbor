@@ -1,0 +1,14 @@
+{
+  "outcome": "revoke",
+  "run_id": "a7ebf8c5-bcbc-4307-ba35-c65885b2f450",
+  "accepted_while_worker_stopped": true,
+  "run_count": 2,
+  "ledger_count": 1,
+  "completion_model_calls": 0,
+  "pids": {
+    "provider": 60176,
+    "runtime": 60323,
+    "platform": 60602,
+    "worker": 64136
+  }
+}

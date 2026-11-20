@@ -1,0 +1,98 @@
+[
+  {
+    "case": "drain-before-post41-rollback",
+    "action": "interrupt",
+    "pending_waited_for_cleanup": true,
+    "post42_stop_confirmed": true,
+    "post41_resumed_pending": true,
+    "schema_migration": false
+  },
+  {
+    "case": "drain-before-post41-rollback",
+    "action": "rollback",
+    "pending_waited_for_cleanup": true,
+    "post42_stop_confirmed": true,
+    "post41_resumed_pending": true,
+    "schema_migration": false
+  },
+  {
+    "case": "real-worker-kill",
+    "action": "interrupt",
+    "stage": "before-cancel",
+    "wait_status": 503,
+    "stopped_confirmed": false,
+    "cancelled_run_reexecuted": false
+  },
+  {
+    "case": "real-worker-kill",
+    "action": "interrupt",
+    "stage": "during-cleanup",
+    "wait_status": 503,
+    "stopped_confirmed": false,
+    "cancelled_run_reexecuted": false
+  },
+  {
+    "case": "real-worker-kill",
+    "action": "interrupt",
+    "stage": "after-confirmation",
+    "wait_status": 200,
+    "stopped_confirmed": true,
+    "cancelled_run_reexecuted": false
+  },
+  {
+    "case": "real-worker-kill",
+    "action": "rollback",
+    "stage": "before-cancel",
+    "wait_status": 503,
+    "stopped_confirmed": false,
+    "cancelled_run_reexecuted": false
+  },
+  {
+    "case": "real-worker-kill",
+    "action": "rollback",
+    "stage": "during-cleanup",
+    "wait_status": 503,
+    "stopped_confirmed": false,
+    "cancelled_run_reexecuted": false
+  },
+  {
+    "case": "real-worker-kill",
+    "action": "rollback",
+    "stage": "after-confirmation",
+    "wait_status": 404,
+    "stopped_confirmed": true,
+    "cancelled_run_reexecuted": false
+  },
+  {
+    "case": "mixed-versions",
+    "combination": "new-api-old-worker",
+    "action": "interrupt",
+    "wait_status_before_cleanup": 503,
+    "legacy_rollback_waited_for_run_deletion": false,
+    "new_stop_guarantee": false
+  },
+  {
+    "case": "mixed-versions",
+    "combination": "new-api-old-worker",
+    "action": "rollback",
+    "wait_status_before_cleanup": 503,
+    "legacy_rollback_waited_for_run_deletion": false,
+    "new_stop_guarantee": false
+  },
+  {
+    "case": "mixed-versions",
+    "combination": "old-api-new-worker",
+    "action": "interrupt",
+    "wait_status_before_cleanup": 200,
+    "legacy_rollback_waited_for_run_deletion": false,
+    "new_stop_guarantee": false
+  },
+  {
+    "case": "mixed-versions",
+    "combination": "old-api-new-worker",
+    "action": "rollback",
+    "wait_status_before_cleanup": null,
+    "legacy_rollback_waited_for_run_deletion": true,
+    "new_stop_guarantee": false
+  }
+]

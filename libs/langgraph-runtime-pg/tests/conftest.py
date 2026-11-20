@@ -106,6 +106,7 @@ async def pg_runtime():
         await teardown_checkpointer()
         await truncate_all()
         await stop_pool()
+        os.environ["GRAPHHARBOR_REDIS_PREFIX"] = base_prefix
 
 
 @pytest.fixture

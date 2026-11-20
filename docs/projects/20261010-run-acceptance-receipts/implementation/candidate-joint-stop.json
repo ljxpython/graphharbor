@@ -1,0 +1,14 @@
+{
+  "outcome": "stop",
+  "run_id": "0c06696d-f40c-4c6b-b954-f1fbfe034215",
+  "accepted_while_worker_stopped": true,
+  "run_count": 2,
+  "ledger_count": 1,
+  "completion_model_calls": 0,
+  "pids": {
+    "provider": 31938,
+    "runtime": 32194,
+    "platform": 32537,
+    "worker": 34081
+  }
+}

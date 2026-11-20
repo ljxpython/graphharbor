@@ -1,0 +1,240 @@
+{
+  "official": [
+    {
+      "state": "pending",
+      "action": "interrupt",
+      "wait": false,
+      "status": 202,
+      "body": null,
+      "headers": {
+        "content-type": null,
+        "location": null,
+        "content-location": null
+      },
+      "response_before_cleanup": null,
+      "elapsed_seconds": 0.005
+    },
+    {
+      "state": "pending",
+      "action": "interrupt",
+      "wait": true,
+      "status": 200,
+      "body": {},
+      "headers": {
+        "content-type": "application/json",
+        "location": "/threads/01a113c4-923f-7972-9a1b-bb0c0260078a/runs/01a113c4-9242-7091-ac23-b83d4aef23ed/join",
+        "content-location": "/threads/01a113c4-923f-7972-9a1b-bb0c0260078a/runs/01a113c4-9242-7091-ac23-b83d4aef23ed"
+      },
+      "response_before_cleanup": null,
+      "elapsed_seconds": 0.508
+    },
+    {
+      "state": "pending",
+      "action": "rollback",
+      "wait": false,
+      "status": 202,
+      "body": null,
+      "headers": {
+        "content-type": null,
+        "location": null,
+        "content-location": null
+      },
+      "response_before_cleanup": null,
+      "elapsed_seconds": 0.006
+    },
+    {
+      "state": "pending",
+      "action": "rollback",
+      "wait": true,
+      "status": 200,
+      "body": {},
+      "headers": {
+        "content-type": "application/json",
+        "location": "/threads/01a113c4-944f-7a31-810b-76c9a3c2cea4/runs/01a113c4-9452-7e13-b24e-86df2e61e8ee/join",
+        "content-location": "/threads/01a113c4-944f-7a31-810b-76c9a3c2cea4/runs/01a113c4-9452-7e13-b24e-86df2e61e8ee"
+      },
+      "response_before_cleanup": null,
+      "elapsed_seconds": 0.507
+    },
+    {
+      "state": "running",
+      "action": "interrupt",
+      "wait": false,
+      "status": 202,
+      "body": null,
+      "headers": {
+        "content-type": null,
+        "location": null,
+        "content-location": null
+      },
+      "response_before_cleanup": true,
+      "elapsed_seconds": 0.134
+    },
+    {
+      "state": "running",
+      "action": "interrupt",
+      "wait": true,
+      "status": 200,
+      "body": {
+        "__error__": {
+          "error": "UserInterrupt",
+          "message": "An internal error occurred"
+        }
+      },
+      "headers": {
+        "content-type": "application/json",
+        "location": "/threads/01a113c4-a65a-79e0-9ba9-31ff12a124a3/runs/01a113c4-a65f-7c22-9a0f-de4d60490bdb/join",
+        "content-location": "/threads/01a113c4-a65a-79e0-9ba9-31ff12a124a3/runs/01a113c4-a65f-7c22-9a0f-de4d60490bdb"
+      },
+      "response_before_cleanup": false,
+      "elapsed_seconds": 0.134
+    },
+    {
+      "state": "running",
+      "action": "rollback",
+      "wait": false,
+      "status": 202,
+      "body": null,
+      "headers": {
+        "content-type": null,
+        "location": null,
+        "content-location": null
+      },
+      "response_before_cleanup": true,
+      "elapsed_seconds": 0.123
+    },
+    {
+      "state": "running",
+      "action": "rollback",
+      "wait": true,
+      "status": 200,
+      "body": {
+        "__error__": {
+          "error": "UserRollback",
+          "message": "An internal error occurred"
+        }
+      },
+      "headers": {
+        "content-type": "application/json",
+        "location": "/threads/01a113c4-af37-75d3-86f2-69e752f9d1a8/runs/01a113c4-af3e-70b2-9d89-6c25e227d03d/join",
+        "content-location": "/threads/01a113c4-af37-75d3-86f2-69e752f9d1a8/runs/01a113c4-af3e-70b2-9d89-6c25e227d03d"
+      },
+      "response_before_cleanup": false,
+      "elapsed_seconds": 0.124
+    }
+  ],
+  "graphharbor": [
+    {
+      "state": "pending",
+      "action": "interrupt",
+      "wait": false,
+      "status": 202,
+      "body": null,
+      "headers": {
+        "content-type": null,
+        "location": null,
+        "content-location": null
+      },
+      "response_before_cleanup": null,
+      "elapsed_seconds": 0.062
+    },
+    {
+      "state": "pending",
+      "action": "interrupt",
+      "wait": true,
+      "status": 200,
+      "body": null,
+      "headers": {
+        "content-type": "application/json",
+        "location": "/threads/3aed4b21-8edd-4de7-b08b-a3ca1a130da7/runs/31125910-94cb-49e7-912b-a92de3476a50/join",
+        "content-location": "/threads/3aed4b21-8edd-4de7-b08b-a3ca1a130da7/runs/31125910-94cb-49e7-912b-a92de3476a50"
+      },
+      "response_before_cleanup": null,
+      "elapsed_seconds": 0.06
+    },
+    {
+      "state": "pending",
+      "action": "rollback",
+      "wait": false,
+      "status": 202,
+      "body": null,
+      "headers": {
+        "content-type": null,
+        "location": null,
+        "content-location": null
+      },
+      "response_before_cleanup": null,
+      "elapsed_seconds": 0.033
+    },
+    {
+      "state": "pending",
+      "action": "rollback",
+      "wait": true,
+      "status": 200,
+      "body": null,
+      "headers": {
+        "content-type": "application/json",
+        "location": "/threads/1210bba4-5269-409e-80dc-75a1c7819160/runs/c34b00a4-7b29-444c-8cf9-aa6911829d6d/join",
+        "content-location": "/threads/1210bba4-5269-409e-80dc-75a1c7819160/runs/c34b00a4-7b29-444c-8cf9-aa6911829d6d"
+      },
+      "response_before_cleanup": null,
+      "elapsed_seconds": 0.04
+    },
+    {
+      "state": "running",
+      "action": "interrupt",
+      "wait": false,
+      "status": 202,
+      "body": null,
+      "headers": {
+        "content-type": null,
+        "location": null,
+        "content-location": null
+      },
+      "response_before_cleanup": true,
+      "elapsed_seconds": 0.143
+    },
+    {
+      "state": "running",
+      "action": "interrupt",
+      "wait": true,
+      "status": 200,
+      "body": null,
+      "headers": {
+        "content-type": "application/json",
+        "location": "/threads/692cc198-89ad-4d68-b674-67e89bbb94cd/runs/a5b65f6a-3e2f-40ac-b039-496745e197cd/join",
+        "content-location": "/threads/692cc198-89ad-4d68-b674-67e89bbb94cd/runs/a5b65f6a-3e2f-40ac-b039-496745e197cd"
+      },
+      "response_before_cleanup": false,
+      "elapsed_seconds": 0.229
+    },
+    {
+      "state": "running",
+      "action": "rollback",
+      "wait": false,
+      "status": 202,
+      "body": null,
+      "headers": {
+        "content-type": null,
+        "location": null,
+        "content-location": null
+      },
+      "response_before_cleanup": true,
+      "elapsed_seconds": 0.144
+    },
+    {
+      "state": "running",
+      "action": "rollback",
+      "wait": true,
+      "status": 200,
+      "body": null,
+      "headers": {
+        "content-type": "application/json",
+        "location": "/threads/2542470f-5634-4b0b-a6da-9d39aa37e49e/runs/8a95e44c-04df-4da5-93c6-ed9b3d3e1b7e/join",
+        "content-location": "/threads/2542470f-5634-4b0b-a6da-9d39aa37e49e/runs/8a95e44c-04df-4da5-93c6-ed9b3d3e1b7e"
+      },
+      "response_before_cleanup": false,
+      "elapsed_seconds": 0.169
+    }
+  ]
+}

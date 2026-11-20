@@ -36,9 +36,13 @@ async def authorize(
     resource: str,
     action: str,
     value: dict[str, Any],
+    *,
+    require_handler: bool = False,
 ) -> dict[str, Any]:
     """Call the most specific handler, preserving mutations to its value."""
     if auth is None or user is None:
+        if require_handler:
+            raise HTTPException(403, "Acceptance receipts require authenticated SDK Auth")
         return {}
     if not isinstance(auth, Auth):
         raise HTTPException(500, "Configured authorization must be an SDK Auth instance")
@@ -52,6 +56,10 @@ async def authorize(
     if handler is None and auth._global_handlers:
         handler = auth._global_handlers[-1]
     if handler is None:
+        if require_handler:
+            raise HTTPException(
+                403, "Acceptance receipts require an explicit authorization handler"
+            )
         return {}
     ctx = Auth.types.AuthContext(
         user=cast(Any, AuthUser(user)),

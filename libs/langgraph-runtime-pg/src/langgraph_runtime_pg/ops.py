@@ -42,6 +42,7 @@ from langgraph_runtime_pg.redis_stream import (
     ContextQueue,
     Message,
     clear_run_heartbeat,
+    control_action,
     get_stream_manager,
     has_run_heartbeat,
     heartbeat_refresh_interval_secs,
@@ -1457,6 +1458,13 @@ class Threads(Authenticated):
         if existing:
             return _handle_existing_thread(existing, thread_id, if_exists, filters)
 
+        from langgraph_runtime_pg.models import ThreadDeletionRow
+        from langgraph_runtime_pg.retention import official_ttl, set_policy
+
+        policy = official_ttl(ttl)
+        if await conn.session.get(ThreadDeletionRow, thread_id) is not None:
+            raise HTTPException(status_code=409, detail="Thread ID has a deletion tombstone")
+
         now = datetime.now(UTC)
         ins = (
             pg_insert(ThreadRow)
@@ -1480,6 +1488,10 @@ class Threads(Authenticated):
 
         await conn.session.flush()
         row = await _aget_thread(conn.session, thread_id)
+        if await conn.session.get(ThreadDeletionRow, thread_id) is not None:
+            raise HTTPException(status_code=409, detail="Thread ID has a deletion tombstone")
+        if ttl is not None and row is not None:
+            set_policy(row, policy)
         data = thread_to_dict(row)
 
         async def _yield():
@@ -1493,6 +1505,7 @@ class Threads(Authenticated):
         thread_id: UUID | str,
         *,
         metadata: dict | None = None,
+        if_metadata: dict | None = None,
         ttl: Any = None,
         ctx: Any = None,
         read_mask_paths: list | None = None,
@@ -1505,12 +1518,16 @@ class Threads(Authenticated):
             "update",
             Auth.types.ThreadsUpdate(thread_id=thread_id, metadata=cast(Any, metadata or {})),
         )
-        row = await _aget_thread(conn.session, thread_id)
-        if row is not None and (not filters or _check_filter_match(row.metadata_ or {}, filters)):
-            if metadata:
-                row.metadata_ = {**(row.metadata_ or {}), **metadata}
-                row.updated_at = datetime.now(UTC)
-                await conn.session.flush()
+        from langgraph_runtime_pg.thread_metadata import patch_thread_metadata
+
+        row = await patch_thread_metadata(
+            conn.session, thread_id, metadata or {}, if_metadata=if_metadata, filters=filters
+        )
+        if row is not None:
+            from langgraph_runtime_pg.retention import official_ttl, set_policy
+
+            if ttl is not None:
+                set_policy(row, official_ttl(ttl))
             d = thread_to_dict(row)
             d.setdefault("state_updated_at", d.get("updated_at"))
 
@@ -1537,36 +1554,20 @@ class Threads(Authenticated):
         if row is None or (filters and not _check_filter_match(row.metadata_ or {}, filters)):
             raise HTTPException(status_code=404, detail=f"Thread {thread_id} not found")
 
-        run_ids = list(
-            (
-                await conn.session.execute(
-                    sa_select(RunRow.run_id).where(RunRow.thread_id == thread_id)
-                )
-            )
-            .scalars()
-            .all()
+        from langgraph_runtime_pg.retention import advance_deletion, request_deletion
+
+        row = await conn.session.scalar(
+            sa_select(ThreadRow).where(ThreadRow.thread_id == thread_id).with_for_update()
         )
-        await _adelete_retry_counters(conn.session, run_ids)
-        await conn.session.execute(delete(RunRow).where(RunRow.thread_id == thread_id))
-        await conn.session.execute(delete(CronRow).where(CronRow.thread_id == thread_id))
-        await conn.session.delete(row)
-        await conn.session.flush()
-        # Checkpointer is a separate autocommit pool — delete after ops commit so we never roll back the thread after checkpoints are gone.
-        deleted_id = thread_id
+        await request_deletion(conn.session, row)
 
-        async def _cleanup_checkpoints() -> None:
-            try:
-                await _adelete_thread_checkpoints(deleted_id)
-            except Exception:
-                logger.exception(
-                    "Failed to delete checkpoints for thread %s",
-                    deleted_id,
-                )
+        async def _cleanup() -> None:
+            await advance_deletion(thread_id)
 
-        conn.schedule_after_commit(_cleanup_checkpoints)
+        conn.schedule_after_commit(_cleanup)
 
         async def _yield():
-            yield deleted_id
+            yield thread_id
 
         return _yield()
 
@@ -1686,12 +1687,16 @@ class Threads(Authenticated):
         read_filters = await Threads.handle_event(
             ctx, "read", Auth.types.ThreadsRead(thread_id=thread_id)
         )
-        original = await _aget_thread(conn.session, thread_id)
+        original = await conn.session.get(ThreadRow, thread_id, with_for_update=True)
         if not original or (
             read_filters and not _check_filter_match(original.metadata_ or {}, read_filters)
         ):
             return _empty_aiter()
 
+        if original.deletion_requested_at is not None:
+            from langgraph_runtime_pg.checkpoint_mutations import CheckpointConflict
+
+            raise CheckpointConflict("thread deletion has been requested")
         new_id = uuid4()
         meta = copy.deepcopy(original.metadata_ or {})
         await Threads.handle_event(
@@ -1711,6 +1716,9 @@ class Threads(Authenticated):
             values_=copy.deepcopy(original.values_),
             interrupts=copy.deepcopy(original.interrupts or {}),
         )
+        from langgraph_runtime_pg.retention import set_policy
+
+        set_policy(row, original.retention)
         conn.session.add(row)
         await conn.session.flush()
         try:
@@ -1834,9 +1842,11 @@ class Threads(Authenticated):
         limit: int | None = None,
         batch_size: int = 100,
     ) -> tuple[int, int]:
-        """TTL sweep — no thread TTL column yet; no-op."""
-        del conn, limit, batch_size
-        return (0, 0)
+        from langgraph_runtime_pg.retention import maintain_retention
+
+        del conn
+        result = await maintain_retention(apply=True, limit=min(limit or batch_size, 1000))
+        return (result["completed"], 0)
 
     class State(Authenticated):
         resource = "threads"
@@ -3322,8 +3332,8 @@ class Runs(Authenticated):
                     data=STREAM_CODEC.encode("control", b"done"),
                 )
                 await stream_manager.put(run_id, thread_id, stream_message, resumable=resumable)
-                await stream_manager.remove_control_queue(run_id, thread_id, control_queue)
         finally:
+            await stream_manager.remove_control_queue(run_id, thread_id, control_queue)
             await clear_run_heartbeat(run_id)
             try:
                 await stream_manager.clear_run_buffers(run_id, thread_id)
@@ -3919,23 +3929,28 @@ async def listen_for_cancellation(
     stream_manager = get_stream_manager()
 
     # Hydrate from Redis so a cancel published before this worker subscribed is still observed.
-    if control_key := await stream_manager.aget_control_key(run_id, thread_id):
-        payload = control_key.data
-        if payload == b"rollback":
+    await stream_manager.wait_control_ready()
+    if control_key := await stream_manager.aget_control_key(run_id, thread_id, refresh=True):
+        action = control_action(control_key)
+        if action == "rollback":
             done.set(UserRollback())
-        elif payload == b"interrupt":
+        elif action == "interrupt":
             done.set(UserInterrupt())
 
     while not done.is_set():
         try:
             # Do not break on timeout — long runs stay quiet until interrupt/rollback/done.
             message = await asyncio.wait_for(queue.get(), timeout=240)
-            payload = message.data
-            if payload == b"rollback":
+            action = control_action(message)
+            if action == "recheck":
+                action = control_action(
+                    await stream_manager.aget_control_key(run_id, thread_id, refresh=True)
+                )
+            if action == "rollback":
                 done.set(UserRollback())
-            elif payload == b"interrupt":
+            elif action == "interrupt":
                 done.set(UserInterrupt())
-            elif payload == b"done":
+            elif message.data == b"done":
                 done.set()
                 break
         except TimeoutError:

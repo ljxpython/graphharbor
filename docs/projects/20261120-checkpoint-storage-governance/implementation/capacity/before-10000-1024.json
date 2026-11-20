@@ -1,0 +1,53 @@
+{
+  "history": 10000,
+  "payload_bytes": 1024,
+  "repeats": 3,
+  "capture_ms": [
+    1697.7707949990872,
+    1439.4586029957281,
+    1273.5377790013445
+  ],
+  "p50_ms": 1439.4586029957281,
+  "max_ms": 1697.7707949990872,
+  "boundary_logical_bytes": [
+    25428095,
+    25428095,
+    25428095
+  ],
+  "capture_wal_bytes": [
+    910920,
+    910552,
+    910552
+  ],
+  "tables_before": {
+    "checkpoints": {
+      "rows": 10000,
+      "logical_bytes": 2798886
+    },
+    "checkpoint_writes": {
+      "rows": 10000,
+      "logical_bytes": 22530000
+    },
+    "checkpoint_blobs": {
+      "rows": 10000,
+      "logical_bytes": 21948894
+    }
+  },
+  "tables_after_prune": {
+    "checkpoints": {
+      "rows": 1,
+      "logical_bytes": 281
+    },
+    "checkpoint_writes": {
+      "rows": 1,
+      "logical_bytes": 2253
+    },
+    "checkpoint_blobs": {
+      "rows": 10000,
+      "logical_bytes": 21948894
+    }
+  },
+  "prune_ms": 8601.204139005858,
+  "peak_rss_bytes": 425725952,
+  "lock_wait": "uncontended; concurrency measured by dedicated safety tests"
+}

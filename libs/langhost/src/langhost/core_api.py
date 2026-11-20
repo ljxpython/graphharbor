@@ -9,13 +9,16 @@ from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
+import croniter
 from langchain_core.runnables import RunnableConfig
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
+from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from langgraph_runtime_pg.auth import (
+    RuntimeContextError,
     in_principal_scope,
     principal_from_scope,
     scoped_idempotency_key,
@@ -24,15 +27,16 @@ from langgraph_runtime_pg.auth import (
 from langgraph_runtime_pg.authorization import authorize, metadata_predicate
 from langgraph_runtime_pg.checkpoint import (
     copy_thread_checkpoints,
-    delete_thread_checkpoints,
     get_checkpointer,
 )
 from langgraph_runtime_pg.checkpoint_mutations import (
     CheckpointConflict,
     complete_rollbacks,
     prune_checkpoints,
+    rollback_receipt,
     rollback_run,
 )
+from langgraph_runtime_pg.cron import next_cron_date
 from langgraph_runtime_pg.database import connect
 from langgraph_runtime_pg.graph_executor import normalize_durability, normalize_interrupt_nodes
 from langgraph_runtime_pg.metrics import inc as metric_inc
@@ -44,6 +48,7 @@ from langgraph_runtime_pg.models import (
     RunLeaseRow,
     RunRow,
     RuntimeEventRow,
+    ThreadDeletionRow,
     ThreadRow,
 )
 from langgraph_runtime_pg.protocol import RunReason, RunStatus, protocol_event
@@ -52,8 +57,20 @@ from langgraph_runtime_pg.redis_stream import (
     enqueue_run,
     get_stream_manager,
 )
+from langgraph_runtime_pg.retention import (
+    RetentionConflict,
+    advance_deletion,
+    deletion_status,
+    official_ttl,
+    request_deletion,
+    retention_status,
+    set_policy,
+    touch,
+    validate_policy,
+)
+from langgraph_runtime_pg.run_acceptance import AcceptanceGrant, RunAcceptanceRepository
 from langgraph_runtime_pg.run_state import is_terminal, transition
-from langgraph_runtime_pg.run_store import RunConflictError, RunRepository
+from langgraph_runtime_pg.run_store import RunConflictError, RunRepository, stopped_event
 
 
 def _plain(value: Any) -> Any:
@@ -91,7 +108,12 @@ def _principal(request: Request) -> Any:
 
 
 async def _authorize(
-    request: Request, resource: str, action: str, value: dict[str, Any]
+    request: Request,
+    resource: str,
+    action: str,
+    value: dict[str, Any],
+    *,
+    require_handler: bool = False,
 ) -> dict[str, Any]:
     principal = _principal(request)
     return await authorize(
@@ -100,6 +122,7 @@ async def _authorize(
         resource,
         action,
         value,
+        require_handler=require_handler,
     )
 
 
@@ -169,16 +192,14 @@ async def _thread_create_payload(request: Request) -> dict[str, Any] | JSONRespo
             return _error(f"{field} must be an object")
     if payload.get("if_exists") not in (None, "raise", "do_nothing"):
         return _error("if_exists must be 'raise' or 'do_nothing'")
-    ttl = payload.get("ttl")
-    if ttl is not None:
-        if not isinstance(ttl, dict):
-            return _error("ttl must be an object")
-        if ttl.get("strategy") not in (None, "delete", "keep_latest"):
-            return _error("ttl.strategy must be 'delete' or 'keep_latest'")
-        if "ttl" in ttl and (
-            isinstance(ttl["ttl"], bool) or not isinstance(ttl["ttl"], (int, float))
-        ):
-            return _error("ttl.ttl must be a number")
+    try:
+        official_ttl(payload.get("ttl"))
+        if "retention" in payload:
+            if "ttl" in payload:
+                raise ValueError("use retention or ttl, not both")
+            validate_policy(payload["retention"])
+    except ValueError as exc:
+        return _error(str(exc))
     supersteps = payload.get("supersteps")
     if supersteps is not None:
         if not isinstance(supersteps, list):
@@ -260,6 +281,7 @@ def _thread(row: ThreadRow) -> dict[str, Any]:
         "config": row.config,
         "values": row.values_,
         "state_updated_at": row.state_updated_at,
+        "retention": retention_status(row),
     }
     if row.interrupts:
         value["interrupts"] = row.interrupts
@@ -267,9 +289,9 @@ def _thread(row: ThreadRow) -> dict[str, Any]:
 
 
 def _run(row: RunRow) -> dict[str, Any]:
-    kwargs = dict(row.kwargs)
-    kwargs.pop("runtime_context", None)
-    kwargs.pop("runtime_context_token", None)
+    from langgraph_runtime_pg.webhooks import public_kwargs
+
+    kwargs = public_kwargs(row.kwargs)
     return _plain(
         {
             "run_id": row.run_id,
@@ -287,6 +309,8 @@ def _run(row: RunRow) -> dict[str, Any]:
 
 
 def _cron(row: CronRow) -> dict[str, Any]:
+    payload = dict(row.payload)
+    payload.pop("__graphharbor_runtime_context", None)
     return _plain(
         {
             "cron_id": row.cron_id,
@@ -298,7 +322,7 @@ def _cron(row: CronRow) -> dict[str, Any]:
             "timezone": row.timezone,
             "created_at": row.created_at,
             "updated_at": row.updated_at,
-            "payload": row.payload,
+            "payload": payload,
             "user_id": row.user_id,
             "next_run_date": row.next_run_date,
             "metadata": row.metadata_,
@@ -718,8 +742,26 @@ async def threads_create(request: Request) -> JSONResponse:
     metadata = dict(payload.get("metadata") or {})
     graph_id = payload.get("graph_id") or metadata.get("graph_id")
     async with connect() as conn:
-        existing = await conn.session.get(ThreadRow, thread_id)
-        if existing is not None:
+        if await conn.session.get(ThreadDeletionRow, thread_id) is not None:
+            return _error("thread ID has a deletion tombstone", 409)
+        inserted = await conn.session.scalar(
+            insert(ThreadRow)
+            .values(
+                thread_id=thread_id,
+                graph_id=str(graph_id) if graph_id else None,
+                status="idle",
+                metadata_=metadata,
+                config=payload.get("config") or {},
+                interrupts={},
+                state_updated_at=datetime.now(UTC),
+            )
+            .on_conflict_do_nothing(index_elements=[ThreadRow.thread_id])
+            .returning(ThreadRow.thread_id)
+        )
+        row = await conn.session.get(ThreadRow, thread_id)
+        if await conn.session.get(ThreadDeletionRow, thread_id) is not None:
+            raise HTTPException(409, "thread ID has a deletion tombstone")
+        if inserted is None:
             allowed = await conn.session.scalar(
                 select(ThreadRow.thread_id).where(
                     ThreadRow.thread_id == thread_id,
@@ -729,21 +771,14 @@ async def threads_create(request: Request) -> JSONResponse:
             if (
                 payload.get("if_exists") == "do_nothing"
                 and allowed
-                and in_principal_scope(existing, principal)
+                and in_principal_scope(row, principal)
             ):
-                return JSONResponse(_thread(existing))
+                return JSONResponse(_thread(row))
             return _error("thread already exists", 409)
-        row = ThreadRow(
-            thread_id=thread_id,
-            graph_id=str(graph_id) if graph_id else None,
-            status="idle",
-            metadata_=metadata,
-            config=payload.get("config") or {},
-            interrupts={},
-            state_updated_at=datetime.now(UTC),
-        )
-        conn.session.add(row)
-        await conn.session.flush()
+        if "retention" in payload:
+            set_policy(row, validate_policy(payload["retention"]))
+        elif "ttl" in payload:
+            set_policy(row, official_ttl(payload["ttl"]))
     return JSONResponse(_thread(row), status_code=200)
 
 
@@ -826,37 +861,167 @@ async def threads_get(request: Request) -> JSONResponse:
     return JSONResponse(_thread(row)) if row is not None else _error("thread not found", 404)
 
 
-async def threads_update(request: Request) -> JSONResponse | Response:
+async def threads_update(
+    request: Request, *, require_condition: bool = False
+) -> JSONResponse | Response:
+    from langgraph_runtime_pg.thread_metadata import patch_thread_metadata
+
     payload = await request.json()
-    row, principal, _ = await _get_thread(request, action="update", value=payload)
-    if row is None:
+    if (
+        not isinstance(payload, dict)
+        or set(payload) - {"metadata", "if_metadata", "ttl"}
+        or (payload.get("metadata") is not None and not isinstance(payload["metadata"], dict))
+    ):
+        return _error("Invalid thread metadata update", 422)
+    if require_condition and (
+        not isinstance(payload.get("if_metadata"), dict)
+        or not isinstance(payload.get("metadata"), dict)
+    ):
+        return _error("Metadata condition required", 422)
+    try:
+        policy = official_ttl(payload.get("ttl"))
+    except ValueError as exc:
+        return _error(str(exc))
+    principal = _principal(request)
+    try:
+        thread_id = UUID(request.path_params["thread_id"])
+    except (KeyError, ValueError):
         return _error("thread not found", 404)
-    if not isinstance(payload.get("metadata"), dict):
-        return _error("metadata must be an object")
+    payload["thread_id"] = thread_id
+    filters = await _authorize(request, "threads", "update", payload)
     async with connect() as conn:
-        stored = await conn.session.get(ThreadRow, row.thread_id)
+        stored = await patch_thread_metadata(
+            conn.session,
+            thread_id,
+            payload.get("metadata") or {},
+            if_metadata=payload.get("if_metadata"),
+            filters=filters,
+        )
         if stored is None or not in_principal_scope(stored, principal):
             return _error("thread not found", 404)
-        stored.metadata_ = {**stored.metadata_, **payload["metadata"]}
-        stored.updated_at = datetime.now(UTC)
-        await conn.session.flush()
+        if stored.deletion_requested_at is not None:
+            raise HTTPException(409, "thread deletion has been requested")
+        if "ttl" in payload:
+            set_policy(stored, policy)
         result = _thread(stored)
     if "return=minimal" in request.headers.get("prefer", ""):
         return _no_content()
     return JSONResponse(result)
 
 
+async def threads_metadata_cas(request: Request) -> JSONResponse | Response:
+    return await threads_update(request, require_condition=True)
+
+
 async def threads_delete(request: Request) -> JSONResponse | Response:
-    row, principal, thread_id = await _get_thread(request, action="delete")
-    if row is None or thread_id is None:
+    principal = _principal(request)
+    try:
+        thread_id = UUID(request.path_params["thread_id"])
+    except (KeyError, ValueError):
         return _error("thread not found", 404)
+    filters = await _authorize(request, "threads", "delete", {"thread_id": thread_id})
     async with connect() as conn:
-        stored = await conn.session.get(ThreadRow, thread_id)
-        if stored is not None and in_principal_scope(stored, principal):
-            await conn.session.delete(stored)
-            await conn.session.flush()
-    await delete_thread_checkpoints(str(thread_id))
-    return _no_content()
+        row = await conn.session.scalar(
+            select(ThreadRow)
+            .where(
+                ThreadRow.thread_id == thread_id, metadata_predicate(ThreadRow.metadata_, filters)
+            )
+            .with_for_update()
+        )
+        if row is not None and in_principal_scope(row, principal):
+            await request_deletion(conn.session, row)
+        else:
+            job = await conn.session.scalar(
+                select(ThreadDeletionRow).where(
+                    ThreadDeletionRow.thread_id == thread_id,
+                    metadata_predicate(ThreadDeletionRow.metadata_, filters),
+                )
+            )
+            if job is None or not in_principal_scope(job, principal):
+                return _error("thread not found", 404)
+    if await advance_deletion(thread_id):
+        return _no_content()
+    async with connect() as conn:
+        job = await conn.session.get(ThreadDeletionRow, thread_id)
+        return JSONResponse(deletion_status(job), status_code=202)
+
+
+async def threads_retention(request: Request) -> JSONResponse:
+    if request.method == "GET":
+        row, _, _ = await _get_thread(request, value={"retention": True})
+        return JSONResponse(retention_status(row)) if row else _error("thread not found", 404)
+    principal = _principal(request)
+    try:
+        thread_id = UUID(request.path_params["thread_id"])
+    except (KeyError, ValueError):
+        return _error("thread not found", 404)
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict) or set(payload) != {"policy"}:
+            raise ValueError("retention update requires policy")
+        policy = validate_policy(payload["policy"])
+    except (ValueError, TypeError) as exc:
+        return _error(str(exc))
+    filters = await _authorize(request, "threads", "update", {"thread_id": thread_id, **payload})
+    async with connect() as conn:
+        stored = await conn.session.scalar(
+            select(ThreadRow)
+            .where(
+                ThreadRow.thread_id == thread_id, metadata_predicate(ThreadRow.metadata_, filters)
+            )
+            .with_for_update()
+        )
+        if stored is None or not in_principal_scope(stored, principal):
+            return _error("thread not found", 404)
+        try:
+            set_policy(stored, policy)
+        except RetentionConflict as exc:
+            return _error(str(exc), 409)
+        return JSONResponse(retention_status(stored))
+
+
+async def threads_touch(request: Request) -> JSONResponse:
+    principal = _principal(request)
+    try:
+        thread_id = UUID(request.path_params["thread_id"])
+    except (KeyError, ValueError):
+        return _error("thread not found", 404)
+    filters = await _authorize(
+        request, "threads", "update", {"thread_id": thread_id, "touch": True}
+    )
+    async with connect() as conn:
+        stored = await conn.session.scalar(
+            select(ThreadRow)
+            .where(
+                ThreadRow.thread_id == thread_id, metadata_predicate(ThreadRow.metadata_, filters)
+            )
+            .with_for_update()
+        )
+        if stored is None or not in_principal_scope(stored, principal):
+            return _error("thread not found", 404)
+        try:
+            touch(stored)
+        except RetentionConflict as exc:
+            return _error(str(exc), 409)
+        return JSONResponse(retention_status(stored))
+
+
+async def threads_deletion(request: Request) -> JSONResponse:
+    try:
+        thread_id = UUID(request.path_params["thread_id"])
+    except (KeyError, ValueError):
+        return _error("thread not found", 404)
+    filters = await _authorize(request, "threads", "read", {"thread_id": thread_id})
+    async with connect() as conn:
+        job = await conn.session.scalar(
+            select(ThreadDeletionRow).where(
+                ThreadDeletionRow.thread_id == thread_id,
+                metadata_predicate(ThreadDeletionRow.metadata_, filters),
+            )
+        )
+        if job is None or not in_principal_scope(job, _principal(request)):
+            return _error("deletion not found", 404)
+        return JSONResponse(deletion_status(job))
 
 
 def _checkpoint_config(
@@ -1082,14 +1247,9 @@ async def threads_update_state(request: Request) -> JSONResponse | Response:
         metadata = payload.get("metadata")
         if not isinstance(metadata, dict):
             return _error("metadata must be an object")
-        async with connect() as conn:
-            stored = await conn.session.get(ThreadRow, thread_id)
-            if stored is None or not in_principal_scope(stored, principal):
-                return _error("thread not found", 404)
-            stored.metadata_ = {**stored.metadata_, **metadata}
-            stored.updated_at = datetime.now(UTC)
-            await conn.session.flush()
-        return _no_content()
+        return await threads_update(request)
+    if row.deletion_requested_at is not None:
+        return _error("thread deletion has been requested", 409)
     graph_id = row.graph_id or row.metadata_.get("graph_id")
     registry = getattr(request.app.state, "graph_registry", None)
     if not graph_id or registry is None:
@@ -1122,30 +1282,35 @@ async def threads_copy(request: Request) -> JSONResponse:
     row, _, thread_id = await _get_thread(request)
     if row is None or thread_id is None:
         return _error("thread not found", 404)
+    if row.deletion_requested_at is not None:
+        return _error("thread deletion has been requested", 409)
     target_id = uuid4()
     target = {"thread_id": target_id, "metadata": dict(row.metadata_)}
     await _authorize(request, "threads", "create", target)
-    async with connect() as conn:
-        copied = ThreadRow(
-            thread_id=target_id,
-            graph_id=row.graph_id,
-            status=row.status,
-            metadata_=target["metadata"],
-            config=dict(row.config),
-            values_=row.values_,
-            interrupts=dict(row.interrupts),
-            error=row.error,
-        )
-        conn.session.add(copied)
-        await conn.session.flush()
     try:
-        await copy_thread_checkpoints(str(thread_id), str(target_id))
-    except Exception:
         async with connect() as conn:
-            stored = await conn.session.get(ThreadRow, target_id)
-            if stored is not None:
-                await conn.session.delete(stored)
-                await conn.session.flush()
+            # Serialize the source snapshot with deletion and expose the target atomically.
+            row = await conn.session.get(ThreadRow, thread_id, with_for_update=True)
+            if row is None:
+                return _error("thread not found", 404)
+            if row.deletion_requested_at is not None:
+                return _error("thread deletion has been requested", 409)
+            copied = ThreadRow(
+                thread_id=target_id,
+                graph_id=row.graph_id,
+                status=row.status,
+                metadata_=target["metadata"],
+                config=dict(row.config),
+                values_=row.values_,
+                interrupts=dict(row.interrupts),
+                error=row.error,
+            )
+            set_policy(copied, row.retention)
+            conn.session.add(copied)
+            await conn.session.flush()
+            await copy_thread_checkpoints(str(thread_id), str(target_id))
+    except Exception:
+        await get_checkpointer().adelete_thread(str(target_id))
         raise
     return JSONResponse(_thread(copied), status_code=201)
 
@@ -1182,10 +1347,8 @@ async def threads_prune(request: Request) -> JSONResponse:
             .all()
         )
         if strategy == "delete":
-            deleted = len(rows)
             for row in rows:
-                await conn.session.delete(row)
-            await conn.session.flush()
+                await request_deletion(conn.session, row)
         else:
             try:
                 for row in rows:
@@ -1196,7 +1359,7 @@ async def threads_prune(request: Request) -> JSONResponse:
             deleted = len(rows)
     if strategy == "delete":
         for thread_id in [row.thread_id for row in rows]:
-            await delete_thread_checkpoints(str(thread_id))
+            deleted += int(await advance_deletion(thread_id))
     return JSONResponse({"pruned_count": deleted})
 
 
@@ -1232,8 +1395,14 @@ async def _thread_for_run(
         thread_id = UUID(str(thread_value))
     except ValueError:
         return None
-    thread = await session.get(ThreadRow, thread_id)
+    thread = await session.scalar(
+        select(ThreadRow).where(ThreadRow.thread_id == thread_id).with_for_update()
+    )
+    if thread is not None and thread.deletion_requested_at is not None:
+        raise HTTPException(409, "thread deletion has been requested")
     if thread is None and create:
+        if await session.get(ThreadDeletionRow, thread_id) is not None:
+            return None
         value = {"thread_id": thread_id, "metadata": {}}
         await _authorize(request, "threads", "create", value)
         thread = ThreadRow(
@@ -1245,6 +1414,8 @@ async def _thread_for_run(
         )
         session.add(thread)
         await session.flush()
+        if await session.get(ThreadDeletionRow, thread_id) is not None:
+            raise HTTPException(409, "thread ID has a deletion tombstone")
     return thread if thread is not None and in_principal_scope(thread, principal) else None
 
 
@@ -1253,11 +1424,31 @@ async def runs_create(
     *,
     thread_value: str | None = None,
     payload: dict[str, Any] | None = None,
+    acceptance: AcceptanceGrant | None = None,
+) -> JSONResponse:
+    if acceptance is None and "graphharbor-request-digest" in request.headers:
+        return _error("receipt digest requires the acceptance endpoint", 422)
+    try:
+        return await _runs_create(
+            request, thread_value=thread_value, payload=payload, acceptance=acceptance
+        )
+    except RuntimeContextError:
+        if acceptance is None:
+            raise
+        return _error("acceptance transaction could not be completed", 503)
+
+
+async def _runs_create(
+    request: Request,
+    *,
+    thread_value: str | None = None,
+    payload: dict[str, Any] | None = None,
+    acceptance: AcceptanceGrant | None = None,
 ) -> JSONResponse:
     principal = _principal(request)
     payload = payload if payload is not None else await request.json()
-    if payload.get("input") is not None and payload.get("command") is not None:
-        return _error("input and command cannot be combined")
+    from langgraph_runtime_pg.webhooks import settings
+
     assistant_value = str(payload.get("assistant_id") or "")
     if not assistant_value:
         return _error("assistant_id is required")
@@ -1266,10 +1457,43 @@ async def runs_create(
         "thread_id": UUID(thread_value) if thread_value else None,
         "assistant_id": assistant_value,
         "kwargs": payload,
+        **(acceptance.authorization_value() if acceptance else {}),
     }
-    filters = await _authorize(request, "threads", "create_run", authorization_value)
+    filters = await _authorize(
+        request,
+        "threads",
+        "create_run",
+        authorization_value,
+        require_handler=acceptance is not None,
+    )
     payload["metadata"] = authorization_value.get("metadata", {})
     async with connect() as conn:
+        receipt_repo = RunAcceptanceRepository()
+        if acceptance is not None:
+            from langhost.run_acceptance import receipt_response
+
+            await receipt_repo.acquire_key(conn.session, acceptance)
+            existing = await receipt_repo.get(conn.session, acceptance)
+            if existing is not None:
+                return receipt_response(
+                    await receipt_repo.response(
+                        conn.session, acceptance, existing, filters, replay=True
+                    )
+                )
+            orphan = await conn.session.scalar(
+                select(RunRow.run_id).where(
+                    RunRow.idempotency_key == "receipt:v1:" + acceptance.receipt_key
+                )
+            )
+            if orphan is not None:
+                raise HTTPException(503, "acceptance ledger integrity unavailable")
+        if payload.get("webhook") is not None:
+            try:
+                settings().validate_url(payload["webhook"])
+            except ValueError as exc:
+                return _error(str(exc), 422)
+        if payload.get("input") is not None and payload.get("command") is not None:
+            return _error("input and command cannot be combined")
         assistant = await _resolve_assistant(request, conn.session, assistant_value, principal)
         if assistant is None:
             return _error("assistant not found", 404)
@@ -1282,6 +1506,15 @@ async def runs_create(
         )
         if thread_value is not None and thread is None:
             return _error("thread not found", 404)
+        if thread is not None and acceptance is not None:
+            thread = await conn.session.scalar(
+                select(ThreadRow)
+                .where(ThreadRow.thread_id == thread.thread_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if thread is None:
+                return _error("thread not found", 404)
         if thread is not None:
             allowed = await conn.session.scalar(
                 select(ThreadRow.thread_id).where(
@@ -1294,6 +1527,10 @@ async def runs_create(
         run_payload = dict(payload)
         run_payload.pop("runtime_context", None)
         run_payload.pop("runtime_context_token", None)
+        run_payload.pop("__graphharbor_runtime_context", None)
+        trusted_context = _runtime_context(run_payload, principal)
+        if trusted_context is not None:
+            run_payload["__graphharbor_runtime_context"] = trusted_context
         run_context = payload.get("context")
         assistant_context = assistant.context if isinstance(assistant.context, dict) else {}
         if isinstance(run_context, dict):
@@ -1334,6 +1571,8 @@ async def runs_create(
             "idempotency_key"
         )
         idempotency_key = scoped_idempotency_key(principal, raw_idempotency_key)
+        if acceptance is not None:
+            idempotency_key = "receipt:v1:" + acceptance.receipt_key
         try:
             run = await RunRepository().create(
                 conn.session,
@@ -1345,6 +1584,12 @@ async def runs_create(
                 multitask_strategy=str(payload.get("multitask_strategy") or "enqueue"),
             )
         except RunConflictError as exc:
+            if acceptance is not None and exc.reason == "multitask_rejected" and thread is not None:
+                receipt = await receipt_repo.record(conn.session, acceptance, thread.metadata_)
+                response = await receipt_repo.response(conn.session, acceptance, receipt, filters)
+                return receipt_response(response)
+            if acceptance is not None:
+                raise HTTPException(409, str(exc)) from exc
             return _error(str(exc), 409)
         if trusted_context and not run.kwargs.get("runtime_context_token"):
             run.kwargs = {
@@ -1360,8 +1605,12 @@ async def runs_create(
         await conn.session.refresh(run)
         conn.schedule_after_commit(lambda run_id=run.run_id: enqueue_run(run_id))
         response = _run(run)
+        if acceptance is not None:
+            assert thread is not None
+            receipt = await receipt_repo.record(conn.session, acceptance, thread.metadata_, run)
+            response = await receipt_repo.response(conn.session, acceptance, receipt, filters)
     metric_inc("graphharbor_runs_created_total")
-    return JSONResponse(response)
+    return receipt_response(response) if acceptance else JSONResponse(response)
 
 
 async def runs_create_root(request: Request) -> JSONResponse:
@@ -1439,7 +1688,8 @@ async def _cancel_row(request: Request, conn: Any, row: RunRow, action: str) -> 
     if action == "rollback":
         await rollback_run(conn.session, row, validate_only=True)
         if row.lease_owner is None:
-            await rollback_run(conn.session, row)
+            confirmed = row.retry_count == 0 or await stopped_event(conn.session, row) is not None
+            await rollback_run(conn.session, row, execution_stopped=confirmed)
             return
         # Retain the lease until the worker acknowledges or it expires. The
         # checkpoint fence rejects writes as soon as this transaction commits.
@@ -1447,56 +1697,51 @@ async def _cancel_row(request: Request, conn: Any, row: RunRow, action: str) -> 
         row.reason = RunReason.ROLLBACK.value
         row.updated_at = datetime.now(UTC)
         await conn.session.flush()
+    elif is_terminal(row.status) and (
+        row.reason != RunReason.CANCEL_REQUESTED.value or row.lease_owner is None
+    ):
         return
-    if is_terminal(row.status):
-        return
-    change = transition(
-        row.status,
-        RunStatus.INTERRUPTED,
-        reason=RunReason.CANCEL_REQUESTED,
-        retry_count=row.retry_count,
-    )
-    was_running = row.status == "running"
-    row.status = change.status.value
-    row.reason = change.reason.value
-    if not was_running:
-        row.lease_owner = None
-        row.lease_expires_at = None
-    row.heartbeat_at = datetime.now(UTC)
-    row.updated_at = datetime.now(UTC)
-    if not was_running:
-        await conn.session.execute(delete(RunLeaseRow).where(RunLeaseRow.run_id == row.run_id))
-    await conn.session.flush()
-    durable = await RunRepository().record_event(
-        conn.session,
-        run_id=row.run_id,
-        thread_id=row.thread_id,
-        topic="lifecycle",
-        payload={
-            "event": "lifecycle",
-            "status": RunStatus.INTERRUPTED.value,
-            "reason": RunReason.CANCEL_REQUESTED.value,
-        },
-        namespace=[],
-        trace_context={
-            "assistant_id": str(row.assistant_id),
-        },
-        terminal=True,
-    )
-    conn.schedule_after_commit(lambda: _fanout_durable_event(durable))
-    if row.thread_id:
+    else:
+        change = transition(
+            row.status,
+            RunStatus.INTERRUPTED,
+            reason=RunReason.CANCEL_REQUESTED,
+            retry_count=row.retry_count,
+        )
+        row.status, row.reason = change.status.value, change.reason.value
+        row.updated_at = datetime.now(UTC)
+        if row.lease_owner is None:
+            await conn.session.execute(delete(RunLeaseRow).where(RunLeaseRow.run_id == row.run_id))
+            row.lease_expires_at = None
+            durable = await RunRepository().record_event(
+                conn.session,
+                run_id=row.run_id,
+                thread_id=row.thread_id,
+                topic="lifecycle",
+                payload={
+                    "event": "lifecycle",
+                    "status": row.status,
+                    "reason": row.reason,
+                    "execution_stopped": True,
+                },
+                terminal=True,
+                trace_context={"assistant_id": str(row.assistant_id)},
+            )
+            conn.schedule_after_commit(lambda: _fanout_durable_event(durable))
+        await conn.session.flush()
 
-        async def publish() -> None:
-            try:
-                await get_stream_manager().put(
-                    row.run_id,
-                    row.thread_id,
-                    Message(topic=b"run:control", data=json.dumps({"action": action}).encode()),
-                )
-            except RuntimeError:
-                pass
+    async def publish() -> None:
+        try:
+            await get_stream_manager().put(
+                row.run_id,
+                row.thread_id,
+                Message(topic=b"run:control", data=json.dumps({"action": action}).encode()),
+            )
+        except Exception:
+            # The committed PostgreSQL intent remains authoritative during an outage.
+            metric_inc("graphharbor_cancel_control_publish_failures_total")
 
-        conn.schedule_after_commit(publish)
+    conn.schedule_after_commit(publish)
 
 
 async def _fanout_durable_event(event: RuntimeEventRow) -> None:
@@ -1622,7 +1867,7 @@ async def runs_queue(request: Request) -> JSONResponse:
     return JSONResponse(response)
 
 
-async def runs_cancel(request: Request) -> JSONResponse:
+async def runs_cancel(request: Request) -> Response:
     principal = _principal(request)
     action = request.query_params.get("action", "interrupt")
     if action not in {"interrupt", "rollback"}:
@@ -1641,24 +1886,37 @@ async def runs_cancel(request: Request) -> JSONResponse:
         except CheckpointConflict as exc:
             await conn.session.rollback()
             return _error(str(exc), 409)
-        response = {} if action == "rollback" else _run(row)
-    if request.query_params.get("wait") in {"1", "true", "True"} and response:
-        response = await _wait_for_run(thread_id, run_id, principal)
-    if action == "rollback" and request.query_params.get("wait") in {"1", "true", "True"}:
-        deadline = asyncio.get_running_loop().time() + 60
+    metric_inc("graphharbor_runs_cancel_requested_total", labels={"action": action})
+    if request.query_params.get("wait", "false").lower() not in {"1", "true", "yes"}:
+        return Response(status_code=202)
+    if action == "rollback":
+        deadline = asyncio.get_running_loop().time() + float(
+            __import__("os").environ.get("GRAPHHARBOR_RUN_WAIT_TIMEOUT", "60")
+        )
         while True:
             await complete_rollbacks(run_id=run_id)
             async with connect() as conn:
-                if await conn.session.get(RunRow, run_id) is None:
+                receipt = await rollback_receipt(conn.session, run_id)
+                if receipt is not None and receipt.payload.get("execution_stopped") is True:
                     break
+                if receipt is not None:
+                    return _error("rollback recovered; worker shutdown is unconfirmed", 503)
             if asyncio.get_running_loop().time() >= deadline:
                 return _error("rollback is still waiting for worker shutdown", 503)
             await asyncio.sleep(0.05)
-    metric_inc("graphharbor_runs_cancel_requested_total", labels={"action": action})
-    return JSONResponse(response)
+        response = None
+    else:
+        response = await _wait_for_run(thread_id, run_id, principal)
+    return JSONResponse(
+        response,
+        headers={
+            "Location": f"/threads/{thread_id}/runs/{run_id}/join",
+            "Content-Location": f"/threads/{thread_id}/runs/{run_id}",
+        },
+    )
 
 
-async def runs_cancel_many(request: Request) -> JSONResponse:
+async def runs_cancel_many(request: Request) -> Response:
     principal = _principal(request)
     action = request.query_params.get("action", "interrupt")
     if action not in {"interrupt", "rollback"}:
@@ -1689,9 +1947,7 @@ async def runs_cancel_many(request: Request) -> JSONResponse:
                     query.outerjoin(
                         RunCheckpointBaselineRow, RunCheckpointBaselineRow.run_id == RunRow.run_id
                     ).order_by(
-                        RunCheckpointBaselineRow.projection["_captured_at"]
-                        .astext.desc()
-                        .nullsfirst(),
+                        RunCheckpointBaselineRow.sequence.desc().nullsfirst(),
                         RunRow.created_at.desc(),
                         RunRow.run_id,
                     )
@@ -1711,7 +1967,7 @@ async def runs_cancel_many(request: Request) -> JSONResponse:
             await conn.session.rollback()
             return _error(str(exc), 409)
     metric_inc("graphharbor_runs_cancel_requested_total", len(rows), labels={"action": action})
-    return JSONResponse({})
+    return Response(status_code=204)
 
 
 async def _wait_for_run(thread_id: UUID | None, run_id: UUID, principal: Any) -> Any:
@@ -1722,27 +1978,21 @@ async def _wait_for_run(thread_id: UUID | None, run_id: UUID, principal: Any) ->
         async with connect() as conn:
             row = await conn.session.get(RunRow, run_id)
             if row is None or not in_principal_scope(row, principal):
-                return {"detail": "run not found"}
-            if is_terminal(row.status):
-                event = await conn.session.scalar(
-                    select(RuntimeEventRow).where(
-                        RuntimeEventRow.run_id == run_id, RuntimeEventRow.terminal.is_(True)
-                    )
-                )
-                if event is not None:
-                    output = event.payload.get("output")
-                    interrupts = event.payload.get("interrupts") or []
-                    if interrupts and isinstance(output, dict):
-                        return {
-                            **output,
-                            "__interrupt__": [
-                                {"value": item["value"], "id": item["id"]} for item in interrupts
-                            ],
-                        }
-                    return output
-                return None
+                raise HTTPException(404, "run not found")
+            event = await stopped_event(conn.session, row)
+            if event is not None:
+                output = event.payload.get("output")
+                interrupts = event.payload.get("interrupts") or []
+                if interrupts and isinstance(output, dict):
+                    return {
+                        **output,
+                        "__interrupt__": [
+                            {"value": item["value"], "id": item["id"]} for item in interrupts
+                        ],
+                    }
+                return output
         await asyncio.sleep(0.1)
-    return {"detail": "run wait timed out", "run_id": str(run_id)}
+    raise HTTPException(503, "run wait timed out; worker shutdown is unconfirmed")
 
 
 async def runs_wait(request: Request) -> JSONResponse:
@@ -1782,6 +2032,8 @@ async def runs_join(request: Request) -> JSONResponse:
 
 
 async def runs_batch(request: Request) -> JSONResponse:
+    if "graphharbor-request-digest" in request.headers:
+        return _error("receipt digest requires the acceptance endpoint", 422)
     payloads = await request.json()
     if not isinstance(payloads, list):
         return _error("runs batch payload must be an array")
@@ -1806,7 +2058,33 @@ async def crons_search(request: Request) -> JSONResponse:
         limit, offset = _pagination(request, payload)
     except ValueError as exc:
         return _error(str(exc))
-    query = _scope(select(CronRow).order_by(CronRow.created_at.desc()), CronRow, principal)
+    sort_fields = {
+        "cron_id",
+        "assistant_id",
+        "thread_id",
+        "next_run_date",
+        "end_time",
+        "created_at",
+        "updated_at",
+    }
+    sort_by = payload.get("sort_by") or "created_at"
+    if sort_by not in sort_fields:
+        return _error("Invalid sort_by", 422)
+    sort_order = str(payload.get("sort_order") or "DESC").upper()
+    if sort_order not in {"ASC", "DESC"}:
+        return _error("Invalid sort_order", 422)
+    select_fields = payload.get("select")
+    if select_fields is not None and (
+        not isinstance(select_fields, list)
+        or any(not isinstance(item, str) for item in select_fields)
+    ):
+        return _error("select must be an array of field names", 422)
+    order = getattr(CronRow, sort_by)
+    query = _scope(
+        select(CronRow).order_by(order.asc() if sort_order == "ASC" else order.desc()),
+        CronRow,
+        principal,
+    )
     if payload.get("assistant_id"):
         try:
             query = query.where(CronRow.assistant_id == UUID(str(payload["assistant_id"])))
@@ -1818,12 +2096,18 @@ async def crons_search(request: Request) -> JSONResponse:
         except ValueError:
             return _error("thread_id must be a UUID")
     if payload.get("enabled") is not None:
-        query = query.where(CronRow.enabled == bool(payload["enabled"]))
+        if not isinstance(payload["enabled"], bool):
+            return _error("enabled must be a boolean", 422)
+        query = query.where(CronRow.enabled == payload["enabled"])
     query = query.where(metadata_predicate(CronRow.metadata_, filters))
     query = _metadata_filter(query, CronRow, payload.get("metadata"))
     async with connect() as conn:
         rows = (await conn.session.execute(query.limit(limit).offset(offset))).scalars().all()
-    return JSONResponse([_cron(row) for row in rows])
+    return JSONResponse(
+        [{key: value for key, value in _cron(row).items() if key in select_fields} for row in rows]
+        if select_fields is not None
+        else [_cron(row) for row in rows]
+    )
 
 
 async def crons_count(request: Request) -> JSONResponse:
@@ -1851,8 +2135,35 @@ async def crons_count(request: Request) -> JSONResponse:
 async def cron_create(request: Request, *, thread_value: str | None = None) -> JSONResponse:
     principal = _principal(request)
     payload = await request.json()
+    if not isinstance(payload, dict):
+        return _error("cron payload must be an object", 422)
+    from langgraph_runtime_pg.webhooks import settings
+
+    if payload.get("webhook") is not None:
+        try:
+            settings().validate_url(payload["webhook"])
+        except ValueError as exc:
+            return _error(str(exc), 422)
     if not payload.get("schedule") or not payload.get("assistant_id"):
         return _error("schedule and assistant_id are required")
+    if not isinstance(payload["schedule"], str) or not croniter.croniter.is_valid(
+        payload["schedule"]
+    ):
+        return _error("Invalid cron schedule", 422)
+    if payload.get("on_run_completed", "delete") not in ("delete", "keep"):
+        return _error("on_run_completed must be delete or keep", 422)
+    if "enabled" in payload and not isinstance(payload["enabled"], bool):
+        return _error("enabled must be a boolean", 422)
+    if not isinstance(payload.get("metadata", {}), dict):
+        return _error("metadata must be an object", 422)
+    if not isinstance(payload.get("config", {}), dict):
+        return _error("config must be an object", 422)
+    if not isinstance((payload.get("config") or {}).get("configurable", {}), dict):
+        return _error("config.configurable must be an object", 422)
+    try:
+        next_run = next_cron_date(payload["schedule"], datetime.now(UTC), payload.get("timezone"))
+    except (KeyError, ValueError):
+        return _error("Invalid timezone", 422)
     payload["thread_id"] = thread_value
     await _authorize(request, "crons", "create", payload)
     async with connect() as conn:
@@ -1869,14 +2180,31 @@ async def cron_create(request: Request, *, thread_value: str | None = None) -> J
             try:
                 end_time = datetime.fromisoformat(str(payload["end_time"]).replace("Z", "+00:00"))
             except ValueError:
-                return _error("end_time must be an ISO date-time")
+                return _error("end_time must be an ISO date-time", 422)
+            if end_time.tzinfo is None:
+                return _error("end_time must include a timezone", 422)
+        cron_id = uuid4()
+        run_payload = dict(payload)
+        run_payload.pop("runtime_context", None)
+        run_payload.pop("runtime_context_token", None)
+        run_payload.pop("__graphharbor_runtime_context", None)
+        trusted_context = _runtime_context(run_payload, principal)
+        if trusted_context is not None:
+            run_payload["__graphharbor_runtime_context"] = trusted_context
+        config = dict(run_payload.get("config") or {})
+        configurable = dict(config.get("configurable") or {})
+        configurable["cron_id"] = str(cron_id)
+        config["configurable"] = configurable
+        run_payload["config"] = config
         row = CronRow(
-            cron_id=uuid4(),
+            cron_id=cron_id,
             assistant_id=assistant.assistant_id,
             thread_id=thread.thread_id if thread else None,
             schedule=str(payload["schedule"]),
-            payload=dict(payload),
+            payload=run_payload,
             metadata_=payload.get("metadata") or {},
+            user_id=principal.subject if principal is not None else None,
+            next_run_date=next_run,
             end_time=end_time,
             timezone=payload.get("timezone"),
             on_run_completed=payload.get("on_run_completed"),
@@ -1906,27 +2234,91 @@ async def cron_update(request: Request) -> JSONResponse:
     except ValueError:
         return _error("cron not found", 404)
     payload = await request.json()
+    if not isinstance(payload, dict):
+        return _error("cron payload must be an object", 422)
+    from langgraph_runtime_pg.webhooks import settings
+
+    if payload.get("webhook") is not None:
+        try:
+            settings().validate_url(payload["webhook"])
+        except ValueError as exc:
+            return _error(str(exc), 422)
+    if not payload:
+        return _error("No fields to update")
+    if "schedule" in payload and (
+        not isinstance(payload["schedule"], str)
+        or not croniter.croniter.is_valid(payload["schedule"])
+    ):
+        return _error("Invalid cron schedule", 422)
+    if "on_run_completed" in payload and payload["on_run_completed"] not in ("delete", "keep"):
+        return _error("on_run_completed must be delete or keep", 422)
+    if "enabled" in payload and not isinstance(payload["enabled"], bool):
+        return _error("enabled must be a boolean", 422)
+    if "metadata" in payload and not isinstance(payload["metadata"], dict):
+        return _error("metadata must be an object", 422)
+    if "config" in payload and not isinstance(payload["config"], dict):
+        return _error("config must be an object", 422)
+    if isinstance(payload.get("config"), dict) and not isinstance(
+        payload["config"].get("configurable", {}), dict
+    ):
+        return _error("config.configurable must be an object", 422)
     async with connect() as conn:
         row = await _authorized_resource(
             request, conn.session, CronRow, "crons", cron_id, "update", payload
         )
         if row is None or not in_principal_scope(row, principal):
             return _error("cron not found", 404)
+        if row.thread_id is not None:
+            thread = await _thread_for_run(request, conn.session, str(row.thread_id), principal)
+            if thread is None:
+                return _error("thread not found", 404)
+        schedule = payload.get("schedule", row.schedule)
+        timezone = payload.get("timezone", row.timezone)
+        if "schedule" in payload or "timezone" in payload:
+            try:
+                row.next_run_date = next_cron_date(schedule, datetime.now(UTC), timezone)
+            except (KeyError, ValueError):
+                return _error("Invalid timezone", 422)
         for field in ("schedule", "timezone", "on_run_completed", "enabled"):
             if field in payload:
                 setattr(row, field, payload[field])
         if "end_time" in payload:
-            row.end_time = (
-                datetime.fromisoformat(str(payload["end_time"]).replace("Z", "+00:00"))
-                if payload["end_time"]
-                else None
-            )
+            if payload["end_time"] is None:
+                row.end_time = None
+            else:
+                try:
+                    row.end_time = datetime.fromisoformat(
+                        str(payload["end_time"]).replace("Z", "+00:00")
+                    )
+                except ValueError:
+                    return _error("end_time must be an ISO date-time", 422)
+                if row.end_time.tzinfo is None:
+                    return _error("end_time must include a timezone", 422)
         if isinstance(payload.get("metadata"), dict):
             row.metadata_ = {**row.metadata_, **payload["metadata"]}
         row.payload = {
             **row.payload,
-            **{key: value for key, value in payload.items() if key != "cron_id"},
+            **{
+                key: value
+                for key, value in payload.items()
+                if key
+                not in {
+                    "cron_id",
+                    "runtime_context",
+                    "runtime_context_token",
+                    "__graphharbor_runtime_context",
+                }
+            },
         }
+        config = dict(row.payload.get("config") or {})
+        configurable = dict(config.get("configurable") or {})
+        configurable["cron_id"] = str(cron_id)
+        config["configurable"] = configurable
+        row.payload = {**row.payload, "config": config}
+        if {"input", "command", "context", "config", "assistant_id"} & payload.keys():
+            trusted_context = _runtime_context(row.payload, principal)
+            if trusted_context is not None:
+                row.payload = {**row.payload, "__graphharbor_runtime_context": trusted_context}
         row.updated_at = datetime.now(UTC)
         await conn.session.flush()
     return JSONResponse(_cron(row))

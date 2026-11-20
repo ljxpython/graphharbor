@@ -64,6 +64,40 @@ def test_thread_config_preserves_run_fields() -> None:
     assert cast(dict[str, Any], config)["context"] == {"temperature": 0.2}
 
 
+@pytest.mark.asyncio
+async def test_server_identity_survives_langgraph_root_and_subgraph() -> None:
+    from langgraph.runtime import Runtime
+
+    from langgraph_runtime_pg.graph_executor import invoke_graph, thread_config
+
+    observed = []
+
+    def observe(state: _State, runtime: Runtime):
+        server = runtime.server_info
+        observed.append((server.assistant_id, server.graph_id, server.user.identity))
+        return {"value": state["value"] + 1}
+
+    child = StateGraph(_State)
+    child.add_node("observe", observe)
+    child.add_edge(START, "observe")
+    child.add_edge("observe", END)
+    parent = StateGraph(_State)
+    parent.add_node("observe", observe)
+    parent.add_node("child", child.compile())
+    parent.add_edge(START, "observe")
+    parent.add_edge("observe", "child")
+    parent.add_edge("child", END)
+    config = thread_config(
+        "thread",
+        assistant_id="server-assistant",
+        graph_id="server-graph",
+        configurable={"assistant_id": "forged", "graph_id": "forged"},
+        runtime_context={"auth_user": {"identity": "owner"}},
+    )
+    await invoke_graph(parent.compile(), {"value": 0}, config=config)
+    assert observed == [("server-assistant", "server-graph", "owner")] * 2
+
+
 def test_thread_metadata_is_exposed_under_a_server_owned_key() -> None:
     from langgraph_runtime_pg.thread_config import attach_thread_metadata
 

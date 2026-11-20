@@ -1,0 +1,6 @@
+{
+  "history": 10000,
+  "payload_bytes": 16384,
+  "error": "PostgreSQL ProgramLimitExceededError: total size of jsonb array elements exceeds 268435455 bytes",
+  "completed": false
+}

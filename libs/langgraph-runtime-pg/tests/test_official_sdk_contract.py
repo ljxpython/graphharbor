@@ -29,7 +29,7 @@ def _write_graph_project(root: Path) -> dict[str, dict[str, str]]:
 
 
 @pytest.mark.asyncio
-async def test_official_python_sdk_core_surface_is_complete(tmp_path: Path) -> None:
+async def test_official_python_sdk_core_surface_is_complete(tmp_path: Path, pg_runtime) -> None:
     from langgraph_sdk._async.client import LangGraphClient
 
     from langgraph_runtime_pg.database import truncate_all
@@ -378,7 +378,10 @@ async def test_official_python_sdk_protocol_v2_multi_interrupt_resume(
 
 
 @pytest.mark.asyncio
-async def test_official_python_sdk_runs_stream_v2_and_replay(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("claimed_generation", [0, 1])
+async def test_official_python_sdk_runs_stream_v2_and_replay(
+    tmp_path: Path, monkeypatch, claimed_generation, pg_runtime
+) -> None:
 
     from langgraph_runtime_pg.database import connect, truncate_all
     from langgraph_runtime_pg.models import RunRow, RuntimeEventRow
@@ -444,6 +447,7 @@ async def test_official_python_sdk_runs_stream_v2_and_replay(tmp_path: Path, mon
             assert row is not None
             row.status = RunStatus.SUCCESS.value
             row.reason = RunReason.COMPLETED.value
+            row.retry_count = claimed_generation
             row.kwargs = {
                 **row.kwargs,
                 "stream_mode": ["values", "updates"],
@@ -487,6 +491,9 @@ async def test_official_python_sdk_runs_stream_v2_and_replay(tmp_path: Path, mon
             chunks.append(chunk)
 
         assert created_metadata and created_metadata[0]["run_id"] == str(run_id)
+        assert (
+            next(chunk for chunk in chunks if chunk["type"] == "metadata")["data"]["attempt"] == 1
+        )
         assert {chunk["type"] for chunk in chunks} >= {"metadata", "values"}
         assert any(chunk["ns"] == [] and chunk["data"] == {"value": 2} for chunk in chunks)
         assert any(

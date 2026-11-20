@@ -1,0 +1,49 @@
+{
+  "release": {
+    "graphharbor-runtime": {
+      "changed_or_added_python": [
+        "langgraph_runtime_pg/checkpoint.py",
+        "langgraph_runtime_pg/checkpoint_journal.py",
+        "langgraph_runtime_pg/checkpoint_mutations.py",
+        "langgraph_runtime_pg/database.py",
+        "langgraph_runtime_pg/models.py",
+        "langgraph_runtime_pg/production_worker.py",
+        "langgraph_runtime_pg/run_store.py",
+        "langgraph_runtime_pg/migrations/versions/015_checkpoint_journal.py"
+      ],
+      "removed_python": [],
+      "current_source_matches_wheel": true
+    },
+    "graphharbor": {
+      "changed_or_added_python": [
+        "langhost/core_api.py",
+        "langhost/streaming.py"
+      ],
+      "removed_python": [],
+      "current_source_matches_wheel": true
+    },
+    "published_sha256": {
+      "graphharbor-0.13.0.post49.tar.gz": "68200602e5b0c87a179ed5ff62d70f8504da921ab1cd0312e8927501bb90c5a2",
+      "graphharbor_runtime-0.13.0.post49-py3-none-any.whl": "551e39f1780bdaabfbfadb6919a076b9414bf91e001eca3085e4dcb897006773",
+      "graphharbor-0.13.0.post49-py3-none-any.whl": "b2c9c554c6442d2a3d220587f3568e8e6340f4f23caa2bcb0759d1d8d65abae7",
+      "graphharbor_runtime-0.13.0.post49.tar.gz": "3975c250763e89247ed5c3b072a460f495b9348d996f4a584ae8b5e053610e96"
+    },
+    "private_or_platform_files": []
+  },
+  "installation": {
+    "versions": {
+      "graphharbor": "0.13.0.post49",
+      "graphharbor-runtime": "0.13.0.post49",
+      "langgraph": "1.2.24",
+      "langgraph-checkpoint": "4.3.2",
+      "langgraph-checkpoint-postgres": "3.2.1",
+      "langgraph-sdk": "0.4.14",
+      "langgraph-cli": "0.4.31"
+    },
+    "schema_head": "015_checkpoint_journal",
+    "installed_from": "PyPI --no-cache",
+    "site_packages": true,
+    "public_contract_tests": {"passed": 42, "deselected": 1},
+    "http_python_javascript_cancel_scenarios": 24
+  }
+}

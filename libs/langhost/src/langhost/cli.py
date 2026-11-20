@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import pathlib
@@ -352,6 +353,9 @@ def serve(
     )
 
     config_json = validate_config_file(config)
+    cast(dict[str, Any], config_json)["thread_lifecycle"] = json.loads(config.read_text()).get(
+        "thread_lifecycle", {}
+    )
     if config_json.get("node_version"):
         raise click.UsageError(
             "JS graphs are not supported by langhost. Remove the 'node_version' field from the config."
@@ -516,6 +520,69 @@ def worker_command(
     import asyncio
 
     asyncio.run(_run())
+
+
+@cli.command("webhooks", help="Inspect or recover delivery snapshots; never rerun a graph.")
+@click.argument(
+    "action", type=click.Choice(["list", "replay", "discard", "cleanup", "confirm-stop"])
+)
+@click.argument("delivery_id", required=False, type=click.UUID)
+def webhooks_command(action: str, delivery_id: Any) -> None:
+    if action in {"replay", "discard", "confirm-stop"} and delivery_id is None:
+        raise click.UsageError("A delivery ID is required")
+    import asyncio
+    import json
+
+    from langgraph_runtime_pg.database import start_pool, stop_pool
+    from langgraph_runtime_pg.webhook_delivery import maintain_deliveries
+
+    load_dotenv(override=False)
+
+    async def run() -> None:
+        await start_pool()
+        try:
+            click.echo(json.dumps(await maintain_deliveries(action, delivery_id)))
+        finally:
+            await stop_pool()
+
+    asyncio.run(run())
+
+
+@cli.command("retention", help="Preview or apply bounded thread retention and deletion handoffs.")
+@click.option(
+    "--config",
+    "config_path",
+    default=DEFAULT_CONFIG,
+    type=click.Path(exists=True, dir_okay=False, path_type=pathlib.Path),
+)
+@click.option("--env-file", type=click.Path(exists=True, dir_okay=False, path_type=pathlib.Path))
+@click.option("--apply", is_flag=True, help="Apply deletion; default only reports candidates.")
+@click.option("--limit", default=100, show_default=True, type=click.IntRange(1, 1000))
+def retention_command(
+    config_path: pathlib.Path, env_file: pathlib.Path | None, apply: bool, limit: int
+) -> None:
+    import asyncio
+    import json
+
+    from langgraph_runtime_pg.database import start_pool, stop_pool
+    from langgraph_runtime_pg.retention import configure_retention, maintain_retention
+    from langhost.server import _load_symbol
+
+    config = json.loads(config_path.read_text())
+    base_dir = resolve_config_base_dir(config_path, config)
+    configured_env = config.get("env")
+    if env_file or isinstance(configured_env, str):
+        load_dotenv(env_file or base_dir / configured_env, override=False)
+    configure_retention(config, lambda spec: _load_symbol(spec, base_dir))
+
+    async def run() -> None:
+        await start_pool()
+        try:
+            click.echo(json.dumps(await maintain_retention(apply=apply, limit=limit)))
+        finally:
+            await stop_pool()
+
+    asyncio.run(run())
 
 
 if __name__ == "__main__":

@@ -74,15 +74,9 @@ def transition(
         raise InvalidTransition(f"Cannot transition run from {current_status} to {target_status}")
 
     normalized_reason = reason if isinstance(reason, RunReason) else RunReason(reason)
-    if retry_count < 0 or retry_count > MAX_INFRASTRUCTURE_RETRIES:
-        raise InvalidTransition(
-            f"retry_count must be between 0 and {MAX_INFRASTRUCTURE_RETRIES}, got {retry_count}"
-        )
-    if (
-        normalized_reason is RunReason.INFRASTRUCTURE_ERROR
-        and retry_count > MAX_INFRASTRUCTURE_RETRIES
-    ):
-        raise InvalidTransition("infrastructure retries are capped at three")
+    # retry_count fences claims; retry_counters bounds attempts independently of handoffs.
+    if retry_count < 0:
+        raise InvalidTransition(f"retry_count must be non-negative, got {retry_count}")
     if target_status is RunStatus.INTERRUPTED and normalized_reason not in {
         RunReason.CANCEL_REQUESTED,
         RunReason.HITL_INTERRUPT,

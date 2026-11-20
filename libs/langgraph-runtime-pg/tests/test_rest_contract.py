@@ -190,11 +190,11 @@ async def test_core_rest_contract_covers_resources_and_errors(tmp_path: Path) ->
         assert (await client.get(f"/threads/{thread_id}/runs")).status_code == 200
         assert (await client.get(f"/threads/{thread_id}/runs/{run_id}")).status_code == 200
         assert (await client.post("/runs/batch", json=[])).status_code == 201
-        assert (await client.post("/runs/cancel", json={"run_ids": [run_id]})).status_code == 200
+        assert (await client.post("/runs/cancel", json={"run_ids": [run_id]})).status_code == 204
         assert (await client.get(f"/threads/{thread_id}/runs/{run_id}")).json()[
             "status"
         ] == "interrupted"
-        assert (await client.post(f"/threads/{thread_id}/runs/{run_id}/cancel")).status_code == 200
+        assert (await client.post(f"/threads/{thread_id}/runs/{run_id}/cancel")).status_code == 202
         assert (await client.get(f"/threads/{thread_id}/runs/{run_id}/join")).status_code == 200
         assert (await client.delete(f"/threads/{thread_id}/runs/{run_id}")).status_code == 204
 
@@ -228,8 +228,8 @@ async def test_core_rest_contract_covers_resources_and_errors(tmp_path: Path) ->
         assert (
             await client.post("/threads/prune", json={"thread_ids": [thread_id, copied_thread_id]})
         ).status_code == 200
-        assert (await client.delete(f"/threads/{copied_thread_id}")).status_code == 404
-        assert (await client.delete(f"/threads/{thread_id}")).status_code == 404
+        assert (await client.delete(f"/threads/{copied_thread_id}")).status_code == 204
+        assert (await client.delete(f"/threads/{thread_id}")).status_code == 204
         assert (await client.delete(f"/assistants/{assistant_id}")).status_code == 204
 
         metrics = await client.get("/metrics")

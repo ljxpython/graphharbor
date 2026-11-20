@@ -205,6 +205,9 @@ async def test_worker_run_forwards_trace_context_to_graph_events(monkeypatch) ->
         async def flush(self) -> None:
             return None
 
+        async def execute(self, _query: object) -> None:
+            return None
+
     class Repository:
         lease_seconds = 60
         last_transition_events: list[object] = []
@@ -247,6 +250,7 @@ async def test_worker_run_forwards_trace_context_to_graph_events(monkeypatch) ->
     worker = ProductionWorker(SimpleNamespace(open=open_graph), owner="worker-a")
     worker.repository = Repository()
     monkeypatch.setattr(worker, "_cancel_requested", no_op)
+    monkeypatch.setattr(worker, "_confirm_shutdown", no_op)
 
     async def publish(
         _run_id: UUID,

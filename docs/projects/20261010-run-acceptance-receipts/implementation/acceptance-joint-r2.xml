@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="3" time="404.391" timestamp="2026-10-10T22:23:58.840014+08:00" hostname="lijiaxindeMacBook-Pro.local"><testcase classname="tests.e2e.test_background_tasks" name="test_lost_native_ack_reconciles_queued_run_without_resubmission[notify-stack0]" time="72.202"><failure message="AssertionError: assert 'error' == 'success'&#10;  &#10;  - success&#10;  + error">tests/e2e/test_background_tasks.py:645: in test_lost_native_ack_reconciles_queued_run_without_resubmission
+    assert wait_for(completed) == {
+E   AssertionError: assert 'error' == 'success'
+E
+E     - success
+E     + error</failure></testcase><testcase classname="tests.e2e.test_background_tasks" name="test_lost_native_ack_reconciles_queued_run_without_resubmission[stop-stack0]" time="60.068"><failure message="AssertionError: (404, '{&quot;error&quot;:{&quot;code&quot;:&quot;route_not_found&quot;,&quot;message&quot;:&quot;Route not found&quot;,&quot;details&quot;:[]},&quot;request_id&quot;:&quot;a6448900b40f4550b723d7d7021e4f81&quot;}')&#10;assert False&#10; +  where False = &lt;Response [404 Not Found]&gt;.is_success">tests/e2e/test_background_tasks.py:598: in test_lost_native_ack_reconciles_queued_run_without_resubmission
+    stop_receipt = request(
+tests/services/dearflow_agent/test_tool_error_platform.py:433: in request
+    assert response.is_success, (response.status_code, response.text[:1000])
+E   AssertionError: (404, '{"error":{"code":"route_not_found","message":"Route not found","details":[]},"request_id":"a6448900b40f4550b723d7d7021e4f81"}')
+E   assert False
+E    +  where False = &lt;Response [404 Not Found]&gt;.is_success</failure></testcase><testcase classname="tests.e2e.test_background_tasks" name="test_lost_native_ack_reconciles_queued_run_without_resubmission[revoke-stack0]" time="271.118"><failure message="AssertionError: Disposable service did not become ready">tests/e2e/test_background_tasks.py:632: in test_lost_native_ack_reconciles_queued_run_without_resubmission
+    accepted = wait_for(recovered)
+               ^^^^^^^^^^^^^^^^^^^
+tests/services/dearflow_agent/test_tool_error_platform.py:37: in wait_for
+    raise AssertionError("Disposable service did not become ready")
+E   AssertionError: Disposable service did not become ready</failure></testcase></testsuite></testsuites>

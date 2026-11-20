@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import importlib
+import json
 import os
 import threading
 import time
@@ -277,6 +278,20 @@ class Message:
     id: bytes | None = None
 
 
+def control_action(message: Message | None) -> str | None:
+    if message is None:
+        return None
+    try:
+        value = message.data.decode()
+        if value in {"interrupt", "rollback", "recheck"}:
+            return value
+        payload = json.loads(value)
+        action = payload.get("action") if isinstance(payload, dict) else None
+        return action if action in {"interrupt", "rollback"} else None
+    except (UnicodeError, ValueError):
+        return None
+
+
 class ContextQueue(asyncio.Queue):
     async def __aenter__(self):
         return self
@@ -366,6 +381,7 @@ class StreamManager:
         self._buf_lock = asyncio.Lock()
         self._mux_tasks: list[asyncio.Task] = []
         self._cleanup_tasks: set[asyncio.Task] = set()
+        self._run_mux_ready = asyncio.Event()
 
     def start_mux(self) -> None:
         if self._mux_tasks:
@@ -393,13 +409,13 @@ class StreamManager:
         return self.control_keys.get(thread_id, {}).get(run_id)
 
     async def aget_control_key(
-        self, run_id: UUID | str, thread_id: UUID | str | None
+        self, run_id: UUID | str, thread_id: UUID | str | None, *, refresh: bool = False
     ) -> Message | None:
         """Local control key, else hydrate from Redis (cross-replica cancel-before-listen)."""
         run_id = _ensure_uuid(run_id)
         thread_id = THREADLESS_KEY if thread_id is None else _ensure_uuid(thread_id)
         local = self.control_keys.get(thread_id, {}).get(run_id)
-        if local is not None:
+        if local is not None and not refresh:
             return local
         if self._redis is None:
             return None
@@ -459,6 +475,8 @@ class StreamManager:
         self,
         pattern: str,
         handler: Callable[[dict], Any],
+        *,
+        run_control: bool = False,
     ) -> None:
         """Shared pattern-subscribe loop: dispatch each pmessage to *handler*."""
         while True:
@@ -466,6 +484,15 @@ class StreamManager:
             try:
                 await pubsub.psubscribe(pattern)
                 async for msg in pubsub.listen():
+                    if msg is not None and msg.get("type") == "psubscribe" and run_control:
+                        self._run_mux_ready.set()
+                        # Re-read durable intent after every subscription/reconnection.
+                        async with self._buf_lock:
+                            for runs in self.control_queues.values():
+                                for queues in runs.values():
+                                    await _fanout_put(
+                                        queues, Message(topic=b"run:control", data=b"recheck")
+                                    )
                     if msg is None or msg.get("type") != "pmessage":
                         continue
                     await handler(msg)
@@ -475,6 +502,8 @@ class StreamManager:
                 logger.exception("redis fanout mux failed; reconnecting", pattern=pattern)
                 await _reconnect_backoff()
             finally:
+                if run_control:
+                    self._run_mux_ready.clear()
                 try:
                     await pubsub.punsubscribe(pattern)
                     await pubsub.aclose()
@@ -503,7 +532,17 @@ class StreamManager:
 
     async def _run_fanout_mux(self) -> None:
         """Shared pattern-subscribe mux for all run fanout channels."""
-        await self._pubsub_mux_loop(_run_fanout_pattern(), self._handle_run_fanout_message)
+        await self._pubsub_mux_loop(
+            _run_fanout_pattern(), self._handle_run_fanout_message, run_control=True
+        )
+
+    async def wait_control_ready(self) -> bool:
+        try:
+            await asyncio.wait_for(self._run_mux_ready.wait(), timeout=1)
+            return True
+        except TimeoutError:
+            logger.warning("control subscription unavailable; using durable polling")
+            return False
 
     async def _thread_fanout_mux(self) -> None:
         """Shared pattern-subscribe mux for all thread fanout channels."""
@@ -736,6 +775,8 @@ class StreamManager:
                 pass
             if not self.control_queues[thread_id][run_id]:
                 del self.control_queues[thread_id][run_id]
+            if not self.control_queues[thread_id]:
+                del self.control_queues[thread_id]
 
     # -- Restore / replay from Redis Streams ---------------------------------
 
@@ -887,6 +928,7 @@ class StreamManager:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._mux_tasks.clear()
         self._cleanup_tasks.clear()
+        self._run_mux_ready.clear()
 
 
 stream_manager: StreamManager | None = None

@@ -62,6 +62,7 @@ def test_serve_passes_resolved_port_to_banner_and_server(
 
     monkeypatch.setattr(cli_module.os, "environ", cli_module.os.environ.copy())
     monkeypatch.chdir(tmp_path)
+    (tmp_path / "langgraph.json").write_text('{"graphs": {}}')
     monkeypatch.setattr(cli_module, "load_dotenv", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli_module, "validate_config_file", lambda _config: {})
 

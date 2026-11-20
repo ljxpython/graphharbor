@@ -10,7 +10,7 @@
 | 领域 / 模块 | 对应文件 | 沉淀条数 | 适用场景 |
 |---|---|---|---|
 | **ASGI 网关与协议** | [langhost-gateway.md](langhost-gateway.md) | 2 条 | CLI、Core REST API、SSE 流式、心跳保活、鉴权分发 |
-| **运行时持久化与调度** | [runtime-persistence.md](runtime-persistence.md) | 3 条 | PostgreSQL 状态机、Lease 租约、Redis 队列、子智能体历史 |
+| **运行时持久化与调度** | [runtime-persistence.md](runtime-persistence.md) | 7 条 | PostgreSQL 状态机、Lease、Redis 队列、子图历史、取消停止确认与迁移回退 |
 | **AI 工作流与工程规范** | [ai-workflow.md](ai-workflow.md) | 3 条 | 破坏性测试、双包版本锁步、文档陈旧与假路径 |
 
 ---

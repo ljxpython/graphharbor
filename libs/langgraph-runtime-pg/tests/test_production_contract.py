@@ -550,7 +550,11 @@ async def test_worker_drain_resumes_same_run_from_postgres_checkpoint(pg_runtime
         run = await conn.session.get(RunRow, run_id)
         assert run.status == "pending"
         assert run.kwargs["__graphharbor_resume_after_drain"] is True
-        retry_after = max((run.next_attempt_at - datetime.now(UTC)).total_seconds(), 0)
+        retry_after = (
+            max((run.next_attempt_at - datetime.now(UTC)).total_seconds(), 0)
+            if run.next_attempt_at is not None
+            else 0
+        )
 
     await asyncio.sleep(retry_after + 0.05)
     assert await ProductionWorker(registry, owner="drain-second").run_once()
@@ -617,7 +621,7 @@ async def test_worker_shutdown_cancellation_and_grace_fallback(
         started.set()
         await asyncio.Event().wait()
 
-    async def fake_heartbeat(_run_id, _thread_id, cancel_event):
+    async def fake_heartbeat(_run_id, _thread_id, cancel_event, **_kwargs):
         cancel_signal.set_result(cancel_event)
         await asyncio.Event().wait()
 
@@ -1320,11 +1324,11 @@ async def test_migration_is_repeatable_and_schema_head_is_recorded(pg_runtime) -
     from langgraph_runtime_pg.database import connect, get_database_uri
     from langgraph_runtime_pg.migrate import upgrade_head
 
-    assert upgrade_head(get_database_uri()) == "009_event_retention_watermarks"
-    assert upgrade_head(get_database_uri()) == "009_event_retention_watermarks"
+    assert upgrade_head(get_database_uri()) == "015_checkpoint_journal"
+    assert upgrade_head(get_database_uri()) == "015_checkpoint_journal"
     async with connect() as conn:
         revision = await conn.session.scalar(text("SELECT version_num FROM alembic_version"))
-    assert revision == "009_event_retention_watermarks"
+    assert revision == "015_checkpoint_journal"
 
 
 @pytest.mark.asyncio
@@ -1429,8 +1433,8 @@ async def test_owned_server_core_resource_flow(pg_runtime) -> None:
         assert rejected.status_code == 409, rejected.text
 
         cancelled = await client.post(f"/threads/{thread_id}/runs/{run_id}/cancel")
-        assert cancelled.status_code == 200
-        assert cancelled.json()["status"] == "interrupted"
+        assert cancelled.status_code == 202
+        assert cancelled.content == b""
         assert (await client.get(f"/threads/{thread_id}/runs/{run_id}")).json()[
             "status"
         ] == "interrupted"
@@ -1456,7 +1460,7 @@ async def test_pending_rollback_never_deletes_thread_checkpoints(pg_runtime, mon
     async def fake_cleanup(thread_id: str) -> None:
         cleanup.append(thread_id)
 
-    monkeypatch.setattr("langhost.core_api.delete_thread_checkpoints", fake_cleanup)
+    monkeypatch.setattr("langgraph_runtime_pg.checkpoint.delete_thread_checkpoints", fake_cleanup)
     app = create_app({"graphs": {}})
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         assistant = await client.post(
@@ -1472,8 +1476,8 @@ async def test_pending_rollback_never_deletes_thread_checkpoints(pg_runtime, mon
         cancelled = await client.post(f"/threads/{thread_id}/runs/{run_id}/cancel?action=rollback")
         missing = await client.get(f"/threads/{thread_id}/runs/{run_id}")
 
-    assert cancelled.status_code == 200
-    assert cancelled.json() == {}
+    assert cancelled.status_code == 202
+    assert cancelled.content == b""
     assert missing.status_code == 404
     assert cleanup == []
 
@@ -1788,10 +1792,16 @@ async def test_run_repository_does_not_claim_two_runs_on_one_thread(pg_runtime) 
 async def test_run_repository_retries_with_backoff_and_reclaims_expired_lease(
     pg_runtime, monkeypatch
 ) -> None:
-    from sqlalchemy import select
+    from sqlalchemy import select, update
 
     from langgraph_runtime_pg.database import connect
-    from langgraph_runtime_pg.models import AssistantRow, RuntimeEventRow, ThreadRow
+    from langgraph_runtime_pg.models import (
+        AssistantRow,
+        RetryCounterRow,
+        RunLeaseRow,
+        RuntimeEventRow,
+        ThreadRow,
+    )
     from langgraph_runtime_pg.protocol import RunReason, RunStatus
     from langgraph_runtime_pg.run_store import RunRepository
 
@@ -1860,8 +1870,20 @@ async def test_run_repository_retries_with_backoff_and_reclaims_expired_lease(
 
         row.status = RunStatus.RUNNING.value
         row.retry_count = 3
+        await conn.session.execute(
+            update(RetryCounterRow).where(RetryCounterRow.run_id == run_id).values(count=3)
+        )
         row.lease_owner = "worker-c"
         row.lease_expires_at = datetime.now(UTC) + timedelta(seconds=5)
+        conn.session.add(
+            RunLeaseRow(
+                run_id=run_id,
+                owner="worker-c",
+                generation=row.retry_count,
+                expires_at=row.lease_expires_at,
+                heartbeat_at=datetime.now(UTC),
+            )
+        )
         terminal = await repo.fail(
             conn.session,
             run_id,
@@ -2151,7 +2173,9 @@ async def test_success_commit_failure_never_publishes_completed(pg_runtime, monk
         nonlocal injected
         if armed and not injected:
             injected = True
-            raise ConnectionError("injected success commit failure")
+            from psycopg import OperationalError
+
+            raise OperationalError("injected success commit failure")
         return await original_commit(session)
 
     monkeypatch.setattr(RunRepository, "finish", finish)
@@ -2254,15 +2278,21 @@ async def test_cancel_publishes_one_durable_terminal_event_and_late_cancel_is_no
             .scalars()
             .all()
         )
-        assert len(events) == 1
-        assert events[0].payload["status"] == RunStatus.INTERRUPTED.value
-        assert events[0].payload["reason"] == "cancel_requested"
+        assert events == [], "accepting cancellation must not confirm execution shutdown"
         row = await conn.session.get(type(run), run_id)
         assert row is not None and row.status == RunStatus.INTERRUPTED.value
-        assert await conn.session.get(RunLeaseRow, run_id) is None
+        assert await conn.session.get(RunLeaseRow, run_id) is not None
         thread = await conn.session.get(ThreadRow, thread_id)
-        assert thread is not None and thread.status == "idle"
+        assert thread is not None and thread.status == "busy"
         await _cancel_row(None, conn, row, "interrupt")
+        await RunRepository().finish(
+            conn.session,
+            run_id,
+            "cancel-worker",
+            RunStatus.INTERRUPTED,
+            reason="cancel_requested",
+            generation=row.retry_count,
+        )
         await conn.session.flush()
 
     async with connect() as conn:
@@ -2379,6 +2409,14 @@ async def test_cancel_root_run_persists_terminal_event(pg_runtime) -> None:
         )
         assert await repo.claim_next(conn.session, "root-cancel-worker") is not None
         await _cancel_row(None, conn, run, "interrupt")
+        await repo.finish(
+            conn.session,
+            run.run_id,
+            "root-cancel-worker",
+            RunStatus.INTERRUPTED,
+            reason="cancel_requested",
+            generation=run.retry_count,
+        )
         run_id = run.run_id
 
     async with connect() as conn:
@@ -2627,16 +2665,23 @@ async def test_cross_instance_cancel_control_fanout(pg_runtime) -> None:
     manager_b = StreamManager(client_b)
     manager_b.start_mux()
     queue = await manager_b.add_control_queue(run_id, thread_id)
-    await asyncio.sleep(0.05)
+    assert await manager_b.wait_control_ready()
+    while not queue.empty():
+        queue.get_nowait()
     await get_stream_manager().put(
         run_id,
         thread_id,
         Message(topic=b"run:control", data=b'{"action":"interrupt"}'),
     )
-    message = await asyncio.wait_for(queue.get(), timeout=3)
-    assert message.data == b'{"action":"interrupt"}'
-    await manager_b.aclose_fanout()
-    await client_b.aclose()
+    try:
+        async with asyncio.timeout(3):
+            message = await queue.get()
+            while message.data == b"recheck":
+                message = await queue.get()
+        assert message.data == b'{"action":"interrupt"}'
+    finally:
+        await manager_b.aclose_fanout()
+        await client_b.aclose()
 
 
 @pytest.mark.asyncio

@@ -16,6 +16,8 @@ from langgraph.stream import (
 )
 from langgraph.types import Command, Durability, GraphOutput
 
+from langgraph_runtime_pg.authorization import AuthUser
+
 EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 _DURABILITY_MODES = frozenset({"sync", "async", "exit"})
 
@@ -68,6 +70,10 @@ def thread_config(
     config: RunnableConfig = {"configurable": dict(configurable or {})}
     if thread_id:
         config["configurable"]["thread_id"] = thread_id
+    if assistant_id:
+        config["configurable"]["assistant_id"] = assistant_id
+    if graph_id:
+        config["configurable"]["graph_id"] = graph_id
     if metadata is not None:
         config["metadata"] = dict(metadata)
     if tags is not None:
@@ -76,7 +82,7 @@ def thread_config(
         cast(dict[str, Any], config)["context"] = context
     if runtime_context:
         raw_auth_user = runtime_context.get("auth_user")
-        user = dict(raw_auth_user) if isinstance(raw_auth_user, Mapping) else {}
+        user = AuthUser(raw_auth_user) if isinstance(raw_auth_user, Mapping) else AuthUser()
         if user.get("identity"):
             config["configurable"]["langgraph_auth_user"] = user
             config["configurable"]["__pregel_runtime"] = Runtime(
