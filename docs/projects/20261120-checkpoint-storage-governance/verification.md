@@ -1,6 +1,6 @@
 # Checkpoint 存储增长治理 - 验证计划与记录
 
-项目启动日期：2026-11-20。批准的通用存储范围已完成；进度与验收范围以[tasks.md](tasks.md)为准，原安全治理测试不计为本项目通过。
+项目启动日期：2026-11-20。通用存储的原隔离验收与正式源码交付已有证据；追加远端补验两项失败待修，当前为部分完成（partial）。进度与验收范围以[tasks.md](tasks.md)为准，原安全治理测试不计为本项目通过。
 
 
 ## 阶段验证（Phase）：规划与机制核查
@@ -45,7 +45,19 @@
 | 容量 | 固定负载下逻辑字节、WAL、延迟、锁、RSS 达冻结预算 | S02 原始基线、测量命令/产物和失败记录 |
 | 正式产物 | 双包唯一版本、四产物一致，正式源冷安装可用 | 哈希、导入路径、迁移 head、关键 PG 场景 |
 
-## 整体验收（Final）：2026-11-21通过批准范围
+## 阶段验证（Phase）：追加远端源码交付
+
+2026-11-21用户另行批准经验沉淀和两仓提交推送。远端原为f9bb32e/post39，本次以eeb204c完整提交正式post49与必要的Cron、取消、webhook、回执、TTL等前置实现，以及迁移011–015、配套测试、依赖和原项目证据；origin/main已接受推送。共209个文件，没有私有配置、安装目录或已匹配凭据模式。六份历史Markdown的本机路径改为相对引用；一份历史失败XML只去掉行尾空白，保留失败内容。
+
+重新下载PyPI四产物，哈希均与原发布记录一致；runtime51个、CLI11个Python源码逐字节一致。初次Python默认CA验证失败，改用已安装certifi可信CA后成功，未跳过TLS验证。uv lock --check、版本锁步、兼容基线、Ruff/90文件格式、mypy46源码及diff --check通过；mypy仅保留未用deepagents配置提示。既有功能测试因源码未变化而复用，不记成重新执行。平台三条经验主题维护在其Runtime经验库，未引入本仓核心。
+
+没有重复发包、创建tag或部署现役。[远端CI44787814603](https://github.com/ljxpython/graphharbor/actions/runs/44787814603)实际针对eeb204c执行：Build、Lint及Python3.11/3.12/3.13生产契约共五项通过；Test和JavaScript SDK contract两项失败。
+
+Test失败步骤为First-party live-server E2E，13例中10 failed/3 passed，另有20 rerun。该夹具通过langgraph_api.server:app及LANGGRAPH_RUNTIME_EDITION=pg运行内部适配入口；日志显示graphharbor_journal_checkpoint_blobs写run_checkpoint_undo时，run_id缺少run_checkpoint_baselines父行，触发run_checkpoint_undo_run_id_fkey。writer/run baseline链路需要修复复验，原正式源未纳入可选ops不能证明此入口通过。
+
+JavaScript SDK1.9.28的完整契约返回422 Invalid thread metadata update。错误对应core_api.py的线程metadata更新校验；具体触发请求及成因尚未完全确认，不能把候选原因写成结论。旧f9bb32e的Test/JS任务曾通过，本次失败不能按既有失败直接排除。两项均未修复，已写回S07；当前项目不是全项完成或生产就绪，原冷安装和隔离容量结果保留其各自范围。
+
+## 整体验收（Final）：2026-11-21原隔离与正式包验收记录
 
 按用户批准的反向差量与绝对预算核对S01–S07。复用最终候选同源码的六组容量、确定性并发/故障和转换备份恢复证据；正式源另外执行42项真实PG/迁移/Schema启动门禁/SDK/CLI/stream测试，42 passed/1 deselected。正式源最初因测试专用asgi-lifespan缺失而collection失败；补齐后内部兼容ops一项因可选langgraph-api缺失失败，最终明确不纳入该内部入口，保留源码套件覆盖，不给生产添加兼容依赖。数量重叠不相加，未计skip为通过。
 
@@ -55,6 +67,6 @@
 
 六组Run边界≤330B、WAL≤1144B、边界p95≤20.214ms、独立维护RSS≤99,983,360B，10,000条prune≤708.201ms，均低于已批8KiB/64KiB/100ms/256MiB/5s。prune扫描成本仍随历史行数增长；本验收只对约定夹具负责。
 
-严格官方比较仍有既有差异，不能标为严格等价通过；原官方等价性专项继续保留自己的未完成范围。用户已要求单一新实现而非旧代码兼容，本项目没有扩大排除项。生产负载、任意业务Reducer的大状态、生产升级和GraphHarbor Git交付未验也未执行。使用方业务联合验收在其项目独立记录。
+严格官方比较仍有既有差异，不能标为严格等价通过；原官方等价性专项继续保留自己的未完成范围。用户已要求单一新实现而非旧代码兼容，本项目没有扩大排除项。生产负载、任意业务Reducer的大状态和生产升级未验也未执行。GraphHarbor Git交付已按追加授权完成；使用方业务联合验收在其项目独立记录。
 
-正式发包、反向差量投影和验收预算均已有用户明确批准；不把本地验证当作独立人审或生产验收。GraphHarbor仓库没有新增现役库迁移、业务数据销毁、生产服务切换或Git操作授权。
+上述为远端补验前的原隔离与正式包验收事实。后续两项远端失败尚未修复，当前项目重新标为部分完成，不以原Final覆盖新失败。正式发包、反向差量投影、验收预算及后续源码提交推送均已有用户明确批准；不把本地验证当作独立人审或生产验收。GraphHarbor仓库没有新增现役库迁移、业务数据销毁或生产服务切换授权。
