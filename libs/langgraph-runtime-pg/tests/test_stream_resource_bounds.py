@@ -10,6 +10,28 @@ import redis.asyncio as redis
 
 
 @pytest.mark.asyncio
+async def test_control_and_stream_ids_do_not_suppress_each_other():
+    from langgraph_runtime_pg.redis_stream import Message, StreamManager
+
+    manager = StreamManager(None)
+    thread_id, run_id = uuid4(), uuid4()
+    control_queue = await manager.add_control_queue(run_id, thread_id)
+    stream_queue = await manager.add_queue(run_id, thread_id)
+    control = Message(f"run:{run_id}:control".encode(), b"done", b"123-0")
+    terminal = Message(f"run:{run_id}:stream".encode(), b"terminal", b"123-0")
+
+    await manager._deliver_local(thread_id, run_id, control, control=True)
+    await manager._deliver_local(thread_id, run_id, terminal, control=False)
+    assert control_queue.get_nowait() == control
+    assert stream_queue.get_nowait() == terminal
+
+    await manager._deliver_local(thread_id, run_id, control, control=True)
+    await manager._deliver_local(thread_id, run_id, terminal, control=False)
+    assert control_queue.empty()
+    assert stream_queue.empty()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["success", "error", "interrupted"])
 async def test_replay_cache_expiry_and_terminal_cleanup(monkeypatch, status):
     from langgraph_runtime_pg.production_worker import ProductionWorker

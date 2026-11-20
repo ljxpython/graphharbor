@@ -20,6 +20,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from starlette.exceptions import HTTPException
 
 from langgraph_runtime_pg.checkpoint import Checkpointer
+from langgraph_runtime_pg.checkpoint_mutations import capture_baseline
 from langgraph_runtime_pg.database import (
     PgConnectionProto,
     assistant_to_dict,
@@ -1148,11 +1149,12 @@ def _accept_message(message: Message, emitted_ids: set[str], resume_cursor: str 
     if not message.id:
         return True
     mid = message.id.decode() if isinstance(message.id, bytes) else str(message.id)
-    if mid in emitted_ids:
+    key = f"{message.topic!r}:{mid}"
+    if key in emitted_ids:
         return False
     if resume_cursor is not None and not ms_seq_id_gt(mid, resume_cursor):
         return False
-    emitted_ids.add(mid)
+    emitted_ids.add(key)
     return True
 
 
@@ -2391,6 +2393,7 @@ async def _claim_next_run(sf, blocked_threads, retry_counter_cls):
         if run_row is None:
             await session.commit()
             return ("empty", None, None, None, None)
+        thread = None
         if run_row.thread_id is not None:
             # Serialize claims for a thread. The candidate query only locks
             # the run row, so a sibling worker may have selected another run
@@ -2419,8 +2422,9 @@ async def _claim_next_run(sf, blocked_threads, retry_counter_cls):
                 run_row.status = "pending"
                 await session.commit()
                 return ("blocked", run_id, run_row.thread_id, None, None)
-            if thread is not None:
-                thread.status = "busy"
+        await capture_baseline(session, run_row, thread)
+        if thread is not None:
+            thread.status = "busy"
         run_row.status = "running"
         run_row.updated_at = datetime.now(UTC)
         attempt = await retry_counter_cls(sf).increment(run_id, session=session)

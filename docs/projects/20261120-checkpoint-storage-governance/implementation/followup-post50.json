@@ -1,0 +1,68 @@
+{
+  "version": "0.13.0.post50",
+  "artifacts": {
+    "graphharbor-0.13.0.post50-py3-none-any.whl": {
+      "sha256": "930f0c787aee8ae9205db1cff4721da708e2d9c0ea7742c5aed6f3b19054b926",
+      "bytes": 52671
+    },
+    "graphharbor-0.13.0.post50.tar.gz": {
+      "sha256": "4171b48b80ba93c6870af22f2dddf2b645dc98e23b591b6ebecc3f7aaddc652c",
+      "bytes": 67686
+    },
+    "graphharbor_runtime-0.13.0.post50-py3-none-any.whl": {
+      "sha256": "c36d2568de924ceb58ffb330e007317bb4ceff20519f321b67d90e559fba551e",
+      "bytes": 145390
+    },
+    "graphharbor_runtime-0.13.0.post50.tar.gz": {
+      "sha256": "cd125dfa28af9e88d7f52e8aa2d0591e5c3a451c54ea59bbf5be39f7e61d304d",
+      "bytes": 205970
+    }
+  },
+  "source_matches": {
+    "graphharbor-0.13.0.post50-py3-none-any.whl": 11,
+    "graphharbor_runtime-0.13.0.post50-py3-none-any.whl": 51
+  },
+  "forbidden_files": [],
+  "phase": "source-and-candidate",
+  "date": "2026-11-21",
+  "tests": {
+    "regression": {
+      "passed": 405,
+      "skipped": 9,
+      "deselected_live_e2e": 13
+    },
+    "live_e2e": {
+      "passed": 13
+    },
+    "upstream_sdk": {
+      "passed": 55
+    },
+    "unit_queue": {
+      "passed": 32
+    },
+    "javascript_sdk": {
+      "version": "1.9.28",
+      "contract": "passed"
+    },
+    "remote_graph_v3": {
+      "iterations": 30,
+      "tests_per_iteration": 5,
+      "all_passed": true,
+      "diagnostics_enabled": false
+    },
+    "candidate_wheel": {
+      "python": "3.13",
+      "passed": 41,
+      "deselected_optional_upstream": 1
+    },
+    "cron": {
+      "passed": 3,
+      "initial_wrong_prefix": {
+        "failed_at_guard": 2,
+        "passed": 1
+      }
+    }
+  },
+  "publication": "pending",
+  "remote_ci": "pending"
+}

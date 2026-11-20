@@ -8,9 +8,9 @@
 ## 📌 当前版本与里程碑
 
 - **当前正式双包版本**：2026-11-21直接发布PyPI `0.13.0.post49`，最小Run边界、首次before-image、JSON Patch反向投影、安全prune/blob GC与migration015；已有TTL/接受回执/webhook/CAS/取消原语保持。四产物SHA256与正式源相同。
-- **当前源码版本**：双包锁步post49；最终wheel源码逐字节匹配当前源码，未混入平台或私有文件。源码扩大399passed/22skipped、独立Cron3passed，最终候选关键37项、sdist26项及stream11项通过；正式源冷安装42passed/1deselected，另有HTTP/Python/JS取消24场景。套件重叠不加总，内部上游ops需可选langgraph-api不在独立安装范围，严格官方对照仍有既有差异。
-- **最后更新时间**：2026-11-21（存储治理部分完成partial；原隔离验收与正式post49/head015交接完成，追加远端补验两项失败待修，见S07。用户授权后完整正式源码及前置能力以eeb204c推送origin/main，重新核对四产物及62源码一致；现役部署未执行。平台三项经验主题已沉淀，Worktree接入与业务验收由关联项目留证。）
-- **当前远端CI**：eeb204c的44787814603中Build、Lint和Python3.11/3.12/3.13生产契约通过；Test的live-server E2E为10 failed/3 passed/20 rerun，出现run_checkpoint_undo缺失baseline的外键错误；JavaScript SDK契约返回422 Invalid thread metadata update。两项尚未修复，不能以原冷安装或可选内部入口排除代替修复；当前不称全项完成或生产就绪。
+- **当前源码版本**：双包锁步post50候选；追加领取baseline、线程更新JSON污染与跨topic事件误去重已修复，完整脚本32/13/55项及JS契约通过，无诊断v3连续30轮各五项通过。正式post50与远端CI待验。原post49：最终wheel源码逐字节匹配当前源码，未混入平台或私有文件。源码扩大399passed/22skipped、独立Cron3passed，最终候选关键37项、sdist26项及stream11项通过；正式源冷安装42passed/1deselected，另有HTTP/Python/JS取消24场景。套件重叠不加总，内部上游ops需可选langgraph-api不在独立安装范围，严格官方对照仍有既有差异。
+- **最后更新时间**：2026-11-21（存储治理部分完成partial；原隔离验收与正式post49/head015交接完成，追加故障已修复且本地复验通过，post50正式交接与远端CI待验，见S07。用户授权后完整正式源码及前置能力以eeb204c推送origin/main，重新核对四产物及62源码一致；现役部署未执行。平台三项经验主题已沉淀，Worktree接入与业务验收由关联项目留证。）
+- **当前远端CI**：历史eeb204c/44787814603有Test与JavaScript SDK失败；本地已修复并复验，新提交远端CI尚未执行，原失败保留在S07，不再描述为未定位。
 - **最新里程碑**：
   - **2026-09-30** | 工业级架构深潜文档体系全量落成（`docs/architecture/`）：以老王暴躁技术流方法论为主导，圆满交付全局架构深潜中心与概念总字典（`docs/architecture/README.md`），覆盖 6 大核心主干模块（01-06）与 11 篇深度概念专篇，系统性攻克 Monorepo 双包锁步、官方协议黑盒适配、PostgreSQL 代际防裂脑、Redis 分布式租约收割、Graph 确定性状态机与离线 Mock 测试隔离体系。
   - **2026-09-30** | 全链路 CI 硬伤彻底根治（Run #36666991389 全绿）：彻底攻克生产契约重播 values 丢失（移除 input.respond 暴力重置 stream_resumable）、E2E 节点保存误杀 CheckpointConflict（精确放行活跃 Run 自身 Checkpoint 写入）以及全仓 Lint/mypy 规范，7 项矩阵任务 100% 绿灯通过。
@@ -25,8 +25,8 @@
 
 | 组件/包 | 当前版本 | 源码位置 | 关键约束与职责 |
 |---|---|---|---|
-| **`graphharbor`** (CLI) | 0.13.0.post49 | `libs/langhost/` | 正式PyPI已发布/冷安装；逆序回滚使用sequence，SSE首帧attempt竞态已修；远端JS SDK线程更新422待修；现役未升级 |
-| **`graphharbor-runtime`** | 0.13.0.post49 | `libs/langgraph-runtime-pg/` | journal-v1、反向投影、引用安全prune/blob GC与migration015；六组预算及正式PG验证通过；远端live-server E2E的undo外键错误待修；无业务政策 |
+| **`graphharbor`** (CLI) | 0.13.0.post49 | `libs/langhost/` | 正式PyPI已发布/冷安装；逆序回滚使用sequence，SSE首帧attempt竞态已修；线程状态PATCH修复本地通过/post50待验；现役未升级 |
+| **`graphharbor-runtime`** | 0.13.0.post49 | `libs/langgraph-runtime-pg/` | journal-v1、反向投影、引用安全prune/blob GC与migration015；六组预算及正式PG验证通过；内部领取baseline和事件去重修复本地通过/post50待验；无业务政策 |
 
 历史post42取消与attempt门禁、12组HTTP、新PID接管及匹配post41回退证据仍见各专项；不据此宣称本轮完成其他专项回归。post44 产物核验确认 CAS 独立 route/OpenAPI 与 JSONB 共享 helper 已发布，不新增 Schema/平台业务字段；CAS 使用方正式接入是否完成仍由该专项验收。
 
@@ -34,7 +34,7 @@
 
 ## 🚀 活跃与近期核心专项
 
-- [Checkpoint 存储增长治理](projects/20261120-checkpoint-storage-governance/README.md)：部分完成（partial）。正式post49、head015、独立冷安装42项和六组容量通过，完整源码eeb204c已推送origin/main；S07追加远端补验的live-server E2E与JavaScript SDK两项失败待修，原隔离证据保留。旧10,000×16KiB边界触发JSONB超限，新边界最大330B；不承诺永久状态有界。核心纯通用，平台独立验收；现役部署、生产容量及严格官方等价性未完成。
+- [Checkpoint 存储增长治理](projects/20261120-checkpoint-storage-governance/README.md)：部分完成（partial）。正式post49、head015、独立冷安装42项和六组容量通过，完整源码eeb204c已推送origin/main；S07追加故障已修且本地32/13/55项与JS契约通过，post50远端CI和正式交接待验，原隔离证据保留。旧10,000×16KiB边界触发JSONB超限，新边界最大330B；不承诺永久状态有界。核心纯通用，平台独立验收；现役部署、生产容量及严格官方等价性未完成。
 
 - [Checkpoint 事务变更安全性](projects/20260924-checkpoint-mutation-safety/README.md)：部分完成（partial，原项目）。既有安全回滚与 prune 有本地真实 PG 证据，原完整官方差分、规模性能与发布预演未齐；保留历史状态，新存储治理在独立项目推进。
 

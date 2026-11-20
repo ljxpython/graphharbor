@@ -224,7 +224,7 @@ jobs:
       - name: First-party unit/queue tests
         run: |
           # Truncates PG — must run before the API server holds DB connections.
-          uv run pytest \
+          uv run --no-sync pytest \
             libs/langgraph-runtime-pg/tests/test_interface.py \
             libs/langgraph-runtime-pg/tests/test_queue.py \
             libs/langgraph-runtime-pg/tests/test_rest_contract.py \
@@ -237,7 +237,7 @@ jobs:
           ROOT="$PWD"
           INTEGRATION_DIR="$ROOT/.tests/langgraph_api/libs/sdk-py/integration"
           export LANGSERVE_GRAPHS="$(
-            uv run python -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["graphs"]))' \
+            uv run --no-sync python -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["graphs"]))' \
               "${INTEGRATION_DIR}/langgraph.json"
           )"
           echo "graphs: ${LANGSERVE_GRAPHS}"
@@ -246,7 +246,7 @@ jobs:
           echo "EOF" >> "$GITHUB_ENV"
           (
             cd "${INTEGRATION_DIR}"
-            exec uv run --project "${ROOT}" uvicorn langgraph_api.server:app \
+            exec uv run --no-sync --project "${ROOT}" uvicorn langgraph_api.server:app \
               --host 127.0.0.1 --port 2024 --log-level info
           ) > /tmp/langgraph-api.log 2>&1 &
           echo $! > /tmp/langgraph-api.pid
@@ -263,13 +263,13 @@ jobs:
 
       - name: First-party live-server E2E
         timeout-minutes: 8
-        run: uv run pytest libs/langgraph-runtime-pg/tests/test_e2e.py -o "timeout=60" --reruns 2 --reruns-delay 1
+        run: uv run --no-sync pytest libs/langgraph-runtime-pg/tests/test_e2e.py -o "timeout=60" --reruns 2 --reruns-delay 1
 
       - name: Upstream SDK integration tests
         timeout-minutes: 15
         run: |
-          uv run pytest .tests/langgraph_api/libs/sdk-py/tests/integration \
-            -o "addopts=" -m integration --reruns 2 --reruns-delay 1
+          uv run --no-sync python -m pytest .tests/langgraph_api/libs/sdk-py/tests/integration \
+            -p scripts.upstream_sdk_fixtures -o "addopts=" -m integration --timeout=60 --reruns 2 --reruns-delay 1
 
       - name: Stop langgraph-api
         if: always()

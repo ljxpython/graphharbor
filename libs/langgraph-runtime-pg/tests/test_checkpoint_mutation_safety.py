@@ -115,6 +115,38 @@ async def test_rollback_restores_history_and_rejects_late_writer(pg_runtime):
         assert (await client.get(f"/threads/{tid}")).json()["values"] == {"value": 3}
 
 
+async def test_internal_claim_captures_journal_before_checkpoint_write(pg_runtime):
+    from langgraph_runtime_pg import ops
+    from langgraph_runtime_pg.checkpoint import get_checkpointer
+    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.models import RunCheckpointBaselineRow
+
+    client, assistant, tid = await setup_client()
+    async with aclosing(client):
+        response = await client.post(
+            f"/threads/{tid}/runs", json={"assistant_id": assistant, "input": {"value": 1}}
+        )
+        assert response.status_code == 200, response.text
+        run_id = response.json()["run_id"]
+        claimed = [run async for run, _ in ops.Runs.next()]
+        assert [str(run["run_id"]) for run in claimed] == [run_id]
+        async with connect() as conn:
+            boundary = await conn.session.get(RunCheckpointBaselineRow, UUID(run_id))
+            assert boundary is not None
+            assert boundary.projection["status"] == "idle"
+        graph = graph_fixture(get_checkpointer())
+        result = await graph.ainvoke(
+            {"value": 1},
+            {"configurable": {"thread_id": tid}, "metadata": {"run_id": run_id}},
+        )
+        assert result == {"value": 2}
+        async with connect() as conn:
+            assert await conn.session.scalar(
+                text("SELECT count(*) FROM run_checkpoint_undo WHERE run_id=:run_id"),
+                {"run_id": UUID(run_id)},
+            )
+
+
 async def test_root_run_checkpoint_uses_run_id_for_fencing(pg_runtime):
     from langgraph_runtime_pg.checkpoint import get_checkpointer
     from langgraph_runtime_pg.checkpoint_mutations import checkpoint_writer

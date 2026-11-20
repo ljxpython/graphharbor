@@ -195,6 +195,7 @@ async def test_http_contract_commits_checks_filters_and_returns_real_metadata(
                 methods=["PATCH"],
             ),
             Route("/threads/{thread_id}", core_api.threads_update, methods=["PATCH"]),
+            Route("/threads/{thread_id}/state", core_api.threads_update_state, methods=["PATCH"]),
         ]
     )
     path = f"/threads/{tid}/metadata/cas"
@@ -231,4 +232,19 @@ async def test_http_contract_commits_checks_filters_and_returns_real_metadata(
                 headers={"Prefer": "return=minimal"},
             )
         ).status_code == 204
+        state_path = f"/threads/{tid}/state"
+        response = await client.patch(state_path, json={"metadata": {"patched": True}})
+        assert response.status_code == 200, response.text
+        assert response.json()["metadata"]["patched"] is True
+        assert (
+            await client.patch(
+                state_path,
+                json={"metadata": {"patched": False}},
+                headers={"project": "other"},
+            )
+        ).status_code == 404
+        assert (
+            await client.patch(state_path, json={"metadata": {}, "unexpected": True})
+        ).status_code == 422
     assert (await patch(sessions, tid, {}))["title"] == "manual"
+    assert (await patch(sessions, tid, {}))["patched"] is True

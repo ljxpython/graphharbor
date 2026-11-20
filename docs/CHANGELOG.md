@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+- 修复内部 Worker 领取后无法写入 Checkpoint、线程状态更新被误拒为 422，以及跨通道或跨 Run 的同值事件 ID 导致有效流事件被丢弃的问题。
+
 - 新Run不再复制整条会话的checkpoint/writes和完整结果投影；显式裁剪回收无引用blob并保留Delta恢复祖先。单格式migration015提供一次性转换与备份恢复路径，长历史维护成本及数据恢复已有隔离PG证据。
 - 修复Worker快速领取Run时SSE首帧将首次执行错误显示为第2次的问题。
 

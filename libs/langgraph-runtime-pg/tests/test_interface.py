@@ -12,6 +12,19 @@ from typing import Any
 import pytest
 
 
+def test_thread_stream_dedup_scopes_ids_to_topics():
+    from langgraph_runtime_pg.ops import _accept_message
+    from langgraph_runtime_pg.redis_stream import Message
+
+    emitted: set[str] = set()
+    first = Message(b"run:first:stream", b"one", b"123-0")
+    second = Message(b"run:second:stream", b"two", b"123-0")
+    assert _accept_message(first, emitted, None)
+    assert _accept_message(second, emitted, None)
+    assert not _accept_message(first, emitted, None)
+    assert not _accept_message(Message(first.topic, b"old", b"122-0"), emitted, "123-0")
+
+
 def _unwrap(obj: Any) -> Callable[..., Any] | None:
     if isinstance(obj, (staticmethod, classmethod)):
         obj = obj.__func__

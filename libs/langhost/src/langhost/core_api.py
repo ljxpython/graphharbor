@@ -839,7 +839,7 @@ async def _get_thread(
         thread_id = UUID(request.path_params["thread_id"])
     except (KeyError, ValueError):
         return None, principal, None
-    event_value = value if value is not None else {}
+    event_value = dict(value) if value is not None else {}
     event_value["thread_id"] = thread_id
     filters = await _authorize(request, "threads", action, event_value)
     async with connect() as conn:

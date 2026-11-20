@@ -1,6 +1,6 @@
 {
-  "graphharbor": "0.13.0.post49",
-  "graphharbor-runtime": "0.13.0.post49",
+  "graphharbor": "0.13.0.post50",
+  "graphharbor-runtime": "0.13.0.post50",
   "langgraph": "1.2.24",
   "langgraph-sdk": "0.4.14",
   "langgraph-cli": "0.4.31",
@@ -15,7 +15,7 @@
   "official-protocol-verified-scope": "historical profile only; not a strict-pass claim for the current dependency lock",
   "checkpoint-storage": {
     "date": "2026-11-21",
-    "release": "0.13.0.post49",
+    "release": "0.13.0.post50",
     "status": "candidate-verified-publishing-pending",
     "schema": "015_checkpoint_journal / journal-v1",
     "strict-official-comparison": "failed; 201 pre-existing OpenAPI differences and existing retention/thread-stream differences retained, no new exclusions",

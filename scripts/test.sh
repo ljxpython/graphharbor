@@ -68,14 +68,14 @@ echo "==> uv sync"
 uv sync --group dev # NOSONAR - editable workspace packages require build
 
 SDK_VERSION="$(
-  uv run python -c 'import importlib.metadata as m; print(m.version("langgraph-sdk"))' # NOSONAR
+  uv run --no-sync python -c 'import importlib.metadata as m; print(m.version("langgraph-sdk"))' # NOSONAR
 )"
 DEFAULT_UPSTREAM_REF="sdk==${SDK_VERSION}"
 UPSTREAM_REF="${1:-${UPSTREAM_LANGGRAPH_REF:-$DEFAULT_UPSTREAM_REF}}"
 echo "    langgraph-sdk=${SDK_VERSION} → upstream ref=${UPSTREAM_REF}"
 
 infra_ready() {
-  uv run python - <<'PY'
+  uv run --no-sync python - <<'PY'
 import asyncio
 import os
 
@@ -142,16 +142,18 @@ export LANGGRAPH_ALLOW_BLOCKING=true
 export LANGGRAPH_AUTH_TYPE=noop
 export LG_BG_JOB_HEARTBEAT=5
 # Relative graph paths in langgraph.json resolve when cwd is integration/.
-export LANGSERVE_GRAPHS="$(uv run python -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["graphs"]))' "${INTEGRATION_DIR}/langgraph.json")" # NOSONAR
-echo "    graphs: $(uv run python -c 'import json,os; print(", ".join(json.loads(os.environ["LANGSERVE_GRAPHS"])))')"
+export LANGSERVE_GRAPHS="$(uv run --no-sync python -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["graphs"]))' "${INTEGRATION_DIR}/langgraph.json")" # NOSONAR
+echo "    graphs: $(uv run --no-sync python -c 'import json,os; print(", ".join(json.loads(os.environ["LANGSERVE_GRAPHS"])))')"
 
 echo "==> tests (wall-clock budget ${E2E_DEADLINE_SECS}s for pytest+server+SDK)"
+set -m
 (
+  set +m
   set -euo pipefail
   # Runtime tests truncate PG tables — must not run while the API server holds
   # connections to the same DB (that deadlocks truncate / claim).
   echo "==> first-party unit/queue tests"
-  uv run pytest -q \
+  uv run --no-sync pytest -q \
     libs/langgraph-runtime-pg/tests/test_interface.py \
     libs/langgraph-runtime-pg/tests/test_queue.py \
     libs/langhost/tests/test_cli.py \
@@ -161,7 +163,7 @@ echo "==> tests (wall-clock budget ${E2E_DEADLINE_SECS}s for pytest+server+SDK)"
   (
     cd "${INTEGRATION_DIR}"
     # --project keeps repo venv; cwd stays integration/ so ./graph/... paths work.
-    exec uv run --project "${ROOT}" uvicorn langgraph_api.server:app \
+    exec uv run --no-sync --project "${ROOT}" uvicorn langgraph_api.server:app \
       --host 127.0.0.1 --port "${PORT}" --log-level info
   ) >"${SERVER_LOG}" 2>&1 &
   SERVER_PID=$!
@@ -188,20 +190,26 @@ echo "==> tests (wall-clock budget ${E2E_DEADLINE_SECS}s for pytest+server+SDK)"
   export LANGGRAPH_INTEGRATION_URL="${BASE_URL}"
 
   echo "==> first-party live-server E2E"
-  uv run pytest -q libs/langgraph-runtime-pg/tests/test_e2e.py --tb=short # NOSONAR
+  uv run --no-sync pytest -q libs/langgraph-runtime-pg/tests/test_e2e.py --tb=short # NOSONAR
 
   echo "==> SDK integration tests"
   # NOSONAR - integration test invocation intentionally uses project environment
-  uv run pytest -q "${UPSTREAM_DIR}/libs/sdk-py/tests/integration" \
-    -o "addopts=" -m integration --tb=short
+  uv run --no-sync python -m pytest -q "${UPSTREAM_DIR}/libs/sdk-py/tests/integration" \
+    -p scripts.upstream_sdk_fixtures -o "addopts=" -m integration --tb=short --timeout=60
 
   echo "==> all suites passed"
 ) &
 SUITE_PID=$!
+set +m
 
 # Watchdog: kill suite (+ server) if wall clock exceeded.
 (
-  sleep "${E2E_DEADLINE_SECS}"
+  timer_pid=""
+  trap 'if [[ -n "${timer_pid}" ]]; then kill "${timer_pid}" 2>/dev/null || true; wait "${timer_pid}" 2>/dev/null || true; fi; exit 0' INT TERM
+  sleep "${E2E_DEADLINE_SECS}" &
+  timer_pid=$!
+  wait "${timer_pid}"
+  timer_pid=""
   echo "error: e2e exceeded ${E2E_DEADLINE_SECS}s — killing suite (likely hung)" >&2
   if [[ -f "${SERVER_LOG}.pid" ]]; then
     spid="$(cat "${SERVER_LOG}.pid" 2>/dev/null || true)"

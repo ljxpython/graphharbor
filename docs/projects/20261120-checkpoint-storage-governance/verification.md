@@ -57,6 +57,12 @@ Test失败步骤为First-party live-server E2E，13例中10 failed/3 passed，�
 
 JavaScript SDK1.9.28的完整契约返回422 Invalid thread metadata update。错误对应core_api.py的线程metadata更新校验；具体触发请求及成因尚未完全确认，不能把候选原因写成结论。旧f9bb32e的Test/JS任务曾通过，本次失败不能按既有失败直接排除。两项均未修复，已写回S07；当前项目不是全项完成或生产就绪，原冷安装和隔离容量结果保留其各自范围。
 
+## 阶段验证（Phase）：2026-11-21远端失败修复复验
+
+内部领取补建同一 journal baseline，请求授权复制缓存字典，事件去重键加入 topic。两个原远端故障已有真实 PG 定向回归 37 项及完整 JavaScript SDK 契约证据。修复后的完整脚本为单元/队列32项、live-server E2E13项、上游SDK55项通过；无诊断 RemoteGraph v3 连续30轮、每轮五项通过。两个去重回归均先复现失败后通过；Ruff/92文件格式和mypy46源码通过。
+
+真实1秒总预算演练返回124且所属进程回收；固定官方in-memory五轮各五项通过。原时序失败、诊断改变复现率、依赖同步及端口错误保留在[修复记录](implementation/02-ci-followup.md)。post50四产物已构建并逐字节审查62源码；远端CI和正式源验真完成前仍为部分完成。
+
 ## 整体验收（Final）：2026-11-21原隔离与正式包验收记录
 
 按用户批准的反向差量与绝对预算核对S01–S07。复用最终候选同源码的六组容量、确定性并发/故障和转换备份恢复证据；正式源另外执行42项真实PG/迁移/Schema启动门禁/SDK/CLI/stream测试，42 passed/1 deselected。正式源最初因测试专用asgi-lifespan缺失而collection失败；补齐后内部兼容ops一项因可选langgraph-api缺失失败，最终明确不纳入该内部入口，保留源码套件覆盖，不给生产添加兼容依赖。数量重叠不相加，未计skip为通过。

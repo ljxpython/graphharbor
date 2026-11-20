@@ -436,7 +436,7 @@ class StreamManager:
         mid = message.id.decode() if message.id else None
         if mid is None:
             return True
-        return self._seen_ids.add(f"{scope}:{mid}")
+        return self._seen_ids.add(f"{scope}:{message.topic!r}:{mid}")
 
     async def _deliver_local(
         self,
