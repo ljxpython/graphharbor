@@ -738,3 +738,93 @@ async def test_legacy_prune_applies_delete_authorization(pg_runtime, monkeypatch
     assert await Threads.prune([own, other, own], strategy="keep_latest") == 1
     assert events == ["delete", "delete"]
     assert await snapshot(other) == before
+
+
+async def test_concurrent_workers_reject_maintenance_and_external_writes(pg_runtime):
+    from langgraph_runtime_pg.checkpoint import get_checkpointer
+    from langgraph_runtime_pg.checkpoint_mutations import CheckpointConflict
+    from langgraph_runtime_pg.database import connect
+    from langgraph_runtime_pg.production_worker import ProductionWorker
+    from langgraph_runtime_pg.run_store import RunRepository
+
+    client, assistant, first = await setup_client()
+    async with aclosing(client):
+        tids = [first]
+        for _ in range(7):
+            tids.append((await client.post("/threads", json={})).json()["thread_id"])
+        saver = get_checkpointer()
+        for tid in tids:
+            await execute_run(client, assistant, tid, graph_fixture(saver), 1)
+        baselines = [await snapshot(tid) for tid in tids]
+        entered, release = asyncio.Event(), asyncio.Event()
+        count = 0
+
+        async def increment(state):
+            nonlocal count
+            count += 1
+            if count == len(tids):
+                entered.set()
+            await release.wait()
+            return {"value": state["value"] + 1}
+
+        graph = (
+            StateGraph(State)
+            .add_node("increment", increment)
+            .add_edge(START, "increment")
+            .add_edge("increment", END)
+            .compile(checkpointer=saver)
+        )
+
+        class Registry:
+            @asynccontextmanager
+            async def open(self, *args):
+                yield graph
+
+        runs = []
+        for tid in tids:
+            response = await client.post(
+                f"/threads/{tid}/runs", json={"assistant_id": assistant, "input": {"value": 10}}
+            )
+            assert response.status_code == 200, response.text
+            runs.append(response.json()["run_id"])
+        tasks = [
+            asyncio.create_task(ProductionWorker(Registry(), owner=f"parallel-{i}").run_once())
+            for i in range(len(tids))
+        ]
+        try:
+            await asyncio.wait_for(entered.wait(), 30)
+
+            async def maintain(tid):
+                response = await client.post(
+                    "/threads/prune", json={"thread_ids": [tid], "strategy": "keep_latest"}
+                )
+                assert response.status_code == 409, response.text
+                with pytest.raises(CheckpointConflict):
+                    await graph.aupdate_state({"configurable": {"thread_id": tid}}, {"value": 999})
+
+            await asyncio.wait_for(asyncio.gather(*(maintain(tid) for tid in tids)), 30)
+            async with connect() as conn:
+                assert await RunRepository().claim_next(conn.session, "competing-claim") is None
+            for tid, rid in zip(tids[::2], runs[::2], strict=True):
+                response = await client.post(f"/threads/{tid}/runs/{rid}/cancel?action=rollback")
+                assert response.status_code == 202
+            release.set()
+            await asyncio.wait_for(asyncio.gather(*tasks), 30)
+        finally:
+            release.set()
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        for i, tid in enumerate(tids):
+            state = await graph.aget_state({"configurable": {"thread_id": tid}})
+            assert state.values == {"value": 2 if i % 2 == 0 else 11}
+            if i % 2 == 0:
+                assert await snapshot(tid) == baselines[i]
+            response = await client.post(
+                "/threads/prune", json={"thread_ids": [tid], "strategy": "keep_latest"}
+            )
+            assert response.status_code == 200, response.text
+            assert (
+                await graph.aget_state({"configurable": {"thread_id": tid}})
+            ).values == state.values

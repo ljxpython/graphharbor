@@ -8,7 +8,7 @@
 
 | 规范名称 | 适用包 | 状态 | last_verified | 置信度 | 来源项目 | 核心职责 |
 |---|---|---|---|---|---|---|
-| **[rest-sse-contract.md](rest-sse-contract.md)** | `libs/langhost` / `libs/langgraph-runtime-pg` | `active` | 2026-11-21 | 🟢 high | `20261007-worker-cancel-propagation` · `20261007-thread-cancellation` · `20261009-thread-metadata-cas` · `20261010-run-acceptance-receipts` · `20261030-thread-retention-lifecycle` · `20261120-checkpoint-storage-governance` | Core REST/SSE、取消、CAS、接受回执、TTL；正式post49/head015采用journal-v1与引用安全显式prune/blob GC，不自动裁剪活跃历史 |
+| **[rest-sse-contract.md](rest-sse-contract.md)** | `libs/langhost` / `libs/langgraph-runtime-pg` | `active` | 2026-11-21 | 🟢 high | `20261007-worker-cancel-propagation` · `20261007-thread-cancellation` · `20261009-thread-metadata-cas` · `20261010-run-acceptance-receipts` · `20261030-thread-retention-lifecycle` · `20261120-checkpoint-storage-governance` | Core REST/SSE、取消、CAS、接受回执、TTL；正式post50/head015采用journal-v1与引用安全显式prune/blob GC，不自动裁剪活跃历史 |
 | **[release-process.md](release-process.md)** | 根目录 / 双包 | `active` | 2026-10-04 | 🟢 high | `20260925-agent-harness` | 双包锁步门禁、临时令牌直接发布与 PyPI 冷安装；Git 操作另需授权 |
 
 ---

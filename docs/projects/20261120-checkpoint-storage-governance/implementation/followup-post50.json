@@ -63,6 +63,11 @@
       }
     }
   },
-  "publication": "pending",
-  "remote_ci": "pending"
+  "publication": "published-and-independent-install-verified",
+  "remote_ci": {
+    "run_id": 44840687787,
+    "source_commit": "84e902179b7297cff3cc8ebd0fd069867dc0a0e2",
+    "conclusion": "success",
+    "jobs": 7
+  }
 }

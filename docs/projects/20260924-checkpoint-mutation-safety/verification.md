@@ -1,6 +1,6 @@
 # 验证记录
 
-2026-09-24，执行者 Codex。总体状态 **partial**：核心实现和本地真实存储验证完成，完整官方差分、规模性能及发布预演尚缺。
+2026-09-24启动，执行者Codex。当前状态为部分完成（partial）：工程与2026-11-21追加差分/容量/有界并发/正式交付已验证，负责人最终验收仍待人工。以下早期环境与结果保留历史范围。
 
 ## 环境与隔离
 
@@ -46,10 +46,18 @@
 
 没有声称完全 API 等价；未将在线文档当作所有返回码的实测证据。官方探针不是完整自动差分套件。
 
-## 未完成证据
+## 2026-11-21追加阶段验证（Phase）
 
-- 完整官方 running/batch/repeated/auth/input 矩阵。
-- 大历史存储与并发压力、网络分区/Redis 全部不可用时的部署演练。
-- 生产环境负责人评审、API/worker 同版本发布预演。
+通过原生一次性PG/Redis runner运行新增脚本 `scripts/verify_checkpoint_protocol.py`。官方langgraph-api0.13.0/runtime-inmem0.33.0与正式PyPI post50各42场景完成，分别覆盖jobs0/1。所有响应低于500；foreign单取消403/404，非法参数400/422，跨owner混合批次后另一用户线程与Run逐项不变。脚本总预算300秒，子迁移60秒，就绪60秒，逐请求20秒；finally仅回收所属进程组，PG/Redis随runner退出。认证只用fixture专用签名密钥。
 
-上述为 partial，不伪记 done；代码可供评审，当前不建议据此宣称完全兼容或直接全量发布。
+两端存在13条状态差异：重复interrupt为官方404/本端202或200；running重复rollback的非等待请求可为404/202；混合批量官方422/本端204；keep_latest官方in-memory422/本端PG200；混合prune官方404/本端200。它们是实测差异，不能概括为完全等价；既有terminal rollback扩展和pending删除时序说明保留。完整脱敏行见[逐例矩阵](../20261120-checkpoint-storage-governance/implementation/protocol-matrix-post50.json)。
+
+新增确定性8 Worker并发：全部在节点屏障内运行，8条prune均409，8条外部update_state均CheckpointConflict，竞争claim无可领取；半数rollback恢复逐项checkpoint/write基线，另一半正常完成，全部终态后prune成功且state不变。单项1 passed/5.18秒，完整安全套件18 passed/17.11秒、2条上游Beta warning；不是生产吞吐量承诺。
+
+六组最高10,000条/16KiB固定负载已有真实旧失败和新预算数据；全量基线被journal-v1替代，继续测试已撤掉的旧设计没有意义。新维护预算、备份恢复、正式post50四产物与独立安装、平台真实进程交接见[新项目验收](../20261120-checkpoint-storage-governance/verification.md)。不将其测试数转记成旧运行结果。
+
+harness初次被路径越界守卫拒绝，随后因非JSON取消响应解析失败，再因认证fixture缺签名密钥导致create500；均修夹具，不放宽产品路径/认证守卫。最终同步与原生async子进程两个版本矩阵均各42场景完成，最终脚本Ruff通过。
+
+## 等待人工的最终验收
+
+项目维护者须审阅上述官方协议差异与发布/恢复限制，确认原安全专项验收。AI不代签；生产网络分区/Redis完全不可用及任意高并发容量未在本轮验证，不用有界fixture替代生产演练。当前没有剩余已知产品修复代码等待实施。

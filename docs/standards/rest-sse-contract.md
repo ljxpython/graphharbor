@@ -15,7 +15,7 @@ Run首次claim只记录起始head引用及必要控制状态。saver写入与首
 
 显式`threads/prune`的`keep_latest`会关闭该Thread既有Run的回滚窗口，保留每个namespace的head、逐channel所需Delta祖先/快照及pending writes，然后批量回收无引用blob。活跃Run、pending rollback或删除屏障阻止维护；缺Delta祖先返回409，整次维护事务回滚。API/CLI及内部入口共用存储服务，不新增自动裁剪或业务期限。
 
-格式固定为journal-v1，双包须同为post49、数据库head为015。旧writer及不匹配schema拒绝启动或写入；切换采用停机备份和一次性转换，无法证明历史归属则事务失败并报告Run。恢复使用升级前备份与匹配包，不支持直接downgrade或旧包接管新格式。步骤见[运行手册](../runbooks/production-runbook.md)，正式包及容量证据见[存储治理](../projects/20261120-checkpoint-storage-governance/verification.md)。
+格式固定为journal-v1，双包须同为post50、数据库head为015。旧writer及不匹配schema拒绝启动或写入；切换采用停机备份和一次性转换，无法证明历史归属则事务失败并报告Run。恢复使用升级前备份与匹配包，不支持直接downgrade或旧包接管新格式。步骤见[运行手册](../runbooks/production-runbook.md)，正式包及容量证据见[存储治理](../projects/20261120-checkpoint-storage-governance/verification.md)。
 
 ## Thread retention 扩展（post48 / migration014）
 

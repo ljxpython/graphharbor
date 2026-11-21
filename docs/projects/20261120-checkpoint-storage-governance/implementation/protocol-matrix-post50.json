@@ -1,0 +1,273 @@
+{
+  "date": "2026-11-21",
+  "official": {
+    "api": "0.13.0",
+    "inmem": "0.33.0"
+  },
+  "graphharbor": "0.13.0.post50",
+  "cases_per_server": 42,
+  "no_http_5xx": true,
+  "fixture_only_signing_key": true,
+  "cases": [
+    {
+      "case": "pending-interrupt-False",
+      "worker_jobs": 0,
+      "official_status": 202,
+      "graphharbor_status": 202
+    },
+    {
+      "case": "repeat-interrupt-False",
+      "worker_jobs": 0,
+      "official_status": 404,
+      "graphharbor_status": 202
+    },
+    {
+      "case": "pending-interrupt-True",
+      "worker_jobs": 0,
+      "official_status": 200,
+      "graphharbor_status": 200
+    },
+    {
+      "case": "repeat-interrupt-True",
+      "worker_jobs": 0,
+      "official_status": 404,
+      "graphharbor_status": 200
+    },
+    {
+      "case": "pending-rollback-False",
+      "worker_jobs": 0,
+      "official_status": 202,
+      "graphharbor_status": 202
+    },
+    {
+      "case": "repeat-rollback-False",
+      "worker_jobs": 0,
+      "official_status": 404,
+      "graphharbor_status": 404
+    },
+    {
+      "case": "pending-rollback-True",
+      "worker_jobs": 0,
+      "official_status": 200,
+      "graphharbor_status": 200
+    },
+    {
+      "case": "repeat-rollback-True",
+      "worker_jobs": 0,
+      "official_status": 404,
+      "graphharbor_status": 404
+    },
+    {
+      "case": "mixed-owner-batch",
+      "worker_jobs": 0,
+      "official_status": 422,
+      "graphharbor_status": 204
+    },
+    {
+      "case": "repeat-mixed-owner-batch",
+      "worker_jobs": 0,
+      "official_status": 422,
+      "graphharbor_status": 204
+    },
+    {
+      "case": "foreign-single-cancel",
+      "worker_jobs": 0,
+      "official_status": 404,
+      "graphharbor_status": 404
+    },
+    {
+      "case": "invalid-run-id",
+      "worker_jobs": 0,
+      "official_status": 422,
+      "graphharbor_status": 422
+    },
+    {
+      "case": "invalid-status",
+      "worker_jobs": 0,
+      "official_status": 422,
+      "graphharbor_status": 422
+    },
+    {
+      "case": "invalid-action",
+      "worker_jobs": 0,
+      "official_status": 422,
+      "graphharbor_status": 422
+    },
+    {
+      "case": "prune-invalid-id",
+      "worker_jobs": 0,
+      "official_status": 422,
+      "graphharbor_status": 422
+    },
+    {
+      "case": "prune-invalid-strategy",
+      "worker_jobs": 0,
+      "official_status": 422,
+      "graphharbor_status": 422
+    },
+    {
+      "case": "prune-empty",
+      "worker_jobs": 0,
+      "official_status": 200,
+      "graphharbor_status": 200
+    },
+    {
+      "case": "prune-keep-latest",
+      "worker_jobs": 0,
+      "official_status": 422,
+      "graphharbor_status": 200
+    },
+    {
+      "case": "prune-mixed-owner",
+      "worker_jobs": 0,
+      "official_status": 404,
+      "graphharbor_status": 200
+    },
+    {
+      "case": "prune-repeat",
+      "worker_jobs": 0,
+      "official_status": 200,
+      "graphharbor_status": 200
+    },
+    {
+      "case": "mixed-owner-resources-unchanged",
+      "worker_jobs": 0,
+      "official_status": null,
+      "graphharbor_status": null,
+      "other_owner_unchanged": true
+    },
+    {
+      "case": "running-interrupt-False",
+      "worker_jobs": 1,
+      "official_status": 202,
+      "graphharbor_status": 202
+    },
+    {
+      "case": "repeat-interrupt-False",
+      "worker_jobs": 1,
+      "official_status": 404,
+      "graphharbor_status": 202
+    },
+    {
+      "case": "running-interrupt-True",
+      "worker_jobs": 1,
+      "official_status": 200,
+      "graphharbor_status": 200
+    },
+    {
+      "case": "repeat-interrupt-True",
+      "worker_jobs": 1,
+      "official_status": 404,
+      "graphharbor_status": 200
+    },
+    {
+      "case": "running-rollback-False",
+      "worker_jobs": 1,
+      "official_status": 202,
+      "graphharbor_status": 202
+    },
+    {
+      "case": "repeat-rollback-False",
+      "worker_jobs": 1,
+      "official_status": 404,
+      "graphharbor_status": 202
+    },
+    {
+      "case": "running-rollback-True",
+      "worker_jobs": 1,
+      "official_status": 200,
+      "graphharbor_status": 200
+    },
+    {
+      "case": "repeat-rollback-True",
+      "worker_jobs": 1,
+      "official_status": 404,
+      "graphharbor_status": 404
+    },
+    {
+      "case": "mixed-owner-batch",
+      "worker_jobs": 1,
+      "official_status": 422,
+      "graphharbor_status": 204
+    },
+    {
+      "case": "repeat-mixed-owner-batch",
+      "worker_jobs": 1,
+      "official_status": 422,
+      "graphharbor_status": 204
+    },
+    {
+      "case": "foreign-single-cancel",
+      "worker_jobs": 1,
+      "official_status": 404,
+      "graphharbor_status": 404
+    },
+    {
+      "case": "invalid-run-id",
+      "worker_jobs": 1,
+      "official_status": 422,
+      "graphharbor_status": 422
+    },
+    {
+      "case": "invalid-status",
+      "worker_jobs": 1,
+      "official_status": 422,
+      "graphharbor_status": 422
+    },
+    {
+      "case": "invalid-action",
+      "worker_jobs": 1,
+      "official_status": 422,
+      "graphharbor_status": 422
+    },
+    {
+      "case": "prune-invalid-id",
+      "worker_jobs": 1,
+      "official_status": 422,
+      "graphharbor_status": 422
+    },
+    {
+      "case": "prune-invalid-strategy",
+      "worker_jobs": 1,
+      "official_status": 422,
+      "graphharbor_status": 422
+    },
+    {
+      "case": "prune-empty",
+      "worker_jobs": 1,
+      "official_status": 200,
+      "graphharbor_status": 200
+    },
+    {
+      "case": "prune-keep-latest",
+      "worker_jobs": 1,
+      "official_status": 422,
+      "graphharbor_status": 200
+    },
+    {
+      "case": "prune-mixed-owner",
+      "worker_jobs": 1,
+      "official_status": 404,
+      "graphharbor_status": 200
+    },
+    {
+      "case": "prune-repeat",
+      "worker_jobs": 1,
+      "official_status": 200,
+      "graphharbor_status": 200
+    },
+    {
+      "case": "mixed-owner-resources-unchanged",
+      "worker_jobs": 1,
+      "official_status": null,
+      "graphharbor_status": null,
+      "other_owner_unchanged": true
+    }
+  ],
+  "limitations": [
+    "Status differences are recorded, not declared equivalent.",
+    "Official in-memory and PostgreSQL have different prune capabilities.",
+    "No production data or production services used."
+  ],
+  "total_deadline_seconds": 300
+}

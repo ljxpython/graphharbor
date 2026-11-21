@@ -1,6 +1,6 @@
 # Checkpoint 存储增长治理 - 验证计划与记录
 
-项目启动日期：2026-11-20。通用存储的原隔离验收与正式源码交付已有证据；追加远端补验两项失败待修，当前为部分完成（partial）。进度与验收范围以[tasks.md](tasks.md)为准，原安全治理测试不计为本项目通过。
+项目启动日期：2026-11-20。S01–S07批准的引擎隔离与正式交付范围已完成（done）；追加缺陷经post50正式源、远端CI及使用方复验解决。现役升级和生产负载未执行，严格官方等价及原负责人验收独立保留。进度以[tasks.md](tasks.md)为准。
 
 
 ## 阶段验证（Phase）：规划与机制核查
@@ -55,13 +55,13 @@
 
 Test失败步骤为First-party live-server E2E，13例中10 failed/3 passed，另有20 rerun。该夹具通过langgraph_api.server:app及LANGGRAPH_RUNTIME_EDITION=pg运行内部适配入口；日志显示graphharbor_journal_checkpoint_blobs写run_checkpoint_undo时，run_id缺少run_checkpoint_baselines父行，触发run_checkpoint_undo_run_id_fkey。writer/run baseline链路需要修复复验，原正式源未纳入可选ops不能证明此入口通过。
 
-JavaScript SDK1.9.28的完整契约返回422 Invalid thread metadata update。错误对应core_api.py的线程metadata更新校验；具体触发请求及成因尚未完全确认，不能把候选原因写成结论。旧f9bb32e的Test/JS任务曾通过，本次失败不能按既有失败直接排除。两项均未修复，已写回S07；当前项目不是全项完成或生产就绪，原冷安装和隔离容量结果保留其各自范围。
+JavaScript SDK1.9.28的完整契约返回422 Invalid thread metadata update。错误对应core_api.py的线程metadata更新校验；具体触发请求及成因尚未完全确认，不能把候选原因写成结论。旧f9bb32e的Test/JS任务曾通过，本次失败不能按既有失败直接排除。当时两项未修复，记录于S07；后续修复及post50复验见本文件后续记录。原冷安装和隔离容量结果保留其各自范围。
 
 ## 阶段验证（Phase）：2026-11-21远端失败修复复验
 
 内部领取补建同一 journal baseline，请求授权复制缓存字典，事件去重键加入 topic。两个原远端故障已有真实 PG 定向回归 37 项及完整 JavaScript SDK 契约证据。修复后的完整脚本为单元/队列32项、live-server E2E13项、上游SDK55项通过；无诊断 RemoteGraph v3 连续30轮、每轮五项通过。两个去重回归均先复现失败后通过；Ruff/92文件格式和mypy46源码通过。
 
-真实1秒总预算演练返回124且所属进程回收；固定官方in-memory五轮各五项通过。原时序失败、诊断改变复现率、依赖同步及端口错误保留在[修复记录](implementation/02-ci-followup.md)。post50四产物已构建并逐字节审查62源码；远端CI和正式源验真完成前仍为部分完成。
+真实1秒总预算演练返回124且所属进程回收；固定官方in-memory五轮各五项通过。原时序失败、诊断改变复现率、依赖同步及端口错误保留在[修复记录](implementation/02-ci-followup.md)。本阶段构建并逐字节审查62源码；后续正式发布与远端复验见post50 Final。
 
 ## 整体验收（Final）：2026-11-21原隔离与正式包验收记录
 
@@ -75,4 +75,15 @@ JavaScript SDK1.9.28的完整契约返回422 Invalid thread metadata update。�
 
 严格官方比较仍有既有差异，不能标为严格等价通过；原官方等价性专项继续保留自己的未完成范围。用户已要求单一新实现而非旧代码兼容，本项目没有扩大排除项。生产负载、任意业务Reducer的大状态和生产升级未验也未执行。GraphHarbor Git交付已按追加授权完成；使用方业务联合验收在其项目独立记录。
 
-上述为远端补验前的原隔离与正式包验收事实。后续两项远端失败尚未修复，当前项目重新标为部分完成，不以原Final覆盖新失败。正式发包、反向差量投影、验收预算及后续源码提交推送均已有用户明确批准；不把本地验证当作独立人审或生产验收。GraphHarbor仓库没有新增现役库迁移、业务数据销毁或生产服务切换授权。
+上述为远端补验前的原隔离与正式包验收事实。后续两项远端失败当时使项目回到部分完成；以下post50独立Final记录修复和交接，不以原Final覆盖新失败。正式发包、反向差量投影、验收预算及后续源码提交推送均已有用户明确批准；不把本地验证当作独立人审或生产验收。GraphHarbor仓库没有新增现役库迁移、业务数据销毁或生产服务切换授权。
+
+
+## 整体验收（Final）：2026-11-21 post50正式修复与使用方交接
+
+产品源码84e9021的真实远端CI44840687787七个job全部success，包含live-server、上游Python/JavaScript SDK和三版Python生产契约。正式post50四产物独立下载SHA256与已审构建一致，62个Python源码逐字节一致；新Python3.13安装实际来自site-packages，无可选langgraph-api。关键真实PG/Schema/迁移/SDK/CLI 41 passed、1内部可选入口deselected；HTTP/Python/JS取消24场景通过。原post49及两次失败CI保留，不改写成成功。
+
+使用方精确锁定post50，登记环境原图配置逐字节还原后API/Worker新子进程来源符合；消息/审批分进程恢复6项、消息队列23 passed/1可选真实模型探针skipped、真实模型Reference记忆/刷新/fork及会话续期浏览器2项通过。确定性测试图另完成八类真实浏览器，含子图局部失败、审批、410/离线与显式v2；夹具流分片/namespace自检通过。两类模型证据不混称。
+
+容量、转换恢复等产品实现相对已验post49不变，复用六组固定夹具预算和隔离014恢复证据；本轮额外真实PG变更安全18项通过（17.11秒），含8 Worker并行与维护/外部写/claim竞争、半数回滚和全部继续prune。正式post50对官方固定版本各42场景完成，差异逐项保留在原安全专项；不是严格等价结论。
+
+**结论：S01–S07的批准交付范围完成。** 证据见[post50正式产物](implementation/release-post50.json)、[差分摘要](implementation/protocol-matrix-post50.json)及关联平台P08。现役部署、任意业务状态和长期/生产容量未验；原负责人评审不由AI代签。未追加业务模型/工具/期限或旧格式兼容代码。

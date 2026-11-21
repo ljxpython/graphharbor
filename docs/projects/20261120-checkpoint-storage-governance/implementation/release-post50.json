@@ -1,0 +1,53 @@
+{
+  "version": "0.13.0.post50",
+  "source_commit": "84e902179b7297cff3cc8ebd0fd069867dc0a0e2",
+  "artifacts": {
+    "graphharbor-0.13.0.post50-py3-none-any.whl": {
+      "sha256": "930f0c787aee8ae9205db1cff4721da708e2d9c0ea7742c5aed6f3b19054b926",
+      "bytes": 52671
+    },
+    "graphharbor-0.13.0.post50.tar.gz": {
+      "sha256": "4171b48b80ba93c6870af22f2dddf2b645dc98e23b591b6ebecc3f7aaddc652c",
+      "bytes": 67686
+    },
+    "graphharbor_runtime-0.13.0.post50-py3-none-any.whl": {
+      "sha256": "c36d2568de924ceb58ffb330e007317bb4ceff20519f321b67d90e559fba551e",
+      "bytes": 145390
+    },
+    "graphharbor_runtime-0.13.0.post50.tar.gz": {
+      "sha256": "cd125dfa28af9e88d7f52e8aa2d0591e5c3a451c54ea59bbf5be39f7e61d304d",
+      "bytes": 205970
+    }
+  },
+  "source_matches": {
+    "graphharbor-0.13.0.post50-py3-none-any.whl": 11,
+    "graphharbor_runtime-0.13.0.post50-py3-none-any.whl": 51
+  },
+  "forbidden_files": [],
+  "remote_ci": {
+    "run_id": 44840687787,
+    "source_commit": "84e902179b7297cff3cc8ebd0fd069867dc0a0e2",
+    "conclusion": "success",
+    "jobs": 7
+  },
+  "installation": {
+    "versions": {
+      "graphharbor": "0.13.0.post50",
+      "graphharbor-runtime": "0.13.0.post50",
+      "langgraph": "1.2.24",
+      "langgraph-checkpoint": "4.3.2",
+      "langgraph-checkpoint-postgres": "3.2.1",
+      "langgraph-sdk": "0.4.14"
+    },
+    "site_packages": true
+  },
+  "verification": {
+    "postgres_sdk_cli": {
+      "passed": 41,
+      "deselected_optional_upstream": 1
+    },
+    "http_python_javascript_cancellation_scenarios": 24
+  },
+  "source": "PyPI simple index and files.pythonhosted.org; TLS verified; fresh Python 3.13 environment; uv pip --no-cache",
+  "metadata_delay": "version JSON remained 404 after successful upload; verified all four hashes through the official simple index, then installed the two official wheel URLs without cache; did not re-upload"
+}

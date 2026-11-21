@@ -1,6 +1,6 @@
 # Checkpoint 存储增长治理 - 任务与进度
 
-**项目状态：部分完成（partial）。** 启动日期：2026-11-20。S01–S06的原存储矩阵已完成；S07原正式post49发布与源码交付完成；追加两项远端故障及事件ID跨topic误去重已修复，本地完整脚本与SDK复验通过，post50正式交接和远端CI待验。原安全治理任务与测试保留在原项目，不据此关闭其完整官方等价性等未完成项。
+**项目状态：已完成（done，批准的引擎隔离与正式交付范围）。** 启动日期：2026-11-20。S01–S07完成；追加三处缺陷已修复，post50远端七项CI、正式四产物验真、独立安装与平台交接通过。现役切换/生产容量和原安全专项的负责人验收不在本轮完成声明内。
 
 
 详细目标、设计、边界和性能测量见 [plan.md](plan.md)。使用方接入进度留在[平台同名关联项目](../../../../ai-agent-platform/docs/projects/20261120-checkpoint-storage-governance/tasks.md)，不成为 GraphHarbor 的安装、测试或发包依赖。
@@ -54,7 +54,7 @@
 - [x] 回滚按 sequence 拒绝后继依赖，原子恢复行与投影；覆盖逆序、失败重试、pending writes 和晚写拒绝。
 
 **开发与验证进度：** 新边界、日志、投影与调用方已实现。真实 PG 专项验证同键两次覆盖只存首次 before-image；同 version blob 未被误删，大投影追加只记录少量反向操作。必要控制字段、实际大范围替换的撤销量仍可能很大，不承诺任意写入固定大小。
-**下一步：** 原存储矩阵的正式候选和冷安装已验证；追加远端内部适配入口暴露writer/baseline链路问题，统一在S07跟进修复复验。生产切换另行授权。
+**下一步：** 原存储矩阵与追加writer/baseline链路已验证，S07完成post50正式交接。生产切换另行授权。
 
 ### S04：实现引用安全、有界 prune 与 blob GC
 
@@ -107,7 +107,7 @@
 
 使用方需要从正式源安装经过验证的同版本 CLI/runtime，不能只依赖工作区源码或本地 wheel。
 
-**状态：** 部分完成（partial）；追加故障修复和本地复验完成，post50正式交接及远端CI待验。
+**状态：** 已完成（done）；post50正式发布、远端CI、正式源验真与使用方交接完成。
 
 2026-11-21用户同意继续完成剩余事项；本项进入修复与复验，沿用单一新格式和通用边界，修复后锁步发布唯一新版本。合并后按平台P09清理所属测试数据库、日志与临时资源，永久验收证据保留。
 **完成标准：** 唯一新版本的双包 wheel/sdist 四产物、哈希、迁移 head、实际打包范围和正式源冷安装有证据；独立环境关键 PG 场景通过，使用方可准确锁定。
@@ -120,15 +120,16 @@
 - [x] 修复内部领取入口缺失baseline；真实saver写入回归、定向37项和完整live-server E2E13项通过。
 - [x] 修复授权检查污染缓存请求JSON导致的线程状态更新422，固定JavaScript SDK1.9.28完整契约再次通过。
 - [x] 修复跨通道/跨Run同值ID误去重，两项确定性回归先失败后通过；无诊断RemoteGraph v3连续30轮各五项通过。
-- [ ] 将post50交付远端CI并锁步正式发布；四产物、无缓存独立安装、关键PG和使用方实际进程来源复验后交接。
+- [x] post50源码84e9021的远端CI44840687787七项通过；锁步正式发布四产物，独立下载SHA256一致，正式源无缓存安装与关键真实PG41项、三客户端取消24场景通过。
+- [x] 平台所属环境加载正式post50/head015，原图配置还原后新API/Worker来源核对；消息/审批恢复6项、队列23项/1可选跳过、真实模型记忆/fork与期限浏览器2项通过，另有确定性v3浏览器8项通过。
 
 **开发与验证进度：** 2026-11-21双包0.13.0.post49正式发布，四产物SHA256与PyPI逐项相同；Python3.13新环境从正式源无缓存安装，实际导入site-packages、CLI和head015符合。首次安装遇到索引同步延迟，未重复上传；补足测试专用asgi-lifespan后，最终42 passed/1 deselected。未纳入的内部上游ops入口需可选langgraph-api，公共生产路径不依赖该包。详见[发布证据](implementation/release-post49.json)及verification的Final。
 正式源另外完成HTTP/Python/JS取消24场景，结果为`{"graphharbor":24}`。
 
 **追加源码交付：** 2026-11-21用户明确授权两仓代码提交推送。本仓远端原为post39，先核对正式post49四产物哈希及全部62个Python源码一致，再以eeb204c提交完整运行代码、迁移011–015、配套测试与证据并推送origin/main。没有只交付缺前置依赖的015补丁；未新增产品源码、重复发包或打tag。提交前六份历史Markdown的本机路径改为相对引用，一份历史失败XML只去掉行尾空白，原失败结果保留。
 
-**远端首次补验（历史）：** eeb204c的CI44787814603中Build、Lint与Python3.11/3.12/3.13生产契约通过，Test和JavaScript SDK contract失败。Test的First-party live-server E2E为10 failed/3 passed/20 rerun；日志证实graphharbor_journal_checkpoint_blobs触发器写run_checkpoint_undo时，run_id在run_checkpoint_baselines不存在，触发外键拒绝。JavaScript SDK契约返回422 Invalid thread metadata update；具体触发原因尚未完全确认。原f9bb32e的Test/JS任务通过，本次不能按已证实旧失败处理。
+**远端首次补验（历史）：** eeb204c的CI44787814603中Build、Lint与Python3.11/3.12/3.13生产契约通过，Test和JavaScript SDK contract失败。Test的First-party live-server E2E为10 failed/3 passed/20 rerun；日志证实graphharbor_journal_checkpoint_blobs触发器写run_checkpoint_undo时，run_id在run_checkpoint_baselines不存在，触发外键拒绝。JavaScript SDK契约返回422 Invalid thread metadata update；当时尚未确认触发原因，后续已证实授权检查原地污染请求缓存并修复。原f9bb32e的Test/JS任务通过，本次不能按已证实旧失败处理。
 
-**当前复验：** 完整脚本为单元/队列32项、live-server E2E13项、上游SDK55项通过，JavaScript SDK1.9.28契约通过。Ruff/92文件格式与mypy46源码通过，1秒预算回收返回124；失败和对照范围见[修复记录](implementation/02-ci-followup.md)。post50四产物已构建，62源码与工作树一致，尚不能记正式发布通过。
+**当前复验：** 完整脚本为单元/队列32项、live-server E2E13项、上游SDK55项通过，JavaScript SDK1.9.28契约通过。Ruff/92文件格式与mypy46源码通过，1秒预算回收返回124；失败和对照范围见[修复记录](implementation/02-ci-followup.md)。post50四产物已正式发布并独立下载验真，62源码匹配，正式安装41项/1内部可选排除及取消24场景通过；源码84e9021远端CI44840687787七项通过。PyPI元数据短时延迟通过官方simple与文件哈希确认，未重复上传。
 
-**下一步：** 完成post50远端CI、正式源冷安装与平台复验。现役015迁移与生产负载需具体目标和操作授权；完整官方逐字段等价性保留在原专项，不因本地通过关闭。
+**交付结论：** S01–S07批准范围完成。发布与平台来源见[post50证据](implementation/release-post50.json)及关联平台任务。现役015迁移/生产负载由使用方取得具体授权后执行；严格官方逐字段等价性不作通过声明，原专项独立保留负责人验收。

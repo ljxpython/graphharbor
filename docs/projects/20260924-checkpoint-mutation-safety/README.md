@@ -5,7 +5,7 @@
 - **时间：** 2026-09-24 开始并实施。
 - **目标：** prune 不越过资源授权范围；rollback 只撤销目标 run 的持久化影响，保留合法历史，并阻止迟到写入。
 - **负责人：** 项目维护者；Codex 协助规划与实施。
-- **状态：** partial：核心修复与本地真实 PostgreSQL 验证完成；官方完整差分、规模性能与发布预演尚未完成。
+- **状态：** 部分完成（partial）：工程、官方/正式post50各42场景、有界并发与固定容量及正式交接已有证据；原专项负责人最终验收待人工。
 - **改动级别：** 治理改动，涉及授权、持久数据和运行中取消。
 - **影响服务：** GraphHarbor API、生产 worker、PostgreSQL checkpoint 层；无业务服务改动。
 - **工作量估计：** 安全止损约 0.5–1 人天；完整回滚约 3–5 人天；含复杂 channel 的 keep_latest 另约 1–2 人天。均为初步工程量，不是交付承诺，依赖官方行为与存储验证。
@@ -32,5 +32,7 @@
 只有隔离、历史保留、运行中取消、迟到写入、重启恢复、状态投影和官方对照均有证据，才将完整修复标为 done。临时安全拒绝为 partial；不支持的 channel/存储布局必须明确报告，不返回伪造成功。
 
 ## 本轮结果
+
+以下为007时期历史结果；全量基线与不回收blob现已被[独立存储治理](../20261120-checkpoint-storage-governance/README.md)的journal-v1/015替代，不作为当前实现说明。
 
 详见 [实现记录](implementation/01-transactional-checkpoint-maintenance.md) 和 [验证记录](verification.md)。核心实现不新增业务字段。新增 007 迁移，API 与 worker 必须一起升级；既有运行无基线时返回 409。每次首次 claim 保存完整 checkpoint/write 基线，存在随历史增长的存储成本；共享 blobs 保留，当前不做垃圾回收。

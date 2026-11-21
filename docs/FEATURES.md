@@ -32,7 +32,7 @@
 | 功能模块 | 核心能力 | 状态 | 代码位置 | 说明与关联文档 |
 |---|---|---|---|---|
 | **Checkpoint 状态存储** | PostgreSQL 事务级 Checkpoint 读写 | 🟢 Supported | `libs/langgraph-runtime-pg/src/langgraph_runtime_pg/` | 事务一致性，防幂等写入与状态回滚 |
-| **Checkpoint 存储增长治理** | 最小运行边界/首次before-image、反向投影、安全prune与blob GC | 部分完成（partial），post49已发布，post50修复本地通过/正式交接待验 | `libs/langgraph-runtime-pg/src/langgraph_runtime_pg/checkpoint_mutations.py`、`checkpoint_journal.py` | migration015单次转换；六组容量与正式源42项通过，追加领取/线程更新/事件误去重已修，完整脚本32/13/55项和JS契约通过，正式post50待验；不内置业务保留政策或承诺永久状态有界，见[验收与限制](projects/20261120-checkpoint-storage-governance/verification.md) |
+| **Checkpoint 存储增长治理** | 最小运行边界/首次before-image、反向投影、安全prune与blob GC | 已完成（done，批准的隔离与正式交付） | `libs/langgraph-runtime-pg/src/langgraph_runtime_pg/checkpoint_mutations.py`、`checkpoint_journal.py` | post50/head015，六组预算、正式源41项/取消24场景、远端七项CI与平台正式交接通过；不内置业务期限或承诺永久有界，见[验收与限制](projects/20261120-checkpoint-storage-governance/verification.md) |
 | **分布式行级 Lease 租约** | PostgreSQL 乐观锁/行锁租约保护 | 🟢 Supported | `libs/langgraph-runtime-pg/src/langgraph_runtime_pg/` | 节点并发抢占与租约心跳续期 |
 | **崩溃自动收割 (Reaper)** | 节点故障超时自动释放与重新排队 | 🟢 Supported | `libs/langgraph-runtime-pg/src/langgraph_runtime_pg/` | 杜绝 Worker 崩溃导致任务永久停滞 |
 | **Worker 图级优雅停机** | superstep 边界 drain 与同 Run 续跑 | 🟢 Supported | `libs/langgraph-runtime-pg/src/langgraph_runtime_pg/production_worker.py` | 隔离 PostgreSQL/Redis 契约与真实 checkpoint 续跑通过 |
