@@ -69,5 +69,17 @@
     "source_commit": "84e902179b7297cff3cc8ebd0fd069867dc0a0e2",
     "conclusion": "success",
     "jobs": 7
+  },
+  "supplemental_ci": {
+    "source_commit": "0f017d40b8e181bfcb2fd59722837d2ebd4d7bfe",
+    "run_id": 44844213427,
+    "conclusion": "success",
+    "jobs": 7
+  },
+  "temporary_resources": {
+    "path": ".local/checkpoint-followup-20261121",
+    "removed": true,
+    "owned_processes_remaining": 0,
+    "scope": "only this project; other .local artifacts and shared caches preserved"
   }
 }
